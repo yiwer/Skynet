@@ -264,3 +264,9 @@ flowchart LR
 用户随后明确确认设计，并调用 to-spec 要求根据讨论构建 PRD。已形成 [PRD v1.0](./PRD.md)，沿用既有验收边界并补齐用户故事与可追踪场景，没有重新访谈。整体设计由建议进入已确认实现方向；客户端兼容性、原生恢复和性能仍待实测。
 
 项目 issue tracker 未配置，PRD 先完整保存在本地；未执行外部发布，拟定标签为 `ready-for-agent`。
+
+## 10. Git 初始化与 PRD 发布
+
+用户要求初始化项目和 Git，随后指定远端 `git@github.com:yiwer/Skynet.git` 并要求关联推送。本地已建立 main 分支并推送；项目 issue tracker 因此确定为 GitHub Issues：yiwer/Skynet。
+
+已按之前调用的 to-spec 发布 [PRD Issue #1](https://github.com/yiwer/Skynet/issues/1)，应用 `ready-for-agent` 标签。工程技能配置草案已展示，根指令文件 AGENTS.md / CLAUDE.md 的选择待用户回答；未将未确认的草案写入正式指令文件。

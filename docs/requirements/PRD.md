@@ -4,7 +4,7 @@
 
 依据：用户已确认需求、历史采集边界与整体架构。本 PRD 是当前首版产品及验收依据；技术兼容性、性能和原生恢复仍须实测，设计确认不代表实现通过。
 
-文档状态：已完成需求合成，可供实现与评审。发布状态：本地保存，尚未发布至项目 issue tracker；待配置发布目标后使用 `ready-for-agent` 标签。
+文档状态：已完成需求合成，可供实现与评审。已发布为 [GitHub Issue #1](https://github.com/yiwer/Skynet/issues/1)，标签为 `ready-for-agent`；实现与技术验证待执行。
 
 ## Problem Statement
 
@@ -338,6 +338,6 @@ MCP 采用 HTTPS Streamable HTTP，按目标客户端支持的授权规范连接
 
 ### issue 发布记录
 
-拟定标题：Skynet v1：自动采集 Coding Agent 会话，提供日周工作视图与原生恢复。
+标题：Skynet v1：自动采集 Coding Agent 会话，提供日周工作视图与原生恢复。
 
-拟定 triage 标签：`ready-for-agent`。当前没有项目 issue tracker 的目标配置或已创建 issue 链接，因而未执行发布、未应用远端标签。按 to-spec 流程，配置缺失时需要运行 `/setup-matt-pocock-skills`；本地 PRD 已完整准备，可直接作为后续 issue 正文。
+项目 issue tracker 为 GitHub Issues：yiwer/Skynet。已发布 [Issue #1](https://github.com/yiwer/Skynet/issues/1)，并应用 `ready-for-agent` 标签。本文维护产品正文，产品内容变更时同步对应 issue；本节的本地发布记录不重复放入 issue 正文。

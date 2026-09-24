@@ -25,4 +25,4 @@
 
 最先验证三种客户端入口的采集、原始存档及原生续聊恢复，尤其 Codex Desktop，再验证安装链与 Claude Code + 千问按量接口。实际员工 OS、规模和服务器配置在试点部署时登记，尚未作为已知事实。
 
-PRD 已在本地完成；项目 issue tracker 尚未配置，因此未发布远端 issue 或应用 `ready-for-agent` 标签。
+项目使用 [GitHub Issues](https://github.com/yiwer/Skynet/issues)。PRD 已发布为 [Issue #1](https://github.com/yiwer/Skynet/issues/1)，标签为 `ready-for-agent`；工程技能指令文件等待配置草案确认。
