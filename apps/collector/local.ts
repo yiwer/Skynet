@@ -1,6 +1,5 @@
 import { mkdir, readFile, readdir, realpath, unlink } from 'node:fs/promises';
-import { createHash, randomUUID } from 'node:crypto';
-import { hostname } from 'node:os';
+import { createHash } from 'node:crypto';
 import { isAbsolute, join } from 'node:path';
 import { z } from 'zod';
 import { hostEventSchema, manifestSchema, sourceSchema, type Source } from '../../packages/contracts/archive.js';
@@ -10,6 +9,8 @@ import { readCollectorSettings } from './settings.js';
 import { captureSchema } from '../../packages/contracts/materials.js';
 import { DeliveryQueue } from './delivery.js';
 import { reportDeliveryHealth } from './health.js';
+import { enroll, setupLock } from './enrollment.js';
+import { protectState } from './install-state.js';
 import { discoverMaterials, readNativeFile, safeNativePath } from './materials.js';
 export { atomicJson } from '../../packages/filesystem.js';
 export { recordHook } from './hook.js';
@@ -30,7 +31,9 @@ const hash = (bytes: Buffer | string) => createHash('sha256').update(bytes).dige
 async function readJson(path: string) { return JSON.parse(await readFile(path, 'utf8')); }
 
 export async function setup(state: string, input: { server: string; enrollmentCredential: string; nativeRoot: string; nativeTempRoot?: string; sourceVersion: string; sourceOs: string; source?: Source }) {
-  await mkdir(state, { recursive: true, mode: 0o700 });
+  await protectState(state);
+  const releaseSetup = await setupLock(state);
+  try {
   try {
     const existing = settingsSchema.parse(await readJson(join(state, 'settings.json')));
     if (existing.server !== input.server || existing.nativeRoot !== await realpath(input.nativeRoot) || existing.nativeTempRoot !== (input.nativeTempRoot ? await realpath(input.nativeTempRoot) : undefined) || existing.source !== (input.source ?? 'codex-desktop')) throw new Error('This state is already bound to another server, source, or native root');
@@ -42,17 +45,13 @@ export async function setup(state: string, input: { server: string; enrollmentCr
   }
   if (server.username || server.password || server.search || server.hash || server.pathname !== '/') throw new Error('Expected a server origin without credentials');
   const nativeRoot = await realpath(input.nativeRoot);
-  const response = await fetch(new URL('/api/devices/enroll', server), {
-    method: 'POST', headers: { Authorization: `Bearer ${input.enrollmentCredential}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ installationId: randomUUID(), name: hostname() }), signal: AbortSignal.timeout(15_000),
-  });
-  if (!response.ok) throw new Error(`Enrollment failed (${response.status})`);
-  const result = z.object({ deviceId: z.uuid(), deviceCredential: z.string() }).parse(await response.json());
+  const result = await enroll(state, server.origin, input.enrollmentCredential);
   const settings = settingsSchema.parse({ ...result, server: input.server, nativeRoot, nativeTempRoot: input.nativeTempRoot ? await realpath(input.nativeTempRoot) : undefined,
-    source: input.source, sourceVersion: input.sourceVersion, sourceOs: input.sourceOs, enrolledAt: new Date().toISOString() });
+    source: input.source, sourceVersion: input.sourceVersion, sourceOs: input.sourceOs, enrolledAt: result.enrolledAt });
   await atomicJson(join(state, 'settings.json'), settings);
   await mkdir(join(state, 'spool'), { mode: 0o700, recursive: true });
   return { deviceId: result.deviceId, state: 'bound', capability: 'unverified' };
+  } finally { await releaseSetup(); }
 }
 
 async function qualifiedPath(settings: Settings, transcriptPath: string) {

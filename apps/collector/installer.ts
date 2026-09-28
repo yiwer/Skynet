@@ -1,15 +1,16 @@
-import { cp, lstat, mkdir, open, readFile, realpath, unlink, writeFile } from 'node:fs/promises';
+import { cp, lstat, mkdir, readFile, realpath, writeFile } from 'node:fs/promises';
 import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { createRequire } from 'node:module';
 import { randomUUID } from 'node:crypto';
-import { hostname, tmpdir } from 'node:os';
+import { tmpdir } from 'node:os';
 import { setTimeout } from 'node:timers/promises';
 import { z } from 'zod';
 import { atomicJson } from '../../packages/filesystem.js';
 import { applyConfiguration, detectClients, hookEntries, planConfiguration } from './integrations.js';
 import { identitySchema, installationSchema, jsonFile, optionalJson, protectState, serverOrigin, type Installation } from './install-state.js';
 import { ensureRunning, installedStatus } from './runtime.js';
+import { enroll, setupLock } from './enrollment.js';
 import { initializeControl } from './runtime-control.js';
 import { installAutostart } from './autostart.js';
 import { compareVersions, packageEntrySchema, registeredEntries } from './entries.js';
@@ -25,7 +26,7 @@ export async function install(state: string) {
   if (entry.version !== manifest.version) throw new Error('Package entry version does not match its payload');
   if (Number(process.versions.node.split('.')[0]) !== 24) throw new Error('Setup requires Node 24');
   await protectState(state);
-  const setupLock = await open(join(state, 'setup.lock'), 'wx', 0o600).catch(() => { throw new Error('Another setup is running; no changes were made'); });
+  const releaseSetup = await setupLock(state);
   try {
     const previousValue = await optionalJson(join(state, 'installation.json'));
     const previous = previousValue ? installationSchema.parse(previousValue) : null;
@@ -68,14 +69,7 @@ export async function install(state: string) {
       configurations.push({ path: client.configPath, entries });
     }
     if (!identity) {
-      const key = process.env.SKYNET_KEY;
-      if (!key || key.length < 32 || key.length > 256 || /\s/.test(key)) throw new Error('Set the personal SKYNET_KEY enrollment value before setup; never paste it into an Agent conversation');
-      const pending = await optionalJson(join(state, 'enrollment.json')) ?? { installationId: randomUUID() };
-      await atomicJson(join(state, 'enrollment.json'), pending);
-      const response = await fetch(new URL('/api/devices/enroll', server), { method: 'POST', redirect: 'error',
-        headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ installationId: pending.installationId, name: hostname() }), signal: AbortSignal.timeout(15_000) });
-      if (!response.ok) throw new Error(`Device enrollment failed (${response.status}); setup did not install hooks. A lost enrollment response requires operator recovery.`);
-      identity = identitySchema.parse({ ...await response.json(), server, installationId: pending.installationId });
+      identity = await enroll(state, server, process.env.SKYNET_KEY ?? '');
       await atomicJson(join(state, 'identity.json'), identity);
     }
     // Copy code outside the npm prefix. Removing the original package must not
@@ -127,5 +121,5 @@ export async function install(state: string) {
       await setTimeout(100);
     }
     throw new Error('Bound and configured, but health check timed out; run skynet status to inspect');
-  } finally { await setupLock.close(); await unlink(join(state, 'setup.lock')); }
+  } finally { await releaseSetup(); }
 }

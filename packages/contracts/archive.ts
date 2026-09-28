@@ -7,7 +7,9 @@ const bounded = z.string().min(1).max(256);
 export const sourceSchema = z.enum(['codex-desktop', 'codex-cli', 'claude-code-cli']);
 export type Source = z.infer<typeof sourceSchema>;
 export const sourceLabel = (source: Source) => ({ 'codex-desktop': 'Codex Desktop', 'codex-cli': 'Codex CLI', 'claude-code-cli': 'Claude Code CLI' })[source];
-export const enrollmentSchema = z.object({ installationId: z.uuid(), name: bounded }).strict();
+export const enrollmentSchema = z.object({ installationId: z.uuid(), name: bounded,
+  // Generated and privately persisted by the installer before its first request.
+  deviceCredential: z.string().regex(/^[A-Za-z0-9_-]{43}$/).optional() }).strict();
 export const manifestSchema = z.object({
   protocolVersion: z.literal(1),
   sourceSessionId: bounded,

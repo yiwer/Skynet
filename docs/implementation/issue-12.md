@@ -37,6 +37,8 @@ skynet autostart-remove   # 仅移除本产品登记的自启；需要时另行 
 
 最终 `npm run typecheck`、`npm run build`、`npm test` 全部通过；普通公开流程 **10/10**，全套 89.14 秒。该轮安装链证据 `%TEMP%/skynet-test-YM6qNx/{runtime,installation}-evidence.json`。测试完成后没有遗留本轮 Windows 任务或安装后台。
 
+与 #17 确认一致性和 #26 MCP 合入公共分支后，再次通过 typecheck、build 和 **13/13** 普通测试，全套 96.73 秒；安装链 95.71 秒。保留接入前持久设备 secret、OS 独占安装锁、Windows .NET DACL，以及共享查询缓存的有界等待。整合安装证据 `%TEMP%/skynet-test-uYlO5h/{runtime,installation}-evidence.json`，实际 worker / supervisor 强杀后自动恢复、离线积压及补传均通过；测试自己的计划任务已移除，两控制端点均已关闭。一致性证据 `%TEMP%/skynet-test-rmFTZR`，MCP `%TEMP%/skynet-test-jRNbSV`，离线交付 `%TEMP%/skynet-test-DLHHNZ`。这轮为合成公开流程回归，原生 CLI 验证沿用上方独立证据，不将其计为真实登录、重启或 Desktop 验收。
+
 对最终安装稳定 launcher 连续测量 200 次：P50 **56.13 ms**、P95 **65.88 ms**、最大 **90.91 ms**，达到样机 P95≤100 ms。包含 Node 进程创建、launcher import 和本地持久入队；证据 `%TEMP%/skynet-installed-hook-latency-hpIpW5/latency.json`，不把宿主自身启动计入该值。
 
 复现：

@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { mkdir, readFile, readdir, open, unlink, stat } from 'node:fs/promises';
+import { mkdir, readFile, readdir, open, unlink, stat, link } from 'node:fs/promises';
 import { join } from 'node:path';
 import { z } from 'zod';
 import { atomicJson, syncDirectory } from '../../packages/filesystem.js';
@@ -101,11 +101,17 @@ export class DeliveryQueue {
     }
     for (const [hash, length] of payloads) {
       const bytes = additions.get(hash); if (!bytes) { await this.blob(hash, length); continue; }
-      const handle = await open(join(this.directory, 'blobs', hash), 'wx', 0o600).catch(error => {
-        if (error.code === 'EEXIST') return null; throw error;
-      });
-      if (handle) { try { await handle.writeFile(bytes); await handle.sync(); } finally { await handle.close(); } }
-      else await this.blob(hash, length);
+      // Publish only a complete blob. A killed partial write cannot poison the
+      // immutable hash name and permanently block the next capture attempt.
+      const temporary = join(this.directory, 'blobs', `.pending-${randomUUID()}`);
+      const handle = await open(temporary, 'wx', 0o600);
+      try { await handle.writeFile(bytes); await handle.sync(); } finally { await handle.close(); }
+      try {
+        await link(temporary, join(this.directory, 'blobs', hash)).catch(async error => {
+          if (error.code !== 'EEXIST') throw error;
+          await this.blob(hash, length);
+        });
+      } finally { await unlink(temporary); }
     }
     await syncDirectory(join(this.directory, 'blobs'));
     const entry = pendingSchema.parse({ id: randomUUID(), sequence: (this.pending.at(-1)?.sequence ?? 0) + 1,
@@ -162,17 +168,18 @@ export class DeliveryQueue {
           && digest(bytes.subarray(0, prior.byteLength)) === prior.hash) {
           const delta = bytes.subarray(prior.byteLength); const appendHash = await upload(delta);
           try {
-            response = await request(settings, '/api/snapshots/append', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+            response = await request(settings, '/api/snapshots/append', { method: 'POST', headers: { 'Content-Type': 'application/json', 'Idempotency-Key': entry.id },
               body: JSON.stringify({ manifest, baseSnapshotId: prior.snapshotId, baseHash: prior.hash, baseByteLength: prior.byteLength,
                 appendHash, appendByteLength: delta.length }) }); usedAppend = true;
           } catch (error) { if (!(error instanceof DeliveryError) || error.status !== 409) throw error; }
         }
         if (!response) {
           await upload(bytes);
-          response = await request(settings, '/api/snapshots', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(manifest) });
+          response = await request(settings, '/api/snapshots', { method: 'POST', headers: { 'Content-Type': 'application/json', 'Idempotency-Key': entry.id }, body: JSON.stringify(manifest) });
         }
         let ack: DeliveryAck;
-        try { ack = z.object({ snapshotId: z.uuid(), state: z.literal('committed'), hash: hashSchema, byteLength: z.number().int().min(0) }).parse(await response.json()); }
+        try { ack = z.object({ snapshotId: z.uuid(), state: z.literal('committed'), hash: hashSchema,
+          byteLength: z.number().int().min(0), uploadId: z.literal(entry.id) }).parse(await response.json()); }
         catch { throw new DeliveryError('invalid-ack'); }
         if (ack.hash !== manifest.hash || ack.byteLength !== manifest.byteLength) throw new DeliveryError('invalid-ack');
         await commit(manifest, entry.fingerprint, ack);

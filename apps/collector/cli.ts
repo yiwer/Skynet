@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { readFile, open, unlink } from 'node:fs/promises';
+import { readFile } from 'node:fs/promises';
 import { resolve, join } from 'node:path';
 import { parseArgs } from 'node:util';
 import { setTimeout } from 'node:timers/promises';
@@ -77,9 +77,7 @@ if (command === 'pack-plugins') {
   const settings = JSON.parse(await readFile(join(state, 'settings.json'), 'utf8'));
   if (settings.sharedIdentity) throw new Error('Installed sources are owned by the shared background; use skynet start or skynet retry');
   const { collectOnce } = await import('./local.js');
-  const lockPath = join(state, 'collector.lock');
-  const lock = await open(lockPath, 'wx', 0o600).catch(() => { throw new Error('Collector lock exists; ensure no collector is running before removing a stale lock'); });
-  await lock.writeFile(String(process.pid)); await lock.close();
+  const release = await (await import('./enrollment.js')).setupLock(state, 'collector');
   const stop = new AbortController();
   process.once('SIGINT', () => stop.abort()); process.once('SIGTERM', () => stop.abort());
   try {
@@ -89,7 +87,7 @@ if (command === 'pack-plugins') {
       if (values.once || stop.signal.aborted) break;
       await setTimeout(1000, undefined, { signal: stop.signal }).catch(() => undefined);
     } while (!stop.signal.aborted);
-  } finally { await unlink(lockPath); }
+  } finally { await release(); }
 } else if (command === 'status') {
   if (!values.state) {
     console.log(JSON.stringify(await (await import('./runtime.js')).installedStatus(state)));

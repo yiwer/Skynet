@@ -51,6 +51,11 @@ export async function migrate(db: Database) {
     );
     ALTER TABLE snapshots ADD COLUMN IF NOT EXISTS source text GENERATED ALWAYS AS (manifest->>'source') STORED;
     CREATE UNIQUE INDEX IF NOT EXISTS snapshots_source_identity ON snapshots(device_id,source,source_session_id,manifest_hash);
+    CREATE TABLE IF NOT EXISTS snapshot_uploads (
+      device_id uuid NOT NULL REFERENCES devices(id), upload_id uuid NOT NULL,
+      manifest_hash text NOT NULL, snapshot_id uuid NOT NULL REFERENCES snapshots(id),
+      PRIMARY KEY(device_id,upload_id)
+    );
     COMMIT;
   `);
 }
