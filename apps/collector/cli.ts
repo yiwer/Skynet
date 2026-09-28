@@ -3,13 +3,15 @@ import { resolve, join } from 'node:path';
 import { parseArgs } from 'node:util';
 import { setTimeout } from 'node:timers/promises';
 import { atomicJson, collectOnce, recordHook, setup } from './local.js';
+import { restorePackage } from './restore.js';
 
 const { values, positionals } = parseArgs({ allowPositionals: true, options: {
   state: { type: 'string' }, once: { type: 'boolean' },
+  package: { type: 'string' }, target: { type: 'string' }, 'desktop-version': { type: 'string' }, runtime: { type: 'string' },
 } });
-if (!values.state) throw new Error('--state must name an explicit private collector directory');
-const state = resolve(values.state);
 const command = positionals[0];
+if (command !== 'restore' && !values.state) throw new Error('--state must name an explicit private collector directory');
+const state = values.state ? resolve(values.state) : '';
 async function stdin() {
   let input = '';
   for await (const part of process.stdin) {
@@ -19,7 +21,13 @@ async function stdin() {
   return JSON.parse(input);
 }
 
-if (command === 'hook') {
+if (command === 'restore') {
+  if (!values.package || !values.target || !values['desktop-version'] || !values.runtime) {
+    throw new Error('Restore requires --package FILE --target NEW_ABSOLUTE_DIRECTORY --desktop-version VERSION --runtime ABSOLUTE_CODEX_EXECUTABLE');
+  }
+  console.log(JSON.stringify(await restorePackage({ packagePath: values.package, target: values.target,
+    desktopVersion: values['desktop-version'], runtime: values.runtime })));
+} else if (command === 'hook') {
   // Hooks never veto work, print payloads, or wait for the network.
   try { await recordHook(state, await stdin()); }
   catch {
@@ -51,4 +59,4 @@ if (command === 'hook') {
     catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
   }
   console.log(JSON.stringify(result));
-} else throw new Error('Expected setup, hook, run, or status');
+} else throw new Error('Expected setup, hook, run, status, or restore');
