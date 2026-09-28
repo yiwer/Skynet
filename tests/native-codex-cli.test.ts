@@ -8,6 +8,7 @@ import { mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { setTimeout } from 'node:timers/promises';
 import { chromium, expect, type Browser } from '@playwright/test';
 import { command, createSandbox } from './support.js';
+import { installAgent, stopInstalled } from './installed-support.js';
 
 test('normally trusted Codex CLI hooks archive two projects and server-only restore retains native history', { timeout: 240_000 }, async () => {
   const runtime = process.env.SKYNET_CODEX_CLI;
@@ -42,7 +43,7 @@ test('normally trusted Codex CLI hooks archive two projects and server-only rest
     } catch (error) { console.error((error as Error).message); response.writeHead(500); response.end(); }
   });
   const sourceHome = join(sandbox.directory, 'cli-source');
-  const state = join(sandbox.directory, 'collector');
+  let state = join(sandbox.directory, 'collector'); let installedState: string | undefined;
   const alpha = join(sandbox.directory, 'project-alpha'); const beta = join(sandbox.directory, 'project-beta');
   const target = join(sandbox.directory, 'cli-restored');
   const restoredWorkspace = join(sandbox.directory, 'restored-project');
@@ -59,7 +60,16 @@ test('normally trusted Codex CLI hooks archive two projects and server-only rest
   }
   async function reviewHook() {
     await command(process.execPath, ['dist/tests/codex-hook-review.js'], process.env,
-      JSON.stringify({ runtime, ptyRoot, alpha, sourceHome, directory: sandbox.directory, env: envFor(sourceHome) }));
+      JSON.stringify({ runtime, ptyRoot, alpha, sourceHome, directory: sandbox.directory, env: envFor(sourceHome), allHooks: !!installedState,
+        probePrompt: installedState ? 'Synthetic interactive project alpha. Read the fixture to confirm native capture.' : undefined }));
+    if (installedState) {
+      const metadata = [];
+      for (const file of await readdir(join(sourceHome, 'sessions'), { recursive: true })) if (file.endsWith('.jsonl')) {
+        const record = JSON.parse((await readFile(join(sourceHome, 'sessions', file), 'utf8')).split('\n')[0]!);
+        metadata.push({ id: record.payload.id, source: record.payload.source, originator: record.payload.originator, cliVersion: record.payload.cli_version });
+      }
+      await writeFile(join(sandbox.directory, 'installed-native-metadata.json'), JSON.stringify(metadata, null, 2));
+    }
   }
 
   try {
@@ -79,32 +89,37 @@ test('normally trusted Codex CLI hooks archive two projects and server-only rest
     }
     await configure(sourceHome);
     const cliPath = resolve('dist/apps/collector/cli.js');
-    await writeFile(join(sourceHome, 'hooks.json'), JSON.stringify({ hooks: { UserPromptSubmit: [{ hooks: [{ type: 'command',
+    if (!process.env.SKYNET_TEST_INSTALLER) await writeFile(join(sourceHome, 'hooks.json'), JSON.stringify({ hooks: { UserPromptSubmit: [{ hooks: [{ type: 'command',
       command: `"${process.execPath}" "${cliPath}" hook --state "${state}"`,
       commandWindows: `& '${process.execPath}' '${cliPath}' hook --state '${state}'`, timeout: 3 }] }] } }, null, 2));
     const employee = await sandbox.provision('真实 CLI 合成活动员工');
     const reader = await sandbox.provision('真实 CLI 合成活动读者');
     const origin = await sandbox.startServer();
-    await sandbox.collectorCommand('setup', state, { server: origin, enrollmentCredential: employee.enrollmentCredential,
+    if (process.env.SKYNET_TEST_INSTALLER) {
+      const installed = await installAgent(sandbox.directory, origin, envFor(sourceHome), employee.enrollmentCredential);
+      installedState = installed.status.stateDirectory; state = join(installedState!, 'sources', 'codex-cli');
+      assert.equal(installed.status.clients.find((item: any) => item.source === 'codex-cli').detected, true);
+    } else await sandbox.collectorCommand('setup', state, { server: origin, enrollmentCredential: employee.enrollmentCredential,
       source: 'codex-cli', nativeRoot: join(sourceHome, 'sessions'), sourceVersion: '0.157.1', sourceOs: 'win32' });
     await reviewHook();
     console.log(`Normal product hook review evidence: ${sandbox.directory}`);
-    await sandbox.startCollector(state);
+    if (!installedState) await sandbox.startCollector(state);
     const alphaOutput = await native(sourceHome, alpha, ['exec', '--json', 'Synthetic project alpha. Remember SKYNET_CLI_PROJECT_ALPHA_381 and read the fixture.']);
     const alphaId = alphaOutput.trim().split('\n').map(line => JSON.parse(line)).find(item => item.type === 'thread.started').thread_id;
     await native(sourceHome, beta, ['exec', '--json', 'Synthetic project beta. Remember SKYNET_CLI_PROJECT_BETA_482 and read the fixture.']);
     const headers = { Authorization: `Bearer ${reader.readerCredential}` };
     let sessions: any[] = []; let selected: any;
+    const expectedSessions = installedState ? 3 : 2;
     for (let attempt = 0; attempt < 100; attempt++) {
       sessions = (await (await fetch(`${origin}/api/sessions`, { headers })).json()).sessions;
       selected = sessions.find(item => item.source_session_id === alphaId);
-      if (sessions.length === 2 && selected) {
+      if (sessions.length === expectedSessions && selected) {
         const details = await Promise.all(sessions.map(async session => (await fetch(`${origin}/api/snapshots/${session.id}`, { headers })).json()));
         if (details.every(detail => detail.events.some((item: any) => item.role === 'tool result' && item.text.includes(toolMarker)))) break;
       }
       await setTimeout(200);
     }
-    assert.equal(sessions.length, 2, 'both real CLI projects reached the archive via normal trusted hooks');
+    assert.equal(sessions.length, expectedSessions, 'real CLI projects and the optional installed interactive session reached the archive via normal trusted hooks');
     assert.ok(sessions.every(item => item.source === 'codex-cli' && item.source_version === '0.157.1'));
     for (const session of sessions) {
       const detail = await (await fetch(`${origin}/api/snapshots/${session.id}`, { headers })).json();
@@ -119,6 +134,7 @@ test('normally trusted Codex CLI hooks archive two projects and server-only rest
     const packagePath = join(sandbox.directory, 'server-download.skynet-recovery.json');
     await writeFile(packagePath, Buffer.from(await (await fetch(`${origin}/api/snapshots/${selected.id}/recovery`, { headers })).arrayBuffer()));
     await sandbox.stopCollector();
+    if (installedState) await stopInstalled(installedState);
     assert.equal(resolve(sourceHome), join(resolve(sandbox.directory), 'cli-source'));
     await rm(sourceHome, { recursive: true, maxRetries: 20, retryDelay: 100 });
     const receipt = JSON.parse(await command(process.execPath, ['dist/apps/collector/cli.js', 'restore', '--package', packagePath,
@@ -132,8 +148,9 @@ test('normally trusted Codex CLI hooks archive two projects and server-only rest
     await writeFile(join(sandbox.directory, 'codex-cli-native-evidence.json'), JSON.stringify({ at: new Date().toISOString(),
       source: 'codex-cli', version: '0.157.1', os: 'win32', arch: 'x64', normalHookReview: true, twoProjectsArchived: true,
       serverOnlyRestore: true, sourceHomeRemoved: true, contextAndToolHistoryRetained: true,
+      npmIgnoreScriptsSetup: !!installedState, interactiveAndExecCaptured: !!installedState,
       toolScope: 'ordinary read-only MCP fixture; no shell sandbox changes or real code edit performed',
       provider: 'synthetic loopback; no credentials', desktopAcceptance: 'not established' }, null, 2));
     console.log(`Codex CLI native evidence: ${join(sandbox.directory, 'codex-cli-native-evidence.json')}`);
-  } finally { try { await browser?.close(); } finally { provider.closeAllConnections(); provider.close(); await sandbox.close(); } }
+  } finally { try { if (installedState) await stopInstalled(installedState); await browser?.close(); } finally { provider.closeAllConnections(); provider.close(); await sandbox.close(); } }
 });

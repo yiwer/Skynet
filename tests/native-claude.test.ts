@@ -9,6 +9,7 @@ import { dirname, join, resolve } from 'node:path';
 import { setTimeout } from 'node:timers/promises';
 import { chromium, expect, type Browser } from '@playwright/test';
 import { command, createSandbox } from './support.js';
+import { installAgent, stopInstalled } from './installed-support.js';
 
 // Explicit opt-in: real CLI and ordinary user hooks, synthetic loopback model responses.
 // This is product/native integration evidence, not a paid provider or whole G0 pass.
@@ -24,6 +25,7 @@ test('ordinary Claude hooks archive two projects and a server-only package resum
   const projects = { A: join(directory, 'project-a'), B: join(directory, 'project-b') };
   const marker = 'SKYNET_CLAUDE_TOOL_MARKER_719';
   let browser: Browser | undefined;
+  let installedState: string | undefined;
   const provider = createServer(async (request, response) => {
     try {
       let raw = ''; for await (const chunk of request) raw += chunk;
@@ -58,7 +60,7 @@ test('ordinary Claude hooks archive two projects and a server-only package resum
       for (const part of [home, config, join(home, 'tmp'), join(home, 'appdata'), join(home, 'localappdata')]) await mkdir(part, { recursive: true });
       const system = process.env.SystemRoot!;
       return { SystemRoot: system, WINDIR: system, COMSPEC: process.env.COMSPEC!, PATHEXT: '.COM;.EXE;.BAT;.CMD',
-        PATH: `${dirname(process.execPath)};${join(system, 'System32')};${system};C:\\Program Files\\Git\\bin`,
+        PATH: `${dirname(runtime!)};${dirname(process.execPath)};${join(system, 'System32')};${join(system, 'System32', 'WindowsPowerShell', 'v1.0')};${system};C:\\Program Files\\Git\\bin`,
         HOME: home, USERPROFILE: home, HOMEDRIVE: home.slice(0, 2), HOMEPATH: home.slice(2),
         APPDATA: join(home, 'appdata'), LOCALAPPDATA: join(home, 'localappdata'), TEMP: join(home, 'tmp'), TMP: join(home, 'tmp'),
         CLAUDE_CONFIG_DIR: config, CLAUDE_CODE_TMPDIR: join(home, 'tmp'), CLAUDE_CODE_GIT_BASH_PATH: 'C:\\Program Files\\Git\\bin\\bash.exe',
@@ -72,13 +74,16 @@ test('ordinary Claude hooks archive two projects and a server-only package resum
     const employee = await sandbox.provision('真实 Claude 合成测试员工');
     const reader = await sandbox.provision('真实 Claude 合成测试读者');
     const origin = await sandbox.startServer();
-    const state = join(directory, 'collector');
-    await sandbox.collectorCommand('setup', state, { server: origin, enrollmentCredential: employee.enrollmentCredential,
+    let state = join(directory, 'collector');
+    if (process.env.SKYNET_TEST_INSTALLER) {
+      const installed = await installAgent(directory, origin, sourceEnv, employee.enrollmentCredential);
+      installedState = installed.status.stateDirectory; state = join(installedState!, 'sources', 'claude-code-cli');
+      assert.equal(installed.status.clients.find((item: any) => item.source === 'claude-code-cli').detected, true);
+    } else await sandbox.collectorCommand('setup', state, { server: origin, enrollmentCredential: employee.enrollmentCredential,
       nativeRoot: join(sourceConfig, 'projects'), source: 'claude-code-cli', sourceVersion: '2.1.281', sourceOs: process.platform });
     const hooks = Object.fromEntries(['SessionStart', 'UserPromptSubmit', 'PostToolUse', 'Stop', 'SessionEnd'].map(event => [event,
       [{ hooks: [{ type: 'command', command: process.execPath, args: [resolve('dist/apps/collector/cli.js'), 'hook', '--state', state] }] }]]));
-    await writeFile(join(sourceConfig, 'settings.json'), JSON.stringify({ hooks }));
-    await sandbox.startCollector(state);
+    if (!installedState) { await writeFile(join(sourceConfig, 'settings.json'), JSON.stringify({ hooks })); await sandbox.startCollector(state); }
     async function runNative(env: NodeJS.ProcessEnv, cwd: string, id: string, prompt: string, resume = false) {
       const args = ['--print', '--output-format', 'stream-json', '--verbose', '--include-hook-events', '--setting-sources', 'user',
         '--strict-mcp-config', '--mcp-config', '{"mcpServers":{}}', '--tools', 'Read', '--permission-prompts', 'none', '--model', 'claude-sonnet-4-5',
@@ -138,6 +143,7 @@ test('ordinary Claude hooks archive two projects and a server-only package resum
     const bundleBytes = Buffer.from(await download.arrayBuffer()); await writeFile(packagePath, bundleBytes);
     const original = Buffer.from(await (await fetch(`${origin}/api/snapshots/${session.id}/raw`, { headers })).arrayBuffer());
     await sandbox.stopCollector();
+    if (installedState) await stopInstalled(installedState);
     assert.equal(dirname(resolve(sourceHome)), resolve(directory), 'recursive deletion is confined to this generated test home');
     await rm(sourceHome, { recursive: true, maxRetries: 20, retryDelay: 100 });
     await assert.rejects(access(sourceConfig), { code: 'ENOENT' });
@@ -161,8 +167,9 @@ test('ordinary Claude hooks archive two projects and a server-only package resum
     assert.ok(blocks.some((b: any) => b.type === 'tool_result' && JSON.stringify(b.content).includes(marker)));
     const evidence = { testedAt: new Date().toISOString(), client: 'claude-code-cli', version: '2.1.281', os: process.platform, arch: process.arch,
       ordinaryHostHooks: true, twoProjects: true, serverPackageOnly: true, sourceHomeRemoved: true,
+      npmIgnoreScriptsSetup: !!installedState,
       exactArchivedBytesRestored: true, nativeContextAndToolHistoryRetained: true, syntheticProvider: true, liveModel: 'unverified', G0: 'unverified' };
     await writeFile(join(directory, 'native-claude-evidence.json'), JSON.stringify(evidence, null, 2));
     console.log(`Claude native public-flow evidence: ${join(directory, 'native-claude-evidence.json')}`);
-  } finally { try { await browser?.close(); } finally { provider.closeAllConnections(); provider.close(); await sandbox.close(); } }
+  } finally { try { if (installedState) await stopInstalled(installedState); await browser?.close(); } finally { provider.closeAllConnections(); provider.close(); await sandbox.close(); } }
 });

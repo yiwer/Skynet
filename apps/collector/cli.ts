@@ -1,3 +1,4 @@
+#!/usr/bin/env node
 import { readFile, open, unlink } from 'node:fs/promises';
 import { resolve, join } from 'node:path';
 import { parseArgs } from 'node:util';
@@ -7,10 +8,11 @@ const { values, positionals } = parseArgs({ allowPositionals: true, options: {
   state: { type: 'string' }, once: { type: 'boolean' },
   package: { type: 'string' }, target: { type: 'string' }, 'desktop-version': { type: 'string' }, runtime: { type: 'string' },
   'source-version': { type: 'string' },
+  output: { type: 'string' }, origin: { type: 'string' }, deployment: { type: 'string' },
 } });
 const command = positionals[0];
-if (command !== 'restore' && !values.state) throw new Error('--state must name an explicit private collector directory');
-const state = values.state ? resolve(values.state) : '';
+if (!['setup', 'status', 'restore', 'pack-agent'].includes(command ?? '') && !values.state) throw new Error('--state must name an explicit private collector directory');
+const state = values.state ? resolve(values.state) : ['setup', 'status'].includes(command ?? '') ? (await import('./install-state.js')).defaultState() : '';
 async function stdin() {
   let input = '';
   for await (const part of process.stdin) {
@@ -20,7 +22,10 @@ async function stdin() {
   return JSON.parse(input);
 }
 
-if (command === 'restore') {
+if (command === 'pack-agent') {
+  if (!values.output || !values.origin || !values.deployment) throw new Error('Operator packaging requires --output NEW_DIRECTORY --origin HTTPS_ORIGIN --deployment ID');
+  console.log(JSON.stringify(await (await import('./package.js')).packAgent(values.output, values.origin, values.deployment)));
+} else if (command === 'restore') {
   const { restorePackage } = await import('./restore.js');
   const version = values['source-version'] ?? values['desktop-version'];
   if (values['source-version'] && values['desktop-version'] && values['source-version'] !== values['desktop-version']) throw new Error('Conflicting restore source versions');
@@ -39,8 +44,13 @@ if (command === 'restore') {
     } catch { /* A read-only/full disk cannot persist diagnostics; the host must still continue. */ }
   }
 } else if (command === 'setup') {
-  const { setup } = await import('./local.js');
-  console.log(JSON.stringify(await setup(state, await stdin())));
+  if (values.state) {
+    // Legacy explicit-state integration harness; employee setup never consumes JSON.
+    const { setup } = await import('./local.js');
+    console.log(JSON.stringify(await setup(state, await stdin())));
+  } else console.log(JSON.stringify(await (await import('./installer.js')).install(state)));
+} else if (command === 'background') {
+  await (await import('./runtime.js')).runInstalled(state);
 } else if (command === 'run') {
   const { collectOnce } = await import('./local.js');
   const lockPath = join(state, 'collector.lock');
@@ -57,10 +67,14 @@ if (command === 'restore') {
     } while (!stop.signal.aborted);
   } finally { await unlink(lockPath); }
 } else if (command === 'status') {
+  if (!values.state) {
+    console.log(JSON.stringify(await (await import('./runtime.js')).installedStatus(state)));
+  } else {
   const result: Record<string, unknown> = {};
   for (const filename of ['status.json', 'hook-gap.json']) {
     try { result[filename] = JSON.parse(await readFile(join(state, filename), 'utf8')); }
     catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
   }
   console.log(JSON.stringify(result));
-} else throw new Error('Expected setup, hook, run, status, or restore');
+  }
+} else throw new Error('Expected setup, hook, run, status, restore, or pack-agent');

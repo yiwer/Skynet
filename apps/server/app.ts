@@ -49,6 +49,11 @@ export async function createApp(options: { db: Database; rawDirectory: string; w
   const deviceGuard = async (request: { headers: { authorization?: string } }) => { await device(request.headers.authorization); };
 
   app.get('/health', async () => ({ status: 'ok' }));
+  app.post('/api/devices/health', { onRequest: deviceGuard }, async request => {
+    const owner = await device(request.headers.authorization);
+    const { nonce } = z.object({ nonce: z.uuid() }).strict().parse(request.body);
+    return { deviceId: owner.id, nonce, checkedAt: new Date().toISOString(), state: 'connected' };
+  });
   app.post('/api/devices/enroll', async request => {
     const input = enrollmentSchema.parse(request.body);
     const employee = await db.query('SELECT id FROM employees WHERE enrollment_hash=$1 AND active', [digest(credential(request.headers.authorization))]);

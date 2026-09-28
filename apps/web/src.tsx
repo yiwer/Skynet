@@ -4,6 +4,7 @@ import type { Manifest, SessionSummary } from '../../packages/contracts/archive.
 import type { ActivityEvent, ActivitySummary, ActivityContext } from '../../packages/activity.js';
 import { sourceLabel } from '../../packages/contracts/archive.js';
 import './style.css';
+import { InstallationHelp } from './installation.js';
 
 type Detail = { snapshotId: string; employee: string; manifest: Manifest; committedAt: string; events: ActivityEvent[]; activity: ActivitySummary;
   unrecognizedLines: number; partialLine: boolean; nextOffset: number | null; total: number;
@@ -93,6 +94,7 @@ function App() {
         <button className="primary" disabled={busy || !credential}>{busy ? '正在验证…' : '进入存档'}</button></form></section> : <>
       <div className="heading"><div><p className="eyebrow">共享存档 · 北京时间</p><h1>会话原件</h1></div><button disabled={busy} onClick={() => setRefresh(value => value + 1)}>{busy ? '正在刷新…' : '刷新存档'}</button></div>
       <p className="notice">当前保存单副本。原件已提交与原生恢复已验证是不同状态；Desktop 原生能力待验证。</p>
+      <InstallationHelp />
       <div className="workspace"><aside aria-label="会话列表"><h2>最近会话 <span>{sessions.length}</span></h2>
         {busy && <p role="status">正在读取存档…</p>}
         {!busy && sessions.length === 0 && <p className="muted">还没有已提交的会话。后台上传后刷新；暂存材料不会显示为已存档。</p>}
