@@ -11,16 +11,17 @@
 - #7：Claude CLI 两项目普通 hooks 自动采集、Web 查询及服务器包原生恢复已实现，提交 `ac66a80` 已通过 `ed4735d` 合并。实际 Claude 2.1.281 运行测试保留原 UUID、上下文和工具结果；模型为隔离确定性替身，单原件范围，G0 不由此通过。
 - #6：Codex CLI 正常审核产品 hook、两项目自动采集和服务器独立恢复已实现，提交 `794a7e4` 已通过 `d979c83` 合并。三来源集成后类型检查、构建、4 项普通流程与 3 项原生测试通过；hook 快路径的 200 次进程启动与持久入队实测 P95 为 74.2 ms。真实代码修改和完整 G0 仍待验收。
 - #8：旧会话完整接管、已确认前缀的增量上传及来源日期已实现，提交 `739b1c6` 已通过 `883e517` 合并。5 项公开流程与 3 项原生恢复回归通过；后续两个 CLI 的真实旧会话续用诊断也已通过，Desktop 及完整支持组合验收仍开放。
-- #9：文件代次与关联材料正在实现，包括 Codex 原生分支明确引用的父原件；父材料作为上下文保存，不计为新活动。
+- #9：代次、精确关联材料、分块上传和 v2 恢复包已通过 `70befed` 合并，集成的 7 项普通测试通过。真实 Codex 后端分支经服务器包恢复后保留父文本、工具和图像；独立附件数据库回填、Claude 侧文件续聊映射及 Desktop UI 仍未验证。每件 64 MiB、集合 128 MiB 的边界和超限缺口明确显示。
 - #11：正式 npm 单 Key 接入正在基于现有适配器实现，共用设备身份与后台，并分别显示配置、信任、首次事件和上传状态。G0 前置验收仍未通过，不因此宣称正式安装验收完成。
+- #16：开始实现原件与清单先持久入队、断网退避补传、积压和拒绝状态；与 #11 共用身份和后台接口。G1 安装前置验收仍开放。
 - #20：维护者停用账号/设备、逐请求撤销及操作审计已通过 `ec65e04` 合并；与 #8 集成的 6 项公开流程测试通过，可信接入边界保留。#11 安装前置验收仍未通过。
 - #26：已开始实现个人 OAuth 授权的 HTTPS MCP 读取与导出，复用已合并的身份撤销边界；尚未完成真实客户端授权验收。
-- #10、#12–#19、#21–#25、#27–#33：尚未完成；依赖与门槛继续按 ticket 图核查。
+- #10、#12–#15、#17–#19、#21–#25、#27–#33：尚未完成；依赖与门槛继续按 ticket 图核查。
 - G0–G4：未通过。原生恢复、真实分析、客户端 MCP 授权与五个工作日试点必须保留实测证据。
 - [草稿 PR #55](https://github.com/yiwer/Skynet/pull/55) 已保存实现与规格关闭引用；保持草稿，尚无 ticket 通过验收或被关闭。
 - 本地类型检查、构建、公开入口 E2E、Linux 容器持久卷重启验证及初次 GitHub CI 通过；[两路评审](../implementation/review-issue-4.md) 的可修复代码问题已在 `9ad3277` 修复，并通过 `920b92f` 合并，回归检查通过。
 
-运行与复现见 [首条存档链](../implementation/issue-4.md)、[导出与恢复](../implementation/issue-5.md)、[Codex CLI 链路](../implementation/issue-6.md)、[Claude CLI 链路](../implementation/issue-7.md)、[旧会话与增量](../implementation/issue-8.md)。目前需补齐的外部条件见 [原生客户端验收状态](../implementation/native-validation-status.md)。
+运行与复现见 [首条存档链](../implementation/issue-4.md)、[导出与恢复](../implementation/issue-5.md)、[Codex CLI 链路](../implementation/issue-6.md)、[Claude CLI 链路](../implementation/issue-7.md)、[旧会话与增量](../implementation/issue-8.md)、[关联材料](../implementation/issue-9.md)、[身份停用](../implementation/issue-20.md)。目前需补齐的外部条件见 [原生客户端验收状态](../implementation/native-validation-status.md)。
 
 ## 已确认的开发环境
 

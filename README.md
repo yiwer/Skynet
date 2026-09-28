@@ -1,6 +1,6 @@
 # Skynet
 
-内部 Coding Agent 工作观察与会话存档平台。用户已确认整体设计，已完成 PRD v1.0 与 v2.0、研究与架构文档，以及 Web 平台原型。现已实现认证存档、导出与单原件恢复，并实测两个 CLI 的自动采集和服务器独立原生续聊；真实 Codex Desktop 界面与完整发布门槛仍待验收，V1 尚未完成。进度见 [V1 实施记录](docs/planning/v1-implementation.md)。
+内部 Coding Agent 工作观察与会话存档平台。用户已确认整体设计，已完成 PRD v1.0 与 v2.0、研究与架构文档，以及 Web 平台原型。现已实现认证存档、历史增量、关联材料导出与恢复、账号和设备停用，并实测两个 CLI 的自动采集、旧会话接管和服务器独立原生续聊；真实 Codex Desktop 界面与完整发布门槛仍待验收，V1 尚未完成。进度见 [V1 实施记录](docs/planning/v1-implementation.md)。
 
 ## 文档入口
 
