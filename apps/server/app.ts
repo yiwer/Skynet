@@ -53,6 +53,11 @@ export async function createApp(options: { db: Database; rawDirectory: string; w
   }
 
   app.get('/health', async () => ({ status: 'ok' }));
+  app.post('/api/devices/health', { onRequest: deviceGuard }, async request => {
+    const owner = await device(request.headers.authorization);
+    const { nonce } = z.object({ nonce: z.uuid() }).strict().parse(request.body);
+    return { deviceId: owner.id, nonce, checkedAt: new Date().toISOString(), state: 'connected' };
+  });
   app.post('/api/devices/enroll', async request => {
     const input = enrollmentSchema.parse(request.body);
     const employee = await db.query('SELECT id FROM employees WHERE enrollment_hash=$1 AND active', [digest(credential(request.headers.authorization))]);
@@ -162,7 +167,7 @@ export async function createApp(options: { db: Database; rawDirectory: string; w
     const bytes = await raw.read(record.device_id, record.hash);
     const evidence = readEvidence(bytes, record.manifest.source);
     const activity = activityFor(evidence.events, record.manifest.enrolledAt);
-    return { snapshotId: record.id, employee: record.employee, manifest: record.manifest,
+    return { snapshotId: record.id, employee: record.employee, deviceId: record.device_id, manifest: record.manifest,
       committedAt: record.committed_at, state: 'committed', backup: 'single-copy', ...evidence, recovery: recoveryInfo(record.manifest, bytes),
       activity: activity.activity, events: activity.events.slice(query.offset, query.offset + 100), total: evidence.events.length,
       nextOffset: query.offset + 100 < evidence.events.length ? query.offset + 100 : null };

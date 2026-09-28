@@ -6,6 +6,7 @@ import { sourceLabel } from '../../packages/contracts/archive.js';
 import { IdentityManagement } from './IdentityManagement.js';
 import { HistoryMaterials } from './HistoryMaterials.js';
 import './style.css';
+import { InstallationHelp } from './installation.js';
 
 type Detail = { snapshotId: string; employee: string; manifest: Manifest; committedAt: string; events: ActivityEvent[]; activity: ActivitySummary;
   unrecognizedLines: number; partialLine: boolean; nextOffset: number | null; total: number;
@@ -107,6 +108,7 @@ function App() {
         onUnauthorized={() => logout('身份已停用或凭据失效，请重新登录。')} /> : <>
       <div className="heading"><div><p className="eyebrow">共享存档 · 北京时间</p><h1>会话原件</h1></div><button disabled={busy} onClick={() => setRefresh(value => value + 1)}>{busy ? '正在刷新…' : '刷新存档'}</button></div>
       <p className="notice">当前保存单副本。原件已提交与原生恢复已验证是不同状态；Desktop 原生能力待验证。</p>
+      <InstallationHelp />
       <div className="workspace"><aside aria-label="会话列表"><h2>最近会话 <span>{sessions.length}</span></h2>
         {busy && <p role="status">正在读取存档…</p>}
         {!busy && sessions.length === 0 && <p className="muted">还没有已提交的会话。后台上传后刷新；暂存材料不会显示为已存档。</p>}

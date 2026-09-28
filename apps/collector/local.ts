@@ -6,6 +6,7 @@ import { z } from 'zod';
 import { hostEventSchema, manifestSchema, MAX_ARTIFACT_BYTES, sourceSchema, type Source } from '../../packages/contracts/archive.js';
 import { atomicJson } from '../../packages/filesystem.js';
 import { claudeIdentity } from '../../packages/native/claude.js';
+import { readCollectorSettings } from './settings.js';
 import { captureSchema, CHUNK_BYTES } from '../../packages/contracts/materials.js';
 import { discoverMaterials, readNativeFile, safeNativePath } from './materials.js';
 export { atomicJson } from '../../packages/filesystem.js';
@@ -72,7 +73,7 @@ class ArchiveRequestError extends Error {
 }
 
 export async function collectOnce(state: string) {
-  const settings = settingsSchema.parse(await readJson(join(state, 'settings.json')));
+  const settings = settingsSchema.parse(await readCollectorSettings(state));
   let tracked: Tracked[] = [];
   try { tracked = z.array(trackedSchema).parse(await readJson(join(state, 'tracked.json'))).map(entry => ({ ...entry, source: entry.source ?? settings.source })); }
   catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
