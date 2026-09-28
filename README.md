@@ -29,4 +29,4 @@
 
 最先验证三种客户端入口的采集、原始存档及原生续聊恢复，尤其 Codex Desktop，再验证安装链与 Claude Code + 千问按量接口。实际员工 OS、规模和服务器配置在试点部署时登记，尚未作为已知事实。
 
-项目使用 [GitHub Issues](https://github.com/yiwer/Skynet/issues)。PRD v1.0 已发布为 [Issue #1](https://github.com/yiwer/Skynet/issues/1)，PRD v2.0 已发布为 [Issue #2](https://github.com/yiwer/Skynet/issues/2)，标签均为 `ready-for-agent`；工程技能指令文件等待配置草案确认。
+项目使用 [GitHub Issues](https://github.com/yiwer/Skynet/issues)。PRD v1.0 已发布为 [Issue #1](https://github.com/yiwer/Skynet/issues/1)，PRD v2.0 已发布为 [Issue #2](https://github.com/yiwer/Skynet/issues/2)，标签均为 `ready-for-agent`；工程技能配置入口见 [AGENTS.md](AGENTS.md)。
