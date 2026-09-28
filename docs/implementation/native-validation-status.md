@@ -17,8 +17,11 @@
 ## 已完成的诊断
 
 - Desktop 内置运行时以 app-server 模式在隔离 home 生成原生 JSONL；将该文件复制到空 home 后，按原 ID resume 并完成合成续轮。请求中保留先前上下文。这是后端机制诊断，未经过 Skynet 服务器导出，也未验证实际 Desktop 界面、真实模型、工具历史或附件恢复。
+- 后续 #5 产品测试已越过直接复制阶段：真实内置后端生成消息及工具结果，经公开 collector/API 上传并下载恢复包，删除测试源 home 后，仅用下载包在新 home 恢复并原生续轮；原 ID、上下文和工具历史均保留。可复现脚本随仓库交付，见 [#5 记录](issue-5.md)。这仍不等于 Desktop 界面与自动 hook 采集通过。
 - `hooks/list` 能列出用户定义、当前哈希和 `untrusted` 状态。一次诊断使用过宿主的信任绕过开关以观察原生事件格式；该结果仅用于输入契约研究，**不作为接入、信任或验收证据**。产品、演示与正常验收流程不得使用该开关或写入信任哈希。
-- 干净 Desktop profile 的两个启动探针均退出 `1`。实际 MSIX 入口程序曾打开独立 loopback 调试端口，但没有页面 target；另一启动器立即退出。未取得进一步错误日志，原因尚未确定。没有修改启动安全要求，也没有影响用户现有 Desktop。
+- Codex CLI 0.157.1 已通过实际终端界面完成新建目录与单条测试 hook 的普通审核，定义详情显示 `Trusted`、事件列表显示 1 个 Active；独立 exec 随后 exit 0 并触发 UserPromptSubmit。提升权限终端不能启动共享 daemon，CLI 自身提示的 `--no-daemon` 独立运行模式可用；没有禁用 sandbox 或绕过 hook 信任。#6 仍需对产品 hook 重复正常审核并测试完整链路。
+- Claude Code 2.1.281 普通 print 模式实际执行 Read 并触发六种 hooks；仅复制 JSONL 到新 home 和不同空工作区，令源原件不可用后，原生 resume 仍保留原 prompt、工具请求和结果。跨工作区的 SessionStart 可能先报告不存在的推导路径，后续 UserPromptSubmit 才给出实际路径。此处是机制诊断，产品链路由 #7 继续验证。
+- 干净 Desktop profile 的启动探针仍退出 `1`。实际 MSIX 入口程序曾打开独立 loopback 调试端口，但没有页面 target。进一步透明协议诊断确认原生 initialize 与 configRequirements/read 成功，错误位于后续 Desktop bootstrap，排除了先前的网络要求失败猜测。原因仍在定位，没有修改启动安全要求或用户现有 Desktop。
 
 原始研究、脚本和合成证据保存在执行机器的 `%TEMP%/skynet-v1-implementation/`，供后续实现代理复用；这些临时文件不构成仓库内可持续复现的发布验收材料。
 
