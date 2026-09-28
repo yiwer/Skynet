@@ -1,0 +1,37 @@
+[
+  {
+    "date": "2026-09-28",
+    "macrostructure": "Workbench (app shell) · employee profile layer",
+    "theme": "studied-DNA",
+    "source": "https://calendly.com/",
+    "theme_axes": "light / geometric-sans + editorial-serif narrative / cool (cornflower 252°)",
+    "nav": "rail + N13 inline ⌘K pill · sticky in-page chip nav on profile",
+    "footer": "none (app)",
+    "enrichment": "none",
+    "brief": "Skynet 员工一览（按等级分组的结论 + 卡片）与员工画像（垂直切分：结论、能力维度、使用数据、工作内容、协作方式、会话、活动、趋势、复核备注）",
+    "dataviz": "reuses validated palette; dimension bars viz-1 with ink median tick; dumbbell deemph → viz-1"
+  },
+  {
+    "date": "2026-09-24",
+    "macrostructure": "Workbench (app shell) · reports layer",
+    "theme": "studied-DNA",
+    "source": "https://calendly.com/",
+    "theme_axes": "light / geometric-sans + editorial-serif narrative / cool (cornflower 252°)",
+    "nav": "rail + N13 inline ⌘K pill",
+    "footer": "none (app)",
+    "enrichment": "none",
+    "brief": "Skynet 报表层：用量与产出、会话产效、提示词、响应与等待、活动记录、对话视图、数据处理；团队概览选定 C",
+    "dataviz": "validated palette light #3d8ce6 #e36d24 #16a08f #7a5bd3 · dark #3f8fe6 #dd7230 #1ca894 #8a74e2"
+  },
+  {
+    "date": "2026-09-24",
+    "macrostructure": "Workbench (app shell)",
+    "theme": "studied-DNA",
+    "source": "https://calendly.com/",
+    "theme_axes": "light / geometric-sans + editorial-serif narrative / cool (cornflower 252°)",
+    "nav": "rail + N13 inline ⌘K pill",
+    "footer": "none (app)",
+    "enrichment": "none",
+    "brief": "Skynet Web 平台原型 · 团队概览 A 周历 / B 日报阅读 / C 覆盖矩阵"
+  }
+]
