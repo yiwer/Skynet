@@ -91,6 +91,8 @@ node --import tsx --test tests/native-claude.test.ts tests/native-codex-cli.test
 
 Linux 不据 Windows 结果宣称通过：较新主线 `099db05` 的 [CI 36398456892](https://github.com/yiwer/Skynet/actions/runs/36398456892/job/108850344602) 报告后台无法建立所有权及 Web 停用后登录界面超时。此时尚未合入本票，根因和 Linux 独立复现由主线继续跟进，本票的控制响应修复不能据此认定已解决该失败。
 
+后续主线修复了 Web 停用刷新时 loading 未复位的确定性缺陷，并隔离认证测试中并发详情请求的竞态；`b71786e` 的 [Linux CI 36399820075](https://github.com/yiwer/Skynet/actions/runs/36399820075/job/108854769079) 全部通过。先前安装启动失败未在同路径诊断复现，仍未据一次绿灯认定其根因已修复。
+
 随后进行 Linux 安装专用隔离诊断：使用已有生产镜像的 Node 24.21.0、非 root `node` 用户，只读挂载本票代码，完全复用 CI 失败路径 `/tmp/skynet-test-t6txx3/isolated user with spaces/state/Skynet`。真实离线 npm pack/install/setup、合成 enrollment/health 往返及五轮 stop/start 全部通过。supervisor 端口 22640、worker 58418、setup 锁 18299，彼此没有碰撞。探针 `%TEMP%/skynet-v1-implementation/linux-plugin-runtime-probe.mjs`，结果 `linux-plugin-runtime-result.json`；自己创建的诊断容器已自动移除。该结果仅排除这个固定路径与 Node 版本的通用启动失败，**没有确认 CI 失败根因已修复**；下一主线 CI 仍需通过，若再次失败应捕获排除凭据和控制令牌的 startup/supervisor/runtime 状态后定位。
 
 仍待：#14 升级/修复/完整卸载；正常 Desktop 市场 UI、图标启动及 UI 原生续聊；真实登录/重启/休眠；其他 OS 安装链；完整 G1 和其他发布门槛。内部 CLI marketplace 验证不替代这些边界。

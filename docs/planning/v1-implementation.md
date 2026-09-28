@@ -4,6 +4,14 @@
 
 实现采用 [tracer-bullet ticket 图](tracer-bullet-tickets.md)，范围为 #4–#33；V2 的 #3 与 #34–#54 不在本次范围。每个实现任务使用独立 worktree，合并到同一草稿 PR。代码与合成测试通过不等同于真实客户端验收通过。
 
+## 暂停节点（2026-09-28）
+
+按用户要求，本批收敛后停止继续实现。最后产品集成提交为 `cbb90b3`：#13 插件入口、#18 本地故障与缺口、#27 搜索已合入，并修复账号停用后刷新导致登录按钮持续忙碌的问题。PR #55 保持草稿，规格与未验收票据不关闭。
+
+类型检查、生产构建与最后三项集成检查（采集缺口、MCP、搜索）通过。#18 的全套 17 项最初通过 16 项，唯一认证测试竞态修正后，认证、插件禁采、Claude metadata 恢复及 Linux 原生故障四项复验通过；最终 Linux 全套结果以 [PR 检查](https://github.com/yiwer/Skynet/pull/55/checks) 为准。并行负载下满盘 hook 的 200 样本 P95 为 **111.35 ms**，未达到 100 ms 目标，性能门槛保持开放。
+
+恢复工作时先处理 #14 修复/升级/卸载与 #19 跨设备历史归属，再接续 #22 的独立草稿；后续为长会话分析、预算与重试、日报/周报/项目、人工更正、覆盖矩阵和服务器备份恢复。G0–G4 均未通过，仍需真实 Desktop 界面采集及服务器独立续聊、登录/重启/休眠、指定千问模型与预算、五个工作日试运行和负责人签收。现有授权实现范围不因暂停改变。
+
 ## 当前状态
 
 - #4：合成输入的设备绑定→hook→后台→原件持久化→认证 Web 查询已实现，提交 `61a5337` 已合并；真实 Desktop 自动采集尚未验收。
@@ -17,7 +25,7 @@
 - #13：两个真实 CLI 的内部插件市场、npm/双插件共存、入口所有权与冻结材料补传已通过 `2111d75` 合并。分支 15 项普通测试通过，主线插件/运行时专项通过；缓存不可用后采集与服务器恢复实测通过。最后来源入口退出不再读取新增原件。控制响应关闭竞态已修；完整修复/升级/卸载由 #14 接续。
 - #16：原件与清单先持久入队、断网退避补传、配额和设备同步状态已通过 `4ce4170` 合并。集成 10 项普通测试通过；实现分支另通过两个 CLI 安装模式及 Desktop 后端的原生回归。离线后改写/删除源头、429、错误凭据及错误 ACK 均保留队列；G1/G2 仍开放。
 - #17：持久上传键、同键异内容拒绝、注册确认丢失恢复与实际进程崩溃验证已通过 `f534f46` 合并；十次断连接丢 ACK 仍只有一个逻辑快照。整合时修复不同冷快照并发读取的忙碌问题，保留并行读取断言，并在 #12 合并后通过 13 项全量测试。
-- #18：开始验证真实隔离存储不足、权限拒绝与源头删除，补齐设备/会话缺口状态和恢复后的补传。
+- #18：真实 Linux ENOSPC、EACCES、ENOENT 下的正常 Claude 回合、独立故障报告与恢复后补传已通过 `cbb90b3` 合并。设备/会话/Web/MCP 共享动态覆盖，已提交原件保持不可变；无法补回的范围仍显示缺口。Claude 子会话 metadata 关联与原位恢复已修。最终合并专项 3/3 通过；Windows 等价故障、同时离线全盘满和性能目标仍待验收。
 - #20：维护者停用账号/设备、逐请求撤销及操作审计已通过 `ec65e04` 合并；与 #8 集成的 6 项公开流程测试通过，可信接入边界保留。#11 安装前置验收仍未通过。
 - #26：个人 OAuth 授权、HTTPS MCP、共享 Web/MCP 查询与分页导出已通过 `85a1533` 合并。两个真实 CLI 各完成 17 次 MCP 调用、正常授权及导出字节校验；后续自然等待 16 分钟，两者均无需重新登录即可自动刷新并重复通过读取。模型为确定性替身；实际域名部署及完整门禁仍开放。
 - #27：组合内容搜索、历史代次和稳定原件定位已通过 `96c3d92` 合并。分支 14 项普通测试、两个真实 CLI 各 20 次 MCP 调用通过；合并后搜索/MCP/缓存 3 项回归通过，105 个独立会话跨 37 页完整命中。查询成员可跨重启继续，过期明确报错；320/375/1440px 布局已检查。
@@ -27,7 +35,7 @@
 - [草稿 PR #55](https://github.com/yiwer/Skynet/pull/55) 已保存实现与规格关闭引用；保持草稿，尚无 ticket 通过验收或被关闭。
 - 本地类型检查、构建、公开入口 E2E、Linux 容器持久卷重启验证及初次 GitHub CI 通过；[两路评审](../implementation/review-issue-4.md) 的可修复代码问题已在 `9ad3277` 修复，并通过 `920b92f` 合并，回归检查通过。
 
-运行与复现见 [首条存档链](../implementation/issue-4.md)、[导出与恢复](../implementation/issue-5.md)、[Codex CLI 链路](../implementation/issue-6.md)、[Claude CLI 链路](../implementation/issue-7.md)、[旧会话与增量](../implementation/issue-8.md)、[关联材料](../implementation/issue-9.md)、[单 Key 安装](../implementation/issue-11.md)、[共享后台](../implementation/issue-12.md)、[离线补传](../implementation/issue-16.md)、[提交一致性](../implementation/issue-17.md)、[身份停用](../implementation/issue-20.md)、[HTTPS MCP](../implementation/issue-26.md)、[组合搜索](../implementation/issue-27.md)。目前需补齐的外部条件见 [原生客户端验收状态](../implementation/native-validation-status.md)。
+运行与复现见 [首条存档链](../implementation/issue-4.md)、[导出与恢复](../implementation/issue-5.md)、[Codex CLI 链路](../implementation/issue-6.md)、[Claude CLI 链路](../implementation/issue-7.md)、[旧会话与增量](../implementation/issue-8.md)、[关联材料](../implementation/issue-9.md)、[单 Key 安装](../implementation/issue-11.md)、[共享后台](../implementation/issue-12.md)、[插件接入](../implementation/issue-13.md)、[离线补传](../implementation/issue-16.md)、[提交一致性](../implementation/issue-17.md)、[故障与缺口](../implementation/issue-18.md)、[身份停用](../implementation/issue-20.md)、[HTTPS MCP](../implementation/issue-26.md)、[组合搜索](../implementation/issue-27.md)。目前需补齐的外部条件见 [原生客户端验收状态](../implementation/native-validation-status.md)。
 
 ## 已确认的开发环境
 
