@@ -10,6 +10,8 @@ import { registerMcp } from './mcp.js';
 import { assembleSchema, CHUNK_BYTES } from '../../packages/contracts/materials.js';
 import { appendSnapshotSchema, hashSchema, manifestSchema, sourceSchema } from '../../packages/contracts/archive.js';
 import { HttpError, identities } from './identities.js';
+import { searchSchema, locationSchema } from '../../packages/contracts/search.js';
+import { migrateArchiveSearch } from './archive-search.js';
 import { archiveWriter } from './archive-write.js';
 import { enrollDevice } from './enrollment.js';
 import { captureHealthSchema } from '../../packages/contracts/capture-health.js';
@@ -18,6 +20,7 @@ import { saveCaptureHealth, readCaptureHealth } from './capture-health.js';
 export async function createApp(options: { db: Database; rawDirectory: string; webDirectory?: string; publicOrigin?: string }) {
   const { db } = options;
   await migrate(db);
+  await migrateArchiveSearch(db);
   const raw = new RawStore(options.rawDirectory);
   const app = Fastify({ bodyLimit: CHUNK_BYTES, logger: false, requestTimeout: 30_000 });
   app.setErrorHandler((error, _request, reply) => {
@@ -149,13 +152,23 @@ export async function createApp(options: { db: Database; rawDirectory: string; w
     const { source, offset } = z.object({ source: sourceSchema, offset: z.coerce.number().int().min(0).default(0) }).parse(request.query);
     return readCaptureHealth(db, z.uuid().parse((request.params as { id: string }).id), source, undefined, offset);
   });
+  app.get('/api/search', { onRequest: readerGuard }, async request => {
+    const query = request.query as Record<string, unknown>;
+    return archive.search(searchSchema.parse({ ...query, ...(query.limit === undefined ? {} : { limit: Number(query.limit) }) }));
+  });
   app.get('/api/sessions', { onRequest: readerGuard }, async request => {
     const query = z.object({ cursor: z.string().max(1024).optional(), limit: z.coerce.number().int().min(1).max(100).default(100) }).parse(request.query);
     return archive.sessions(query.cursor, query.limit);
   });
   app.get('/api/snapshots/:id', { onRequest: readerGuard }, async request => {
-    const { offset } = z.object({ offset: z.coerce.number().int().min(0).default(0) }).parse(request.query);
-    return archive.detail((request.params as { id: string }).id, offset);
+    const { offset, summary } = z.object({ offset: z.coerce.number().int().min(0).default(0), summary: z.enum(['true', 'false']).default('false') }).parse(request.query);
+    return archive.detail((request.params as { id: string }).id, offset, summary === 'true');
+  });
+  app.get('/api/snapshots/:id/location', { onRequest: readerGuard }, async request => {
+    const query = request.query as Record<string, unknown>;
+    const location = locationSchema.parse({ ...query, ...Object.fromEntries(['offset', 'line', 'block', 'textOffset']
+      .filter(key => query[key] !== undefined).map(key => [key, Number(query[key])])) });
+    return archive.locationPage((request.params as { id: string }).id, location);
   });
   app.get('/api/snapshots/:id/evidence', { onRequest: readerGuard }, async request => {
     const query = z.object({ offset: z.coerce.number().int().min(0).default(0), textOffset: z.coerce.number().int().min(0).default(0) }).parse(request.query);

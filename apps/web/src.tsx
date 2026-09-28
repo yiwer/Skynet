@@ -9,6 +9,8 @@ import { DeviceDelivery } from './DeviceDelivery.js';
 import { CaptureCoverage, type Coverage } from './CaptureCoverage.js';
 import './style.css';
 import { InstallationHelp } from './installation.js';
+import { ArchiveSearch } from './ArchiveSearch.js';
+import { EvidenceReader, selectedEvidence } from './EvidenceReader.js';
 
 type Detail = { snapshotId: string; employee: string; manifest: Manifest; committedAt: string; events: ActivityEvent[]; activity: ActivitySummary;
   unrecognizedLines: number; partialLine: boolean; nextOffset: number | null; total: number; captureHealth: Coverage;
@@ -32,7 +34,8 @@ function App() {
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailError, setDetailError] = useState('');
   const [detailRetry, setDetailRetry] = useState(0);
-  const [selected, setSelected] = useState(location.hash.slice(1));
+  const [selected, setSelected] = useState(location.hash.slice(1).split('?')[0]!);
+  const [evidenceLocation, setEvidenceLocation] = useState(() => selectedEvidence(location.hash));
   const [offset, setOffset] = useState(0);
   const [refresh, setRefresh] = useState(0);
   const [busy, setBusy] = useState(false);
@@ -46,7 +49,7 @@ function App() {
   }
 
   useEffect(() => {
-    const change = () => { setSelected(location.hash.slice(1)); setOffset(0); };
+    const change = () => { setSelected(location.hash.slice(1).split('?')[0]!); setEvidenceLocation(selectedEvidence(location.hash)); setOffset(0); };
     window.addEventListener('hashchange', change);
     return () => window.removeEventListener('hashchange', change);
   }, []);
@@ -54,7 +57,11 @@ function App() {
   async function request(path: string, access = token, signal?: AbortSignal) {
     const response = await fetch(path, { headers: { Authorization: `Bearer ${access}` }, signal });
     if (response.status === 401 && token && access === token) logout('凭据无效或已停用，请重新登录。');
-    if (!response.ok) throw new Error(response.status === 401 ? '凭据无效或已停用，请重新登录。' : '暂时无法读取，请稍后重试。');
+    if (!response.ok) {
+      const body = await response.json().catch(() => null);
+      throw new Error(response.status === 401 ? '凭据无效或已停用，请重新登录。'
+        : typeof body?.error === 'string' ? body.error : '暂时无法读取，请稍后重试。');
+    }
     return response;
   }
   async function login(event: FormEvent) {
@@ -79,12 +86,12 @@ function App() {
     setExportError(''); setExportStatus('');
     if (!token || !selected) return;
     const abort = new AbortController(); setDetailLoading(true);
-    request(`/api/snapshots/${encodeURIComponent(selected)}?offset=${offset}`, token, abort.signal)
+    request(`/api/snapshots/${encodeURIComponent(selected)}?offset=${offset}${evidenceLocation ? '&summary=true' : ''}`, token, abort.signal)
       .then(response => response.json()).then(data => { if (!abort.signal.aborted) setDetail(data); })
       .catch(failure => { if (!abort.signal.aborted) setDetailError(failure.message); })
       .finally(() => { if (!abort.signal.aborted) setDetailLoading(false); });
     return () => abort.abort();
-  }, [token, selected, offset, refresh, detailRetry]);
+  }, [token, selected, offset, evidenceLocation, refresh, detailRetry]);
   async function download(kind: 'raw' | 'readable' | 'recovery') {
     if (!detail) return;
     setExporting(true); setExportError(''); setExportStatus('');
@@ -115,6 +122,7 @@ function App() {
       <div className="heading"><div><p className="eyebrow">共享存档 · 北京时间</p><h1>会话原件</h1></div><button disabled={busy} onClick={() => { setSessionCursor(null); setRefresh(value => value + 1); }}>{busy ? '正在刷新…' : '刷新存档'}</button></div>
       <p className="notice">当前保存单副本。原件已提交与原生恢复已验证是不同状态；Desktop 原生能力待验证。</p>
       <InstallationHelp />
+      <ArchiveSearch key={token} request={(path, signal) => request(path, token, signal)} />
       <div className="workspace"><aside aria-label="会话列表"><h2>最近会话 <span>{sessions.length}</span></h2>
         {busy && <p role="status">正在读取存档…</p>}
         {!busy && sessions.length === 0 && <p className="muted">还没有已提交的会话。后台上传后刷新；暂存材料不会显示为已存档。</p>}
@@ -128,6 +136,8 @@ function App() {
           <div className="detail-heading"><div><p className="eyebrow">{detail.employee} · {sourceLabel(detail.manifest.source)}</p><h2>{detail.manifest.project || '未归类项目'}</h2></div><button disabled={exporting} onClick={() => download('raw')}>下载原件</button></div>
           <dl><div><dt>提交时间</dt><dd>{date(detail.committedAt)}</dd></div><div><dt>来源环境</dt><dd>{detail.manifest.sourceVersion} / {detail.manifest.sourceOs}</dd></div>
             <div><dt>存档范围</dt><dd>{detail.manifest.byteLength.toLocaleString()} 字节原件 · {detail.manifest.capture?.materials.length ?? 0} 项关联材料</dd></div><div><dt>SHA-256</dt><dd className="hash">{detail.manifest.hash}</dd></div></dl>
+          {evidenceLocation && <EvidenceReader key={`${selected}:${JSON.stringify(evidenceLocation)}:${refresh}`} snapshotId={selected} location={evidenceLocation}
+            request={(path, signal) => request(path, token, signal)} />}
           {(detail.unrecognizedLines > 0 || detail.partialLine) && <p className="notice">{detail.unrecognizedLines} 行未解析{detail.partialLine ? '，另有未闭合的末行' : ''}。全部字节仍保存在原件中。</p>}
           <HistoryMaterials key={detail.snapshotId} snapshotId={detail.snapshotId} capture={detail.manifest.capture} request={(path, signal) => request(path, token, signal)} />
           <CaptureCoverage key={`coverage-${detail.snapshotId}`} initial={detail.captureHealth} path={`/api/snapshots/${detail.snapshotId}/capture-status`} request={path => request(path)} />
@@ -166,8 +176,8 @@ function App() {
           </section>
           <p className="muted">共 {detail.total} 条已解析记录。消息只代表会话中记录的内容。</p>
           {detail.events.map(event => <section className="message" key={`${event.line}:${event.block ?? 0}`}><div className="message-meta"><strong>{event.role}</strong><span>{contextLabel[event.context]}</span><span>原件第 {event.line} 行 · 来源时间：{event.timestamp ? date(event.timestamp) : '未知'}</span></div><pre>{event.text}</pre></section>)}
-          {detail.events.length === 0 && <p>当前原件没有可解析的消息；可下载原件核查。</p>}
-          <div className="pagination"><button disabled={offset === 0} onClick={() => setOffset(value => Math.max(0, value - 100))}>上一页</button><button disabled={detail.nextOffset === null} onClick={() => setOffset(detail.nextOffset ?? 0)}>下一页</button></div>
+          {!evidenceLocation && detail.events.length === 0 && <p>当前原件没有可解析的消息；可下载原件核查。</p>}
+          {!evidenceLocation && <div className="pagination"><button disabled={offset === 0} onClick={() => setOffset(value => Math.max(0, value - 100))}>上一页</button><button disabled={detail.nextOffset === null} onClick={() => setOffset(detail.nextOffset ?? 0)}>下一页</button></div>}
         </>}</article></div></>}</>}
       {error && <p className="error" role="alert">{error}</p>}</main><footer>Skynet · 完整性以实际收到的材料为准</footer></>;
 }
