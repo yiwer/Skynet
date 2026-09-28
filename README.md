@@ -1,12 +1,16 @@
 # Skynet
 
-内部 Coding Agent 工作观察与会话存档平台。用户已确认整体设计，已完成 PRD v1.0、研究与架构文档，产品尚未实现。
+内部 Coding Agent 工作观察与会话存档平台。用户已确认整体设计，已完成 PRD v1.0 与 v2.0、研究与架构文档，以及 Web 平台原型；产品尚未实现。
 
 ## 文档入口
 
 | 文档 | 用途 |
 | --- | --- |
 | [PRD v1.0](docs/requirements/PRD.md) | 首版实施与验收依据：71 条用户故事、实施决策、22 组验收场景与发布门槛 |
+| [V1 验收标准](docs/requirements/v1-acceptance.md) | 把 PRD v1.0 的 AC-01…AC-22 与 G0—G4 整理成可执行的验收步骤、证据与判定规则 |
+| [PRD v2.0](docs/requirements/PRD-v2.md) | V2：数据报表、对话视图、活动记录、会话组装审计与员工使用能力评估；用户故事 72—176，验收场景 AC-23…AC-38 |
+| [V2 实现提示词](docs/requirements/v2-prompt.md) | 交给实现 Agent 的 V2 工作说明；第六节守则第 1 条与 AC-28 已被 PRD v2.0 取代 |
+| [Web 平台原型](prototypes/web-platform/README.md) | 可点击的界面原型，数据为合成；只作界面与口径参考，代码不进入产品 |
 | [可行性与整体架构](docs/architecture/solution-design.md) | 推荐结构、Module 职责、可靠存档、分析、恢复与实施顺序 |
 | [安装与运行设计](docs/architecture/installation-design.md) | npm / 插件市场两个入口、单 Key 绑定、共享后台与升级卸载 |
 | [技术验证计划](docs/architecture/validation-plan.md) | 原生恢复、安装、可靠上传、模型分析与产品发布门槛 |
@@ -25,4 +29,4 @@
 
 最先验证三种客户端入口的采集、原始存档及原生续聊恢复，尤其 Codex Desktop，再验证安装链与 Claude Code + 千问按量接口。实际员工 OS、规模和服务器配置在试点部署时登记，尚未作为已知事实。
 
-项目使用 [GitHub Issues](https://github.com/yiwer/Skynet/issues)。PRD 已发布为 [Issue #1](https://github.com/yiwer/Skynet/issues/1)，标签为 `ready-for-agent`；工程技能指令文件等待配置草案确认。
+项目使用 [GitHub Issues](https://github.com/yiwer/Skynet/issues)。PRD v1.0 已发布为 [Issue #1](https://github.com/yiwer/Skynet/issues/1)，PRD v2.0 已发布为 [Issue #2](https://github.com/yiwer/Skynet/issues/2)，标签均为 `ready-for-agent`；工程技能指令文件等待配置草案确认。
