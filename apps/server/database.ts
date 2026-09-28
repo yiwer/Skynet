@@ -42,6 +42,13 @@ export async function migrate(db: Database) {
     -- Old devices have no trustworthy registration instant. Keep that boundary unknown.
     ALTER TABLE devices ADD COLUMN IF NOT EXISTS enrolled_at timestamptz;
     ALTER TABLE devices ALTER COLUMN enrolled_at SET DEFAULT now();
+    CREATE TABLE IF NOT EXISTS device_health (
+      device_id uuid PRIMARY KEY REFERENCES devices(id), received_at timestamptz NOT NULL DEFAULT now()
+    );
+    CREATE TABLE IF NOT EXISTS device_delivery_health (
+      device_id uuid NOT NULL REFERENCES devices(id), source text NOT NULL,
+      report jsonb NOT NULL, received_at timestamptz NOT NULL DEFAULT now(), PRIMARY KEY(device_id,source)
+    );
     ALTER TABLE snapshots ADD COLUMN IF NOT EXISTS source text GENERATED ALWAYS AS (manifest->>'source') STORED;
     CREATE UNIQUE INDEX IF NOT EXISTS snapshots_source_identity ON snapshots(device_id,source,source_session_id,manifest_hash);
     COMMIT;

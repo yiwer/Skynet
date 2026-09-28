@@ -6,7 +6,8 @@ import { z } from 'zod';
 import { digest, migrate, newCredential, type Database } from './database.js';
 import { RawStore } from './raw-store.js';
 import { readEvidence } from './evidence.js';
-import { appendSnapshotSchema, enrollmentSchema, hashSchema, manifestSchema, MAX_ARTIFACT_BYTES, type Manifest } from '../../packages/contracts/archive.js';
+import { appendSnapshotSchema, enrollmentSchema, hashSchema, manifestSchema, MAX_ARTIFACT_BYTES, sourceSchema, type Manifest } from '../../packages/contracts/archive.js';
+import { deliveryHealthSchema } from '../../packages/contracts/delivery.js';
 import { createRecoveryPackage, recoveryInfo } from '../../packages/recovery.js';
 import { assembleSchema, CHUNK_BYTES } from '../../packages/contracts/materials.js';
 import { activityFor } from '../../packages/activity.js';
@@ -55,8 +56,23 @@ export async function createApp(options: { db: Database; rawDirectory: string; w
   app.get('/health', async () => ({ status: 'ok' }));
   app.post('/api/devices/health', { onRequest: deviceGuard }, async request => {
     const owner = await device(request.headers.authorization);
-    const { nonce } = z.object({ nonce: z.uuid() }).strict().parse(request.body);
+    const { nonce, source, delivery } = z.object({ nonce: z.uuid(), source: sourceSchema.optional(), delivery: deliveryHealthSchema.optional() }).strict()
+      .refine(value => Boolean(value.source) === Boolean(value.delivery), 'Source and delivery must be reported together').parse(request.body);
+    await db.query(`INSERT INTO device_health(device_id) VALUES($1) ON CONFLICT(device_id) DO UPDATE SET received_at=now()`, [owner.id]);
+    if (source && delivery) await db.query(`INSERT INTO device_delivery_health(device_id,source,report) VALUES($1,$2,$3)
+      ON CONFLICT(device_id,source) DO UPDATE SET report=EXCLUDED.report,received_at=now()`, [owner.id, source, delivery]);
     return { deviceId: owner.id, nonce, checkedAt: new Date().toISOString(), state: 'connected' };
+  });
+  app.get('/api/devices/status', { onRequest: readerGuard }, async request => {
+    const { offset } = z.object({ offset: z.coerce.number().int().min(0).default(0) }).parse(request.query);
+    const result = await db.query(`SELECT d.id,d.name,e.name AS employee,d.active AND e.active AS active,h.received_at AS "lastSeenAt",
+      h.received_at > now()-interval '90 seconds' AS connected
+      FROM devices d JOIN employees e ON e.id=d.employee_id LEFT JOIN device_health h ON h.device_id=d.id ORDER BY e.name,d.name,d.id LIMIT 51 OFFSET $1`, [offset]);
+    const devices = result.rows.slice(0, 50);
+    const reports = await db.query(`SELECT device_id AS "deviceId",source,report,received_at AS "receivedAt" FROM device_delivery_health WHERE device_id=ANY($1::uuid[]) ORDER BY source`, [devices.map(item => item.id)]);
+    return { checkedAt: new Date().toISOString(), devices: devices.map(item => ({ ...item,
+      sources: reports.rows.filter(report => report.deviceId === item.id).map(({ deviceId: _id, ...report }) => report) })),
+      nextOffset: result.rows.length > 50 ? offset + 50 : null };
   });
   app.post('/api/devices/enroll', async request => {
     const input = enrollmentSchema.parse(request.body);

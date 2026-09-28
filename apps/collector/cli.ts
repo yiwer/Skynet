@@ -51,6 +51,10 @@ if (command === 'pack-agent') {
   } else console.log(JSON.stringify(await (await import('./installer.js')).install(state)));
 } else if (command === 'background') {
   await (await import('./runtime.js')).runInstalled(state);
+} else if (command === 'retry') {
+  // Ask the owning background to retry; never start a competing installed writer.
+  await (await import('../../packages/filesystem.js')).atomicJson(join(state, 'retry-request.json'), { requestedAt: new Date().toISOString() });
+  console.log(JSON.stringify({ state: 'retry-requested', notice: 'The owning collector will make one immediate delivery attempt on its next sweep.' }));
 } else if (command === 'run') {
   const { collectOnce } = await import('./local.js');
   const lockPath = join(state, 'collector.lock');
@@ -77,4 +81,4 @@ if (command === 'pack-agent') {
   }
   console.log(JSON.stringify(result));
   }
-} else throw new Error('Expected setup, hook, run, status, restore, or pack-agent');
+} else throw new Error('Expected setup, hook, run, retry, status, restore, or pack-agent');
