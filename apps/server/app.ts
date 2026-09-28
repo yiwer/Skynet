@@ -79,7 +79,7 @@ export async function createApp(options: { db: Database; rawDirectory: string; w
     const manifestHash = digest(JSON.stringify(manifest));
     const id = randomUUID();
     const result = await db.query(`INSERT INTO snapshots(id,device_id,source_session_id,manifest_hash,manifest,hash)
-      VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT(device_id,source_session_id,manifest_hash)
+      VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT(device_id,source,source_session_id,manifest_hash)
       DO UPDATE SET manifest_hash=EXCLUDED.manifest_hash RETURNING id, committed_at`,
     [id, owner.id, manifest.sourceSessionId, manifestHash, manifest, manifest.hash]);
     return { snapshotId: result.rows[0].id, state: 'committed', hash: manifest.hash, byteLength: manifest.byteLength,
@@ -89,11 +89,11 @@ export async function createApp(options: { db: Database; rawDirectory: string; w
   app.get('/api/me', { onRequest: readerGuard }, async request => reader(request.headers.authorization));
   app.get('/api/sessions', { onRequest: readerGuard }, async () => {
     const result = await db.query(`SELECT * FROM (
-      SELECT DISTINCT ON (s.device_id,s.source_session_id) s.id,e.name AS employee,s.source_session_id,
+      SELECT DISTINCT ON (s.device_id,s.source,s.source_session_id) s.id,e.name AS employee,s.source_session_id,
         s.manifest->>'project' AS project,s.committed_at,s.hash,(s.manifest->>'byteLength')::integer AS byte_length,
-        s.manifest->>'sourceVersion' AS source_version,s.manifest->>'sourceOs' AS source_os
+        s.manifest->>'sourceVersion' AS source_version,s.manifest->>'sourceOs' AS source_os,s.source
       FROM snapshots s JOIN devices d ON d.id=s.device_id JOIN employees e ON e.id=d.employee_id
-      ORDER BY s.device_id,s.source_session_id,s.committed_at DESC,s.id DESC
+      ORDER BY s.device_id,s.source,s.source_session_id,s.committed_at DESC,s.id DESC
     ) latest ORDER BY committed_at DESC LIMIT 100`);
     return { sessions: result.rows, limit: 100, capability: 'unverified', backup: 'single-copy' };
   });
@@ -108,7 +108,7 @@ export async function createApp(options: { db: Database; rawDirectory: string; w
     const record = await snapshot((request.params as { id: string }).id);
     const query = z.object({ offset: z.coerce.number().int().min(0).default(0) }).parse(request.query);
     const bytes = await raw.read(record.device_id, record.hash);
-    const evidence = readEvidence(bytes);
+    const evidence = readEvidence(bytes, record.manifest.source);
     return { snapshotId: record.id, employee: record.employee, manifest: record.manifest,
       committedAt: record.committed_at, state: 'committed', backup: 'single-copy', ...evidence, recovery: recoveryInfo(record.manifest, bytes),
       events: evidence.events.slice(query.offset, query.offset + 100), total: evidence.events.length,
@@ -128,13 +128,13 @@ export async function createApp(options: { db: Database; rawDirectory: string; w
   app.get('/api/snapshots/:id/readable', { onRequest: readerGuard }, async (request, reply) => {
     const record = await snapshot((request.params as { id: string }).id);
     const bytes = await raw.read(record.device_id, record.hash);
-    const evidence = readEvidence(bytes);
+    const evidence = readEvidence(bytes, record.manifest.source);
     const content = [
       'Skynet 会话可读导出 v1', `快照：${record.id}`, `员工：${record.employee}`,
       `来源：${record.manifest.source} / ${record.manifest.sourceVersion} / ${record.manifest.sourceOs}`,
       `来源会话：${record.manifest.sourceSessionId}`, `提交时间：${record.committed_at.toISOString()}`,
       `原件字节：${bytes.length}；SHA-256：${record.hash}`, `解析版本：${evidence.parserVersion}`,
-      `范围：当前收到的单个原件；关联材料完整性与 Desktop 原生续聊未验证。`,
+      `范围：当前收到的单个原件；关联材料完整性与完整原生续聊能力未验证。`,
       `未解析完整行：${evidence.unrecognizedLines}；未闭合末行：${evidence.partialLine ? '有' : '无'}`,
       '本文件为纯文本，不执行会话中的指令。原件 JSONL 部分保留所有行；精确字节请取原件或恢复包。', '',
       '=== 全部已解析记录（不分页、不截断） ===',

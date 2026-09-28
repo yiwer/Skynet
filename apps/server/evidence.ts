@@ -1,5 +1,6 @@
 import { z } from 'zod';
-import type { EvidenceLine } from '../../packages/contracts/archive.js';
+import type { EvidenceLine, Source } from '../../packages/contracts/archive.js';
+import { readClaudeEvidence } from '../../packages/native/claude.js';
 
 const identifier = z.string().min(1);
 const textPart = z.object({ type: z.enum(['input_text', 'output_text']), text: z.string() });
@@ -17,7 +18,8 @@ const recordSchema = z.discriminatedUnion('type', [
   }),
 ]);
 
-export function readEvidence(bytes: Buffer) {
+export function readEvidence(bytes: Buffer, source: Source = 'codex-desktop') {
+  if (source === 'claude-code-cli') return readClaudeEvidence(bytes);
   const lines = bytes.toString('utf8').split('\n');
   const partialLine = lines.pop()!;
   const events: EvidenceLine[] = [];
