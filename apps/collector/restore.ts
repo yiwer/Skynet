@@ -2,7 +2,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { lstat, mkdir, open, readFile, unlink } from 'node:fs/promises';
 import { dirname, isAbsolute, join, parse, resolve } from 'node:path';
-import { measuredDesktop, nativeMetadata, readRecoveryPackage, MAX_RECOVERY_BYTES } from '../../packages/recovery.js';
+import { measuredDesktop, measuredCodexCli, nativeMetadata, readRecoveryPackage, MAX_RECOVERY_BYTES } from '../../packages/recovery.js';
 import { syncDirectory } from '../../packages/filesystem.js';
 
 const execute = promisify(execFile);
@@ -26,7 +26,7 @@ async function durableFile(path: string, bytes: Buffer | string) {
   try { await handle.writeFile(bytes); await handle.sync(); } finally { await handle.close(); }
 }
 
-export async function restorePackage(options: { packagePath: string; target: string; desktopVersion: string; runtime: string }) {
+export async function restorePackage(options: { packagePath: string; target: string; sourceVersion: string; runtime: string }) {
   const target = await newTarget(options.target);
   const info = await lstat(options.packagePath);
   if (!info.isFile() || info.isSymbolicLink() || info.size > MAX_RECOVERY_BYTES) throw new Error('Expected a bounded regular recovery package file');
@@ -42,10 +42,12 @@ export async function restorePackage(options: { packagePath: string; target: str
       if (!record || typeof record !== 'object' || Array.isArray(record)) throw new Error('Invalid record');
     }
   } catch { throw new Error('Native rollout contains invalid UTF-8 or JSON records'); }
-  if (bundle.manifest.sourceVersion !== options.desktopVersion || bundle.manifest.sourceOs !== process.platform
-    || options.desktopVersion !== measuredDesktop.version || process.platform !== measuredDesktop.os || process.arch !== measuredDesktop.arch
-    || metadata.payload.cli_version !== measuredDesktop.runtime) {
-    throw new Error('Unsupported source/target Desktop, runtime, OS or architecture combination; no files were changed');
+  const cli = bundle.manifest.source === 'codex-cli';
+  const baseline = cli ? measuredCodexCli : measuredDesktop;
+  if (bundle.manifest.sourceVersion !== options.sourceVersion || bundle.manifest.sourceOs !== process.platform
+    || options.sourceVersion !== baseline.version || process.platform !== baseline.os || process.arch !== baseline.arch
+    || metadata.payload.cli_version !== baseline.runtime) {
+    throw new Error('Unsupported source/target Agent, runtime, OS or architecture combination; no files were changed');
   }
   if (!isAbsolute(options.runtime)) throw new Error('Runtime must be the absolute path to the installed native executable');
   const { stdout } = await execute(options.runtime, ['--version'], { windowsHide: true, timeout: 10_000, maxBuffer: 4096 });
@@ -62,12 +64,12 @@ export async function restorePackage(options: { packagePath: string; target: str
   }
   const rolloutPath = join(directory, `rollout-${date.slice(0, 19).replaceAll(':', '-')}-${metadata.payload.id}.jsonl`);
   await durableFile(rolloutPath, bundle.bytes); await syncDirectory(directory);
-  const result = { state: 'prepared-desktop-unverified', snapshotId: bundle.snapshot.id, sourceEmployee: bundle.snapshot.employee,
+  const result = { state: cli ? 'prepared-cli' : 'prepared-desktop-unverified', snapshotId: bundle.snapshot.id, sourceEmployee: bundle.snapshot.employee,
     sourceSessionId: bundle.manifest.sourceSessionId, nativeHome: target, rolloutPath,
     sha256: bundle.manifest.hash, byteLength: bundle.manifest.byteLength,
     sourceVersion: bundle.manifest.sourceVersion, runtimeVersion: metadata.payload.cli_version, os: process.platform,
-    desktopUi: 'unverified', nativeBackend: 'fixture-tested',
-    limitation: 'Only this archived rollout was restored. Associated materials, workspace, credentials and Desktop UI continuation are not restored or verified.' };
+    desktopUi: cli ? 'not-applicable' : 'unverified', nativeBackend: 'fixture-tested', source: bundle.manifest.source,
+    limitation: 'Only this archived rollout was restored. Associated materials, workspace and credentials are not restored. Desktop UI continuation remains unverified.' };
   await durableFile(join(target, 'restore-receipt.json'), JSON.stringify(result, null, 2));
   await unlink(join(target, '.skynet-restore-incomplete'));
   await syncDirectory(target); await syncDirectory(dirname(target));

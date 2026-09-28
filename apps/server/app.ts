@@ -91,7 +91,7 @@ export async function createApp(options: { db: Database; rawDirectory: string; w
     const result = await db.query(`SELECT * FROM (
       SELECT DISTINCT ON (s.device_id,s.source_session_id) s.id,e.name AS employee,s.source_session_id,
         s.manifest->>'project' AS project,s.committed_at,s.hash,(s.manifest->>'byteLength')::integer AS byte_length,
-        s.manifest->>'sourceVersion' AS source_version,s.manifest->>'sourceOs' AS source_os
+        s.manifest->>'sourceVersion' AS source_version,s.manifest->>'sourceOs' AS source_os,s.manifest->>'source' AS source
       FROM snapshots s JOIN devices d ON d.id=s.device_id JOIN employees e ON e.id=d.employee_id
       ORDER BY s.device_id,s.source_session_id,s.committed_at DESC,s.id DESC
     ) latest ORDER BY committed_at DESC LIMIT 100`);

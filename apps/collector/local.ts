@@ -1,34 +1,30 @@
-import { mkdir, open, rename, readFile, readdir, realpath, stat, unlink } from 'node:fs/promises';
+import { mkdir, readFile, readdir, realpath, stat, unlink } from 'node:fs/promises';
 import { createHash, randomUUID } from 'node:crypto';
 import { hostname } from 'node:os';
 import { isAbsolute, join, relative, sep } from 'node:path';
 import { z } from 'zod';
-import { hostEventSchema, manifestSchema, MAX_ARTIFACT_BYTES } from '../../packages/contracts/archive.js';
-import { syncDirectory } from '../../packages/filesystem.js';
+import { hostEventSchema, manifestSchema, MAX_ARTIFACT_BYTES, sourceSchema, type Source } from '../../packages/contracts/archive.js';
+import { atomicJson } from '../../packages/filesystem.js';
+export { atomicJson } from '../../packages/filesystem.js';
+export { recordHook } from './hook.js';
 
 const settingsSchema = z.object({
   server: z.url(), deviceId: z.uuid(), deviceCredential: z.string().min(32),
   nativeRoot: z.string(), sourceVersion: z.string(), sourceOs: z.string(), enrolledAt: z.iso.datetime(),
+  source: sourceSchema.default('codex-desktop'),
 });
 type Settings = z.infer<typeof settingsSchema>;
 type Tracked = { sessionId: string; transcriptPath: string; project: string; qualifiedAt: string; acknowledgedHash?: string };
 const trackedSchema = z.object({ sessionId: z.string(), transcriptPath: z.string(), project: z.string(), qualifiedAt: z.iso.datetime(), acknowledgedHash: z.string().optional() });
 const hash = (bytes: Buffer | string) => createHash('sha256').update(bytes).digest('hex');
 
-export async function atomicJson(path: string, value: unknown) {
-  const temporary = `${path}.${randomUUID()}.tmp`;
-  const handle = await open(temporary, 'wx', 0o600);
-  try { await handle.writeFile(JSON.stringify(value)); await handle.sync(); } finally { await handle.close(); }
-  await rename(temporary, path);
-  await syncDirectory(join(path, '..'));
-}
 async function readJson(path: string) { return JSON.parse(await readFile(path, 'utf8')); }
 
-export async function setup(state: string, input: { server: string; enrollmentCredential: string; nativeRoot: string; sourceVersion: string; sourceOs: string }) {
+export async function setup(state: string, input: { server: string; enrollmentCredential: string; nativeRoot: string; sourceVersion: string; sourceOs: string; source?: Source }) {
   await mkdir(state, { recursive: true, mode: 0o700 });
   try {
     const existing = settingsSchema.parse(await readJson(join(state, 'settings.json')));
-    if (existing.server !== input.server || existing.nativeRoot !== await realpath(input.nativeRoot)) throw new Error('This state is already bound to another server or native root');
+    if (existing.server !== input.server || existing.nativeRoot !== await realpath(input.nativeRoot) || existing.source !== (input.source ?? 'codex-desktop')) throw new Error('This state is already bound to another server, source, or native root');
     return { deviceId: existing.deviceId, state: 'already-bound' };
   } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
   const server = new URL(input.server);
@@ -44,17 +40,10 @@ export async function setup(state: string, input: { server: string; enrollmentCr
   if (!response.ok) throw new Error(`Enrollment failed (${response.status})`);
   const result = z.object({ deviceId: z.uuid(), deviceCredential: z.string() }).parse(await response.json());
   const settings = settingsSchema.parse({ ...result, server: input.server, nativeRoot,
-    sourceVersion: input.sourceVersion, sourceOs: input.sourceOs, enrolledAt: new Date().toISOString() });
+    source: input.source, sourceVersion: input.sourceVersion, sourceOs: input.sourceOs, enrolledAt: new Date().toISOString() });
   await atomicJson(join(state, 'settings.json'), settings);
   await mkdir(join(state, 'spool'), { mode: 0o700, recursive: true });
   return { deviceId: result.deviceId, state: 'bound', capability: 'unverified' };
-}
-
-export async function recordHook(state: string, event: unknown) {
-  // No imports with network side effects, network request, source scan, or transcript read here.
-  const input = hostEventSchema.parse(event);
-  await mkdir(join(state, 'spool'), { recursive: true, mode: 0o700 });
-  await atomicJson(join(state, 'spool', `${randomUUID()}.json`), { event: input, observedAt: new Date().toISOString() });
 }
 
 async function qualifiedPath(settings: Settings, transcriptPath: string) {
@@ -108,8 +97,9 @@ export async function collectOnce(state: string) {
       // Read identity from the source artifact, never accept a hook pointing at another session.
       const metadata = JSON.parse(bytes.toString('utf8').split('\n')[0]!);
       if (metadata.type !== 'session_meta' || metadata.payload?.id !== source.sessionId) throw new Error('Native session identity mismatch');
-      const manifest = manifestSchema.parse({ protocolVersion: 1, sourceSessionId: source.sessionId, source: 'codex-desktop',
-        sourceVersion: settings.sourceVersion, sourceOs: settings.sourceOs, project: source.project,
+      const sourceVersion = settings.source === 'codex-cli' ? z.string().min(1).max(256).parse(metadata.payload.cli_version) : settings.sourceVersion;
+      const manifest = manifestSchema.parse({ protocolVersion: 1, sourceSessionId: source.sessionId, source: settings.source,
+        sourceVersion, sourceOs: settings.sourceOs, project: source.project,
         hash: artifactHash, byteLength: bytes.length, qualifiedAt: source.qualifiedAt, capability: 'unverified' });
       await send(settings, `/api/chunks/${artifactHash}`, { method: 'PUT', headers: { 'Content-Type': 'application/octet-stream' }, body: new Uint8Array(bytes) });
       const response = await send(settings, '/api/snapshots', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(manifest) });

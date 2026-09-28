@@ -1,6 +1,7 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { createRoot } from 'react-dom/client';
 import type { EvidenceLine, Manifest, SessionSummary } from '../../packages/contracts/archive.js';
+import { sourceLabel } from '../../packages/contracts/archive.js';
 import './style.css';
 
 type Detail = { snapshotId: string; employee: string; manifest: Manifest; committedAt: string; events: EvidenceLine[];
@@ -93,26 +94,30 @@ function App() {
         {busy && <p role="status">正在读取存档…</p>}
         {!busy && sessions.length === 0 && <p className="muted">还没有已提交的会话。后台上传后刷新；暂存材料不会显示为已存档。</p>}
         <nav>{sessions.map(session => <a key={session.id} href={`#${session.id}`} className={`session ${selected === session.id ? 'selected' : ''}`} aria-current={selected === session.id ? 'page' : undefined}>
-          <strong>{session.employee}</strong><span className="project">{session.project || '未归类项目'}</span><small>{date(session.committed_at)}</small><span className="badge">原件已提交</span></a>)}</nav>
+          <strong>{session.employee}</strong><span>{sourceLabel(session.source)}</span><span className="project">{session.project || '未归类项目'}</span><small>{date(session.committed_at)}</small><span className="badge">原件已提交</span></a>)}</nav>
         <p className="muted small">最多显示最近 100 条会话。</p></aside>
         <article aria-label="会话详情">{!selected ? <div className="empty"><h2>选择一条会话</h2><p>阅读消息、工具结果与对应原件位置。</p></div> : detailLoading ? <p role="status">正在读取会话…</p> : detailError ? <>
           <p className="error" role="alert">{detailError}</p><button onClick={() => setDetailRetry(value => value + 1)}>重试读取会话</button>
         </> : detail && <>
-          <div className="detail-heading"><div><p className="eyebrow">{detail.employee} · Codex Desktop</p><h2>{detail.manifest.project || '未归类项目'}</h2></div><button disabled={exporting} onClick={() => download('raw')}>下载原件</button></div>
+          <div className="detail-heading"><div><p className="eyebrow">{detail.employee} · {sourceLabel(detail.manifest.source)}</p><h2>{detail.manifest.project || '未归类项目'}</h2></div><button disabled={exporting} onClick={() => download('raw')}>下载原件</button></div>
           <dl><div><dt>提交时间</dt><dd>{date(detail.committedAt)}</dd></div><div><dt>来源环境</dt><dd>{detail.manifest.sourceVersion} / {detail.manifest.sourceOs}</dd></div>
             <div><dt>存档范围</dt><dd>{detail.manifest.byteLength.toLocaleString()} 字节 · 当前收到的单个原件</dd></div><div><dt>SHA-256</dt><dd className="hash">{detail.manifest.hash}</dd></div></dl>
           {(detail.unrecognizedLines > 0 || detail.partialLine) && <p className="notice">{detail.unrecognizedLines} 行未解析{detail.partialLine ? '，另有未闭合的末行' : ''}。全部字节仍保存在原件中。</p>}
           <section className="recovery" aria-label="导出与会话找回"><h3>导出与会话找回</h3>
             <p>{detail.recovery.limitation}</p>
-            <p className="muted small">原生运行时：{detail.recovery.nativeRuntimeVersion ?? '未识别'}。{detail.recovery.nativeBackend === 'fixture-tested' ? '相同版本的后端合成续聊已有测试；Desktop UI 仍待验证。' : '该来源版本尚无原生续聊验证记录。'}</p>
+            <p className="muted small">原生运行时：{detail.recovery.nativeRuntimeVersion ?? '未识别'}。{detail.recovery.nativeBackend === 'fixture-tested' ? '相同版本的原生运行时合成续聊已有测试；支持范围以该来源的验证记录为准。' : '该来源版本尚无原生续聊验证记录。'}</p>
             <div className="export-actions"><button disabled={exporting} onClick={() => download('readable')}>导出完整可读材料</button>
               <button disabled={exporting} onClick={() => download('recovery')}>下载恢复包</button></div>
             <p className="muted small">恢复仅允许新建隔离目录，并检查来源、目标版本、操作系统、长度与哈希。现有会话不会被覆盖；代码工作区和登录状态不在恢复范围内。</p>
             {detail.recovery.preparation !== 'candidate' && <p className="notice">当前来源或快照不满足已测恢复准备条件。可下载保存；恢复命令会给出具体原因。</p>}
-            <details><summary>查看恢复准备步骤</summary><ol><li>保存恢复包，记录上方来源版本；保留原件。</li>
+            {detail.manifest.source === 'codex-cli' ? <details><summary>查看 CLI 恢复准备步骤</summary><ol>
+              <li>保存恢复包，在 Windows x64 的独立测试环境安装相同 CLI 0.157.1。</li>
+              <li>运行 restore，指定包、全新隔离目录、--source-version 0.157.1 和 CLI 绝对路径；校验失败时不写已有目标。</li>
+              <li>以恢复目录作为新 CODEX_HOME，在自己的工作区使用原会话 ID 执行原生 resume。配置与登录独立设置；源码、依赖和附件不由此包恢复。</li>
+              <li>工具返回值及代码变更仅反映原会话可提供的材料；未记录或未解析的内容不代表没有发生。</li></ol></details> : <details><summary>查看恢复准备步骤</summary><ol><li>保存恢复包，记录上方来源版本；保留原件。</li>
               <li>在独立测试账户或测试设备安装相同 Desktop 与内置运行时版本。仅有 Windows x64、Desktop 26.924.2738.0、运行时 0.158.0-alpha.2.1 的后端测试记录。</li>
               <li>按部署文档运行 collector 的 restore 命令，指定包文件、全新目录、Desktop 版本及原生运行时路径。</li>
-              <li>检查恢复回执。Desktop 中打开并继续原会话的步骤仍待验证，当前不能据此确认 Desktop 找回成功。</li></ol></details>
+              <li>检查恢复回执。Desktop 中打开并继续原会话的步骤仍待验证，当前不能据此确认 Desktop 找回成功。</li></ol></details>}
             {(exporting || exportStatus) && <p role="status">{exporting ? '正在准备下载…' : exportStatus}</p>}
             {exportError && <p className="error" role="alert">{exportError} 可重新点击导出重试。</p>}
           </section>
