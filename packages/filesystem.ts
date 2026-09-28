@@ -1,13 +1,15 @@
-import { open, rename } from 'node:fs/promises';
+import { open, rename, unlink } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import { dirname } from 'node:path';
 
 export async function atomicJson(path: string, value: unknown) {
   const temporary = `${path}.${randomUUID()}.tmp`;
-  const handle = await open(temporary, 'wx', 0o600);
-  try { await handle.writeFile(JSON.stringify(value)); await handle.sync(); } finally { await handle.close(); }
-  await rename(temporary, path);
-  await syncDirectory(dirname(path));
+  try {
+    const handle = await open(temporary, 'wx', 0o600);
+    try { await handle.writeFile(JSON.stringify(value)); await handle.sync(); } finally { await handle.close(); }
+    await rename(temporary, path);
+    await syncDirectory(dirname(path));
+  } finally { await unlink(temporary).catch(() => undefined); }
 }
 
 export async function syncDirectory(directory: string) {

@@ -8,6 +8,8 @@ import { hostEventSchema } from '../../packages/contracts/archive.js';
 import { identitySchema, installationSchema, jsonFile, optionalJson } from './install-state.js';
 import { askRuntime, ownRuntime, releaseRuntime } from './runtime-control.js';
 import { autostartStatus } from './autostart.js';
+import { CaptureMonitor } from './capture-health.js';
+import { reportDeliveryHealth } from './health.js';
 export { ensureRunning } from './supervisor.js';
 
 async function routeCodex(state: string, installation: ReturnType<typeof installationSchema.parse>) {
@@ -71,9 +73,19 @@ export async function runInstalled(state: string) {
       const errors: string[] = [];
       try {
         const installation = installationSchema.parse(await jsonFile(join(state, 'installation.json')));
-        errors.push(...await routeCodex(state, installation));
+        try { errors.push(...await routeCodex(state, installation)); } catch { errors.push('Codex routing unavailable; queued events retained'); }
         for (const client of installation.clients.filter(item => item.configured)) {
-          try { await collectOnce(join(state, 'sources', client.source)); } catch { errors.push(`Collector unavailable: ${client.source}; state retained`); }
+          const sourceState = join(state, 'sources', client.source);
+          try { await collectOnce(sourceState); } catch (error) {
+            errors.push(`Collector unavailable: ${client.source}; state retained`);
+            // A source settings ACL may fail while the shared private identity is
+            // still readable. Report that scope without reading any source bytes.
+            try {
+              const monitor = await CaptureMonitor.open(sourceState); monitor.fail(error);
+              const identity = identitySchema.parse(await jsonFile(join(state, 'identity.json')));
+              await reportDeliveryHealth(sourceState, { ...identity, source: client.source }, undefined, await monitor.save());
+            } catch { /* No readable identity/network: existing server status expires honestly. */ }
+          }
         }
         const request = await optionalJson(join(state, 'health-request.json'));
         if (request || Date.now() >= nextHealth) {
@@ -96,7 +108,7 @@ export async function runInstalled(state: string) {
           if (request) await unlink(join(state, 'health-request.json')).catch(() => undefined);
         }
       } catch { errors.push('Background configuration could not be read; retained local state needs inspection'); }
-      await atomicJson(join(state, 'runtime.json'), { pid: process.pid, instance, checkedAt: new Date().toISOString(), errors });
+      await atomicJson(join(state, 'runtime.json'), { pid: process.pid, instance, checkedAt: new Date().toISOString(), errors }).catch(() => undefined);
       if (!stop.signal.aborted) await setTimeout(1000, undefined, { signal: stop.signal }).catch(() => undefined);
     } while (!stop.signal.aborted);
   } finally { await unlink(lockPath).catch(() => undefined); await releaseRuntime(lease); if (process.connected) process.disconnect(); }
@@ -114,10 +126,11 @@ export async function installedStatus(state: string) {
     const tracked = await optionalJson(join(sourceState, 'tracked.json')) ?? [];
     const capture = await optionalJson(join(sourceState, 'status.json'));
     const gap = await optionalJson(join(sourceState, 'hook-gap.json'));
+    const coverage = await optionalJson(join(sourceState, 'capture-health.json'));
     const queued = await readdir(join(sourceState, 'spool')).catch(() => []);
     clients.push({ ...client, trust: !client.configured ? 'not-configured' : tracked.length ? 'host-event-observed; all-hook-trust-not-asserted' : 'pending-host-confirmation',
       firstEvent: tracked.length ? tracked.map((item: any) => item.qualifiedAt).sort()[0] : null,
-      confirmedUploads: tracked.filter((item: any) => item.acknowledgedSnapshotId).length, queuedEvents: queued.filter(file => file.endsWith('.json')).length, capture, gap });
+      confirmedUploads: tracked.filter((item: any) => item.acknowledgedSnapshotId).length, queuedEvents: queued.filter(file => file.endsWith('.json')).length, capture, gap, coverage });
   }
   return { installed: true, deviceId: identity.deviceId, deploymentId: installation.deploymentId, stateDirectory: state,
     background: supervisor?.worker?.instance === worker?.instance && worker?.supervisorInstance === supervisor?.instance && worker?.state === 'running' ? 'running' : 'unavailable', runtime,

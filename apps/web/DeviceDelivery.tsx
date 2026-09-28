@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react';
 import type { DeliveryHealth, DeliveryFailure } from '../../packages/contracts/delivery.js';
 import { sourceLabel, type Source } from '../../packages/contracts/archive.js';
+import { CaptureCoverage, type Coverage } from './CaptureCoverage.js';
 
 type Device = { id: string; name: string; employee: string; active: boolean; lastSeenAt: string | null; connected: boolean | null;
-  sources: { source: Source; receivedAt: string; report: DeliveryHealth }[] };
+  sources: { source: Source; receivedAt: string; report: DeliveryHealth }[]; capture: Coverage[] };
 const date = (value: string | null) => value ? new Date(value).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false }) : '尚无记录';
 const bytes = (value: number) => `${(value / 1024 / 1024).toFixed(2)} MiB`;
 const reasons: Record<DeliveryFailure['kind'], string> = { disconnected: '网络不可达', 'rate-limited': '服务器限流',
@@ -31,8 +32,13 @@ export function DeviceDelivery({ token, onUnauthorized }: { token: string; onUna
     {devices.map(device => <article className="device-delivery" key={device.id}><h2>{device.employee} · {device.name}</h2>
       <p><strong>{!device.active ? '已停用' : device.connected ? '最近连接正常' : device.lastSeenAt ? '设备离线或状态已过期' : '尚未收到连接确认'}</strong> · 最后连接：{date(device.lastSeenAt)}</p>
       {!device.sources.length && <p>尚无来源同步报告，不能据此判断没有活动。</p>}
+      {device.capture.map(coverage => <div key={`${coverage.source}-${refresh}`}><h3>{sourceLabel(coverage.source as Source)}</h3><CaptureCoverage initial={coverage}
+        path={`/api/devices/${device.id}/capture-status?source=${coverage.source}`} request={async path => {
+          const response = await fetch(path, { headers: { Authorization: `Bearer ${token}` } }); if (response.status === 401) onUnauthorized(); return response;
+        }} /></div>)}
       {device.sources.map(({ source, receivedAt, report }) => <section key={source} aria-label={`${sourceLabel(source)}同步`}>
         <h3>{sourceLabel(source)}</h3><p>状态收到时间：{date(receivedAt)}</p>
+        <p>{report.pendingSnapshots ? '同步中：存在未确认材料' : '当前报告没有待确认材料；不代表没有活动或完整存档。'}</p>
         <dl className="delivery-facts"><div><dt>待确认存档</dt><dd>{report.pendingSnapshots} 份 · {bytes(report.pendingBytes)}</dd></div>
           <div><dt>最早积压</dt><dd>{date(report.oldestPendingAt)}</dd></div><div><dt>最后成功上传</dt><dd>{date(report.lastSuccessAt)}</dd></div>
           <div><dt>连续失败</dt><dd>{report.attempts} 次</dd></div><div><dt>下次重试</dt><dd>{date(report.nextAttemptAt)}</dd></div>

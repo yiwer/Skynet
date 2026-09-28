@@ -7,6 +7,7 @@ import { activityFor, beijingDate } from '../../packages/activity.js';
 import { manifestSchema } from '../../packages/contracts/archive.js';
 import { createRecoveryPackage, recoveryInfo } from '../../packages/recovery.js';
 import { QueryCache } from './query-cache.js';
+import { readCaptureHealth } from './capture-health.js';
 
 export const exportFormat = z.enum(['raw', 'readable', 'recovery']);
 export type ExportFormat = z.infer<typeof exportFormat>;
@@ -70,6 +71,7 @@ export function archiveQuery(db: Database, raw: RawStore) {
     const { record, evidence, activity, recovery } = await evidenceCache.get(`${id}:${beijingDate(new Date())}`, () => parsed(id));
     return { snapshotId: record.id, employee: record.employee, deviceId: record.device_id, manifest: record.manifest,
       committedAt: record.committed_at, state: 'committed', backup: 'single-copy', ...evidence, recovery,
+      captureHealth: await readCaptureHealth(db, record.device_id, record.source, record.source_session_id),
       activity: activity.activity, events: activity.events.slice(offset, offset + 100), total: evidence.events.length,
       nextOffset: offset + 100 < evidence.events.length ? offset + 100 : null };
   }
@@ -86,11 +88,12 @@ export function archiveQuery(db: Database, raw: RawStore) {
       if (nextText === event.text.length) { index++; nextText = 0; }
       if (!remaining || events.length === 25 || nextText !== 0) break;
     }
-    const { events: _events, nextOffset: _next, manifest, recovery, activity, ...metadata } = result;
+    const { events: _events, nextOffset: _next, manifest, recovery, activity, captureHealth, ...metadata } = result;
     const { capture, ...manifestHeader } = manifestSchema.parse(manifest);
     const { artifacts, gaps, lineage, ...recoveryHeader } = recovery;
     const { days, ...activityHeader } = activity;
     return { ...metadata, manifest: manifestHeader,
+      captureHealth: { report: captureHealth.report, receivedAt: captureHealth.receivedAt, faultCount: captureHealth.total, detailsTool: 'read_capture_status' },
       recovery: { ...recoveryHeader, artifactCount: artifacts.length, gapCount: gaps.length, lineageCount: lineage.length, detailsTool: 'read_manifest' },
       activity: { ...activityHeader, sourceDayCount: days.length, sourceDaysLocation: 'each evidence event sourceDate; full Web snapshot detail' },
       capture: capture ? {
@@ -99,6 +102,10 @@ export function archiveQuery(db: Database, raw: RawStore) {
     } : null, manifestPaging: { tool: 'read_manifest', snapshotId: id, textOffset: 0 },
     events, next: index < result.total ? { offset: index, textOffset: nextText } : null,
       evidenceLocation: 'immutable snapshotId + original line; textOffset uses UTF-16 code units' };
+  }
+  async function captureStatus(id: string, offset = 0) {
+    const record = await snapshot(id);
+    return { snapshotId: id, ...await readCaptureHealth(db, record.device_id, record.source, record.source_session_id, offset) };
   }
   async function manifestPage(id: string, textOffset = 0) {
     const record = await snapshot(id); const text = JSON.stringify(record.manifest);
@@ -182,6 +189,6 @@ export function archiveQuery(db: Database, raw: RawStore) {
     return { material: file.material, context: 'associated-context-only', encoding: file.material.mediaType === 'binary' ? 'base64' : 'utf8',
       text: text.slice(offset, end), nextOffset: end < text.length ? end : null };
   }
-  return { sessions, snapshot, detail, evidencePage, manifestPage, exported, prepareExport, exportPage, history, material, materialPage };
+  return { sessions, snapshot, detail, evidencePage, manifestPage, exported, prepareExport, exportPage, history, material, materialPage, captureStatus };
 }
 export type ArchiveQuery = ReturnType<typeof archiveQuery>;

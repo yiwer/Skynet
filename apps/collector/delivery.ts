@@ -104,14 +104,14 @@ export class DeliveryQueue {
       // Publish only a complete blob. A killed partial write cannot poison the
       // immutable hash name and permanently block the next capture attempt.
       const temporary = join(this.directory, 'blobs', `.pending-${randomUUID()}`);
-      const handle = await open(temporary, 'wx', 0o600);
-      try { await handle.writeFile(bytes); await handle.sync(); } finally { await handle.close(); }
       try {
+        const handle = await open(temporary, 'wx', 0o600);
+        try { await handle.writeFile(bytes); await handle.sync(); } finally { await handle.close(); }
         await link(temporary, join(this.directory, 'blobs', hash)).catch(async error => {
           if (error.code !== 'EEXIST') throw error;
           await this.blob(hash, length);
         });
-      } finally { await unlink(temporary); }
+      } finally { await unlink(temporary).catch(() => undefined); }
     }
     await syncDirectory(join(this.directory, 'blobs'));
     const entry = pendingSchema.parse({ id: randomUUID(), sequence: (this.pending.at(-1)?.sequence ?? 0) + 1,

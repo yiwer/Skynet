@@ -94,7 +94,7 @@ export async function restorePackage(options: { packagePath: string; target: str
       if (!material.sourceSessionId || !['parent-transcript', 'child-transcript'].includes(material.role)) throw new Error('Invalid associated rollout role');
       destination = codexPath(bytes, material.sourceSessionId, runtimeVersion); mapping = 'native-rollout';
     } else if (isClaude && material.placement === 'claude-session') {
-      if (material.role === 'subagent' && /^subagents\/agent-[a-zA-Z0-9-]+\.jsonl$/.test(material.name)
+        if (material.role === 'subagent' && /^subagents\/agent-[a-zA-Z0-9-]+\.(?:jsonl|meta\.json)$/.test(material.name)
         || material.role === 'tool-result' && /^tool-results\/[^/]+$/.test(material.name)) {
         destination = ['projects', 'skynet-restored', bundle.manifest.sourceSessionId, ...material.name.split('/')]; mapping = 'native-sidecar; continuation unverified';
       }

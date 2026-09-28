@@ -33,6 +33,10 @@ test('HTTPS OAuth consent, per-request revocation, MCP/Web evidence and complete
     assert.equal((await sandbox.api(`/api/chunks/${manifest.hash}`, enrollment.deviceCredential, { method: 'PUT', headers: { 'Content-Type': 'application/octet-stream' }, body: bytes })).status, 201);
     const commit = await (await sandbox.api('/api/snapshots', enrollment.deviceCredential, json(manifest))).json();
     assert.ok(commit.snapshotId);
+    const captureFault = { id: randomUUID(), code: 'source-missing', scope: 'session', sessionId: manifest.sourceSessionId,
+      firstObservedAt: new Date().toISOString(), lastObservedAt: new Date().toISOString(), recoveredAt: null, coverage: 'unverified-range' };
+    assert.equal((await sandbox.api('/api/devices/health', enrollment.deviceCredential, json({ nonce: randomUUID(), source: manifest.source,
+      capture: { checkedAt: new Date().toISOString(), observation: 'host-event-observed', locallyPersisted: true, faults: [captureFault] } }))).status, 200);
 
     for (const token of [undefined, enrollment.deviceCredential, reader.readerCredential, employee.enrollmentCredential]) {
       const denied = await sandbox.api('/mcp', token, json({ jsonrpc: '2.0', id: 1, method: 'tools/list' }));
@@ -82,13 +86,15 @@ test('HTTPS OAuth consent, per-request revocation, MCP/Web evidence and complete
     client = new Client({ name: 'public-product-test', version: '1' });
     await client.connect(new StreamableHTTPClientTransport(new URL(resource), { fetch: sandbox.fetchTls,
       requestInit: { headers: { Authorization: `Bearer ${tokens.access_token}` } } }));
-    assert.equal((await client.listTools()).tools.length, 6);
+      assert.equal((await client.listTools()).tools.length, 7);
     async function tool(name: string, args: Record<string, unknown>) {
       const result = await client!.callTool({ name, arguments: args });
       assert.notEqual(result.isError, true, JSON.stringify(result)); assert.ok(Buffer.byteLength(JSON.stringify(result)) <= 96 * 1024);
       return JSON.parse((result.content as { text: string }[])[0]!.text);
     }
-    const sessions = await tool('list_sessions', { limit: 1 }); assert.equal(sessions.sessions[0].id, commit.snapshotId);
+      const sessions = await tool('list_sessions', { limit: 1 }); assert.equal(sessions.sessions[0].id, commit.snapshotId);
+      const coverage = await tool('read_capture_status', { snapshotId: commit.snapshotId }); assert.equal(coverage.faults[0].id, captureFault.id);
+      assert.deepEqual(coverage, await (await sandbox.api(`/api/snapshots/${commit.snapshotId}/capture-status`, reader.readerCredential)).json());
     assert.deepEqual(sessions, await (await sandbox.api('/api/sessions?limit=1', reader.readerCredential)).json());
     let position = { offset: 0, textOffset: 0 }; const fragments: any[] = []; let pages = 0;
     while (true) {

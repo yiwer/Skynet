@@ -49,6 +49,15 @@ export async function migrate(db: Database) {
       device_id uuid NOT NULL REFERENCES devices(id), source text NOT NULL,
       report jsonb NOT NULL, received_at timestamptz NOT NULL DEFAULT now(), PRIMARY KEY(device_id,source)
     );
+    CREATE TABLE IF NOT EXISTS device_capture_health (
+      device_id uuid NOT NULL REFERENCES devices(id), source text NOT NULL,
+      report jsonb NOT NULL, received_at timestamptz NOT NULL DEFAULT now(), PRIMARY KEY(device_id,source)
+    );
+    CREATE TABLE IF NOT EXISTS capture_faults (
+      device_id uuid NOT NULL REFERENCES devices(id), source text NOT NULL, id uuid NOT NULL,
+      session_id text, report jsonb NOT NULL, received_at timestamptz NOT NULL DEFAULT now(), PRIMARY KEY(device_id,source,id)
+    );
+    CREATE INDEX IF NOT EXISTS capture_faults_session ON capture_faults(device_id,source,session_id);
     ALTER TABLE snapshots ADD COLUMN IF NOT EXISTS source text GENERATED ALWAYS AS (manifest->>'source') STORED;
     CREATE UNIQUE INDEX IF NOT EXISTS snapshots_source_identity ON snapshots(device_id,source,source_session_id,manifest_hash);
     CREATE TABLE IF NOT EXISTS snapshot_uploads (

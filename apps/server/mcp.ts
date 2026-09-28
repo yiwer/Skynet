@@ -31,6 +31,8 @@ export async function registerMcp(app: FastifyInstance, db: Database, archive: A
     mcp.registerTool('read_snapshot', { description: '分页读取快照原文及证据行、来源时间、完整性和恢复能力。大工具输出通过 next.textOffset 继续，零丢字。',
       annotations, inputSchema: { snapshotId, offset, textOffset: offset } },
     input => result(() => archive.evidencePage(input.snapshotId, input.offset, input.textOffset)));
+    mcp.registerTool('read_capture_status', { description: '分页核查快照所在会话及来源的后续采集故障与修复状态。这是动态覆盖报告，不修改快照原件；故障恢复不证明缺失时段完整。',
+      annotations, inputSchema: { snapshotId, offset } }, input => result(() => archive.captureStatus(input.snapshotId, input.offset)));
     mcp.registerTool('read_manifest', { description: '分页读取不可变快照的完整清单 JSON，包括全部材料 ID、缺口和父子谱系。拼接 text 后解析，不把关联上下文算新增活动。',
       annotations, inputSchema: { snapshotId, textOffset: offset } },
     input => result(() => archive.manifestPage(input.snapshotId, input.textOffset)));

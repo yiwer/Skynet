@@ -12,6 +12,8 @@ import { appendSnapshotSchema, hashSchema, manifestSchema, sourceSchema } from '
 import { HttpError, identities } from './identities.js';
 import { archiveWriter } from './archive-write.js';
 import { enrollDevice } from './enrollment.js';
+import { captureHealthSchema } from '../../packages/contracts/capture-health.js';
+import { saveCaptureHealth, readCaptureHealth } from './capture-health.js';
 
 export async function createApp(options: { db: Database; rawDirectory: string; webDirectory?: string; publicOrigin?: string }) {
   const { db } = options;
@@ -56,11 +58,12 @@ export async function createApp(options: { db: Database; rawDirectory: string; w
   app.get('/health', async () => ({ status: 'ok' }));
   app.post('/api/devices/health', { onRequest: deviceGuard }, async request => {
     const owner = await device(request.headers.authorization);
-    const { nonce, source, delivery } = z.object({ nonce: z.uuid(), source: sourceSchema.optional(), delivery: deliveryHealthSchema.optional() }).strict()
-      .refine(value => Boolean(value.source) === Boolean(value.delivery), 'Source and delivery must be reported together').parse(request.body);
+    const { nonce, source, delivery, capture } = z.object({ nonce: z.uuid(), source: sourceSchema.optional(), delivery: deliveryHealthSchema.optional(), capture: captureHealthSchema.optional() }).strict()
+      .refine(value => Boolean(value.source) === Boolean(value.delivery || value.capture), 'Source and report must be provided together').parse(request.body);
     await db.query(`INSERT INTO device_health(device_id) VALUES($1) ON CONFLICT(device_id) DO UPDATE SET received_at=now()`, [owner.id]);
     if (source && delivery) await db.query(`INSERT INTO device_delivery_health(device_id,source,report) VALUES($1,$2,$3)
       ON CONFLICT(device_id,source) DO UPDATE SET report=EXCLUDED.report,received_at=now()`, [owner.id, source, delivery]);
+    if (source && capture) await saveCaptureHealth(db, owner.id, source, capture);
     return { deviceId: owner.id, nonce, checkedAt: new Date().toISOString(), state: 'connected' };
   });
   app.get('/api/devices/status', { onRequest: readerGuard }, async request => {
@@ -70,7 +73,10 @@ export async function createApp(options: { db: Database; rawDirectory: string; w
       FROM devices d JOIN employees e ON e.id=d.employee_id LEFT JOIN device_health h ON h.device_id=d.id ORDER BY e.name,d.name,d.id LIMIT 51 OFFSET $1`, [offset]);
     const devices = result.rows.slice(0, 50);
     const reports = await db.query(`SELECT device_id AS "deviceId",source,report,received_at AS "receivedAt" FROM device_delivery_health WHERE device_id=ANY($1::uuid[]) ORDER BY source`, [devices.map(item => item.id)]);
+    const captureSources = await db.query(`SELECT device_id,source FROM device_capture_health WHERE device_id=ANY($1::uuid[]) ORDER BY source`, [devices.map(item => item.id)]);
+    const captures = await Promise.all(captureSources.rows.map(async item => ({ deviceId: item.device_id, ...await readCaptureHealth(db, item.device_id, item.source) })));
     return { checkedAt: new Date().toISOString(), devices: devices.map(item => ({ ...item,
+      capture: captures.filter(report => report.deviceId === item.id),
       sources: reports.rows.filter(report => report.deviceId === item.id).map(({ deviceId: _id, ...report }) => report) })),
       nextOffset: result.rows.length > 50 ? offset + 50 : null };
   });
@@ -135,6 +141,14 @@ export async function createApp(options: { db: Database; rawDirectory: string; w
 
   app.get('/api/me', { onRequest: readerGuard }, async request => reader(request.headers.authorization));
   const archive = archiveQuery(db, raw);
+  app.get('/api/snapshots/:id/capture-status', { onRequest: readerGuard }, async request => {
+    const { offset } = z.object({ offset: z.coerce.number().int().min(0).default(0) }).parse(request.query);
+    return archive.captureStatus((request.params as { id: string }).id, offset);
+  });
+  app.get('/api/devices/:id/capture-status', { onRequest: readerGuard }, async request => {
+    const { source, offset } = z.object({ source: sourceSchema, offset: z.coerce.number().int().min(0).default(0) }).parse(request.query);
+    return readCaptureHealth(db, z.uuid().parse((request.params as { id: string }).id), source, undefined, offset);
+  });
   app.get('/api/sessions', { onRequest: readerGuard }, async request => {
     const query = z.object({ cursor: z.string().max(1024).optional(), limit: z.coerce.number().int().min(1).max(100).default(100) }).parse(request.query);
     return archive.sessions(query.cursor, query.limit);
