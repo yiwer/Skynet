@@ -1,7 +1,5 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
 import { dirname, join, delimiter } from 'node:path';
 import { chmod, mkdir, readFile, readdir, rename, stat, writeFile } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
@@ -99,9 +97,20 @@ test('offline npm package with scripts disabled → one key setup → owned hook
     const conflict = structuredClone(hooks); conflict.hooks.UserPromptSubmit.at(-1).hooks[0].timeout = 9;
     await writeFile(join(codex, 'hooks.json'), JSON.stringify(conflict));
     await assert.rejects(installed.run('setup'), /ownership conflict/); assert.deepEqual(JSON.parse(await readFile(join(codex, 'hooks.json'), 'utf8')), conflict);
+    await writeFile(join(codex, 'hooks.json'), '{invalid-json');
+    await assert.rejects(installed.run('setup'), /invalid JSON/); assert.equal(await readFile(join(codex, 'hooks.json'), 'utf8'), '{invalid-json');
+    await writeFile(join(codex, 'hooks.json'), JSON.stringify(hooks));
+    const changedHome = { ...env, SKYNET_KEY: undefined, CODEX_HOME: join(home, 'changed-codex') };
+    await assert.rejects(command(process.execPath, [installed.cli, 'setup'], changedHome), /native home changed/);
+    assert.deepEqual(JSON.parse(await readFile(join(state!, 'identity.json'), 'utf8')), identity);
+    const emptyHome = join(sandbox.directory, 'missing key user'); await mkdir(emptyHome);
+    await assert.rejects(command(process.execPath, [installed.cli, 'setup'], { ...env, SKYNET_KEY: undefined,
+      HOME: emptyHome, USERPROFILE: emptyHome, LOCALAPPDATA: join(emptyHome, 'local'), XDG_STATE_HOME: join(emptyHome, 'state'),
+      CODEX_HOME: join(emptyHome, '.codex'), CLAUDE_CONFIG_DIR: join(emptyHome, '.claude') }), /Set the personal SKYNET_KEY/);
     await writeFile(join(sandbox.directory, 'installation-evidence.json'), JSON.stringify({ setupMs: installed.setupMs, packInstallAndSetupMs: installed.packInstallAndSetupMs,
       deviceId: identity.deviceId, backgroundInstance: status.runtime.instance, platform: process.platform, npmIgnoreScripts: true, offlineBundledDependency: true,
-      existingHooksPreserved: true, repeatSetupOneIdentity: true, isolatedSyntheticCapture: true, nativeClient: false, desktop: 'not-validated' }, null, 2));
+      existingHooksPreserved: true, repeatSetupOneIdentity: true, bothSourceDeviceIdVerified: true,
+      isolatedSyntheticCapture: true, nativeClient: false, desktop: 'not-validated' }, null, 2));
     console.log(`Installation evidence: ${sandbox.directory}`);
   } finally { if (state) await stopInstalled(state); await browser?.close(); await sandbox.close(); }
 });
