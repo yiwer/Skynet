@@ -8,6 +8,7 @@ import { join } from 'node:path';
 import { chromium, expect, type Browser } from '@playwright/test';
 import { createSandbox } from './support.js';
 import { sourceSchema } from '../packages/contracts/archive.js';
+import { connect } from '../apps/server/database.js';
 
 const hash = (bytes: Buffer) => createHash('sha256').update(bytes).digest('hex');
 const jsonl = (records: unknown[]) => Buffer.from(records.map(item => JSON.stringify(item)).join('\r\n') + '\r\n');
@@ -147,10 +148,18 @@ test('resuming one old conversation preserves source dates, sends verified appen
       const fallback = JSON.parse(await sandbox.collectorCommand('run', state));
       assert.deepEqual(fallback.errors, []); assert.equal(fallback.appended, 0);
       assert.deepEqual(transfers.filter(t => t.path.startsWith('/api/chunks')).map(t => t.bytes), [last.length, fullBytes.length]);
-      const finalId = (await find())[0].id; assert.deepEqual(await raw(finalId), fullBytes);
+      const beforeRewriteId = (await find())[0].id; assert.deepEqual(await raw(beforeRewriteId), fullBytes);
+      // A rewritten prefix must trigger a full upload; the prior archive is immutable.
+      const rewritten = Buffer.from(fullBytes.toString('utf8').replace('old-context-0', 'old-context-X'));
+      await writeFile(path, rewritten); transfers.length = 0;
+      const rewrite = JSON.parse(await sandbox.collectorCommand('run', state));
+      assert.deepEqual(rewrite.errors, []); assert.equal(rewrite.appended, 0);
+      assert.deepEqual(transfers.filter(t => t.path.startsWith('/api/chunks')).map(t => t.bytes), [rewritten.length]);
+      assert.deepEqual(await raw(beforeRewriteId), fullBytes);
+      const finalId = (await find())[0].id; assert.deepEqual(await raw(finalId), rewritten);
       for (const uncontinued of untouched) await appendFile(uncontinued, '\n');
       assert.equal(JSON.parse(await sandbox.collectorCommand('run', state)).committed, 0);
-      assert.equal((await find()).length, 1); results.push({ snapshotId: finalId, bytes: fullBytes });
+      assert.equal((await find()).length, 1); results.push({ snapshotId: finalId, bytes: rewritten });
     }
     assert.equal((await (await api('/api/sessions')).json()).sessions.length, sourceSchema.options.length);
     const port = Number(new URL(upstream).port); await sandbox.stopServer(); upstream = await sandbox.startServer(port);
@@ -160,6 +169,20 @@ test('resuming one old conversation preserves source dates, sends verified appen
       const secondExport = await (await api(`/api/snapshots/${result.snapshotId}/recovery`)).json();
       assert.deepEqual(Buffer.from(secondExport.artifact.data, 'base64'), result.bytes);
     }
+    // A migrated device's missing registration instant is represented by SQL NULL, not now().
+    const legacy = await (await api('/api/devices/enroll', employee.enrollmentCredential, { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ installationId: randomUUID(), name: 'synthetic pre-migration device' }) })).json();
+    const fixtureDatabase = connect(sandbox.env.DATABASE_URL);
+    try { await fixtureDatabase.query('UPDATE devices SET enrolled_at=NULL WHERE id=$1', [legacy.deviceId]); } finally { await fixtureDatabase.end(); }
+    const previous = await detail(results.at(-1)!.snapshotId); const legacyBytes = results.at(-1)!.bytes;
+    assert.equal((await api(`/api/chunks/${hash(legacyBytes)}`, legacy.deviceCredential, { method: 'PUT', headers: { 'Content-Type': 'application/octet-stream' }, body: new Uint8Array(legacyBytes) })).status, 201);
+    const legacyCommit = await (await api('/api/snapshots', legacy.deviceCredential, { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ...previous.manifest, project: '/synthetic/legacy-boundary', enrolledAt: '1999-01-01T00:00:00.000Z' }) })).json();
+    const legacyDetail = await detail(legacyCommit.snapshotId);
+    assert.equal(legacyDetail.activity.today.counts, null, 'unknown enrollment is not represented by zero activity');
+    assert.equal(legacyDetail.activity.enrolledAt, null); assert.ok(legacyDetail.activity.unknownEnrollmentRecords > 0);
+    assert.equal(legacyDetail.events[0].timestamp, '2000-01-01T15:59:59.000Z');
+    assert.equal(legacyDetail.events[0].context, 'unknown-enrollment');
     browser = await chromium.launch(); const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
     await page.goto(`${upstream}#${results.at(-1)!.snapshotId}`);
     await page.getByLabel('个人读取凭据').fill(reader.readerCredential); await page.getByRole('button', { name: '进入存档' }).click();
@@ -181,6 +204,9 @@ test('resuming one old conversation preserves source dates, sends verified appen
     await page.setViewportSize({ width: 375, height: 900 });
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
     await page.screenshot({ path: join(sandbox.directory, 'history-mobile.png'), fullPage: true });
+    await page.getByRole('link').filter({ hasText: '/synthetic/legacy-boundary' }).click();
+    await expect(activity).toContainText('未知，缺少可信设备接入时间');
+    await expect(page.locator('.message').first()).toContainText('接入边界未知');
     console.log(`History synthetic API/UI evidence: ${sandbox.directory}; host calls are simulated, native-client acceptance is separate.`);
   } finally {
     proxy.closeAllConnections(); await new Promise<void>(resolve => proxy.close(() => resolve()));
