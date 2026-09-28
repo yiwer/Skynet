@@ -1,0 +1,7 @@
+{
+  "name": "skynet-claude",
+  "version": "0.1.0",
+  "description": "Bind the shared Skynet collector from an internal marketplace. Requires Node 24 and local setup.",
+  "author": { "name": "Skynet" },
+  "skills": "./skills/"
+}

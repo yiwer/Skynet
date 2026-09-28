@@ -9,6 +9,7 @@ import { setTimeout } from 'node:timers/promises';
 import { chromium, expect, type Browser } from '@playwright/test';
 import { command, createSandbox } from './support.js';
 import { installAgent, stopInstalled } from './installed-support.js';
+import { installNativePlugins } from './plugin-support.js';
 
 test('normally trusted Codex CLI hooks archive two projects and server-only restore retains native history', { timeout: 240_000 }, async () => {
   const runtime = process.env.SKYNET_CODEX_CLI;
@@ -89,14 +90,16 @@ test('normally trusted Codex CLI hooks archive two projects and server-only rest
     }
     await configure(sourceHome);
     const cliPath = resolve('dist/apps/collector/cli.js');
-    if (!process.env.SKYNET_TEST_INSTALLER) await writeFile(join(sourceHome, 'hooks.json'), JSON.stringify({ hooks: { UserPromptSubmit: [{ hooks: [{ type: 'command',
+    if (!process.env.SKYNET_TEST_INSTALLER && !process.env.SKYNET_TEST_PLUGINS) await writeFile(join(sourceHome, 'hooks.json'), JSON.stringify({ hooks: { UserPromptSubmit: [{ hooks: [{ type: 'command',
       command: `"${process.execPath}" "${cliPath}" hook --state "${state}"`,
       commandWindows: `& '${process.execPath}' '${cliPath}' hook --state '${state}'`, timeout: 3 }] }] } }, null, 2));
     const employee = await sandbox.provision('真实 CLI 合成活动员工');
     const reader = await sandbox.provision('真实 CLI 合成活动读者');
     const origin = await sandbox.startServer();
-    if (process.env.SKYNET_TEST_INSTALLER) {
-      const installed = await installAgent(sandbox.directory, origin, envFor(sourceHome), employee.enrollmentCredential);
+    if (process.env.SKYNET_TEST_INSTALLER || process.env.SKYNET_TEST_PLUGINS) {
+      const installed = process.env.SKYNET_TEST_PLUGINS
+        ? await installNativePlugins(sandbox.directory, origin, envFor(sourceHome), employee.enrollmentCredential, 'codex')
+        : await installAgent(sandbox.directory, origin, envFor(sourceHome), employee.enrollmentCredential);
       installedState = installed.status.stateDirectory; state = join(installedState!, 'sources', 'codex-cli');
       assert.equal(installed.status.clients.find((item: any) => item.source === 'codex-cli').detected, true);
     } else await sandbox.collectorCommand('setup', state, { server: origin, enrollmentCredential: employee.enrollmentCredential,
@@ -148,7 +151,7 @@ test('normally trusted Codex CLI hooks archive two projects and server-only rest
     await writeFile(join(sandbox.directory, 'codex-cli-native-evidence.json'), JSON.stringify({ at: new Date().toISOString(),
       source: 'codex-cli', version: '0.157.1', os: 'win32', arch: 'x64', normalHookReview: true, twoProjectsArchived: true,
       serverOnlyRestore: true, sourceHomeRemoved: true, contextAndToolHistoryRetained: true,
-      npmIgnoreScriptsSetup: !!installedState, interactiveAndExecCaptured: !!installedState,
+      npmIgnoreScriptsSetup: !!process.env.SKYNET_TEST_INSTALLER, pluginMarketplaceSetup: process.env.SKYNET_TEST_PLUGINS ?? false, interactiveAndExecCaptured: !!installedState,
       toolScope: 'ordinary read-only MCP fixture; no shell sandbox changes or real code edit performed',
       provider: 'synthetic loopback; no credentials', desktopAcceptance: 'not established' }, null, 2));
     console.log(`Codex CLI native evidence: ${join(sandbox.directory, 'codex-cli-native-evidence.json')}`);

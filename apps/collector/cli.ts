@@ -9,10 +9,11 @@ const { values, positionals } = parseArgs({ allowPositionals: true, options: {
   package: { type: 'string' }, target: { type: 'string' }, 'desktop-version': { type: 'string' }, runtime: { type: 'string' },
   'source-version': { type: 'string' },
   output: { type: 'string' }, origin: { type: 'string' }, deployment: { type: 'string' },
+  entry: { type: 'string' },
 } });
 const command = positionals[0];
-if (!['setup', 'status', 'start', 'stop', 'autostart-remove', 'restore', 'pack-agent'].includes(command ?? '') && !values.state) throw new Error('--state must name an explicit private collector directory');
-const state = values.state ? resolve(values.state) : ['setup', 'status', 'start', 'stop', 'autostart-remove'].includes(command ?? '') ? (await import('./install-state.js')).defaultState() : '';
+if (!['setup', 'status', 'start', 'stop', 'autostart-remove', 'restore', 'pack-agent', 'pack-plugins', 'entry-remove'].includes(command ?? '') && !values.state) throw new Error('--state must name an explicit private collector directory');
+const state = values.state ? resolve(values.state) : ['setup', 'status', 'start', 'stop', 'autostart-remove', 'entry-remove'].includes(command ?? '') ? (await import('./install-state.js')).defaultState() : '';
 async function stdin() {
   let input = '';
   for await (const part of process.stdin) {
@@ -22,7 +23,13 @@ async function stdin() {
   return JSON.parse(input);
 }
 
-if (command === 'pack-agent') {
+if (command === 'pack-plugins') {
+  if (!values.output || !values.origin || !values.deployment) throw new Error('Operator packaging requires --output NEW_DIRECTORY --origin HTTPS_ORIGIN --deployment ID');
+  console.log(JSON.stringify(await (await import('./plugin-package.js')).packPlugins(values.output, values.origin, values.deployment)));
+} else if (command === 'entry-remove') {
+  if (!values.entry) throw new Error('entry-remove requires --entry npm|codex-plugin|claude-plugin');
+  console.log(JSON.stringify(await (await import('./entries.js')).removeEntry(state, values.entry)));
+} else if (command === 'pack-agent') {
   if (!values.output || !values.origin || !values.deployment) throw new Error('Operator packaging requires --output NEW_DIRECTORY --origin HTTPS_ORIGIN --deployment ID');
   console.log(JSON.stringify(await (await import('./package.js')).packAgent(values.output, values.origin, values.deployment)));
 } else if (command === 'restore') {

@@ -50,8 +50,8 @@ export async function ownRuntime(state: string, role: Role, status: () => object
     if (supplied.length !== expected.length || !timingSafeEqual(supplied, expected)) { res.writeHead(401); res.end(); return; }
     if (!((req.method === 'GET' && req.url === '/status') || (req.method === 'POST' && req.url === '/stop'))) { res.writeHead(404); res.end(); return; }
     res.setHeader('Content-Type', 'application/json'); res.setHeader('Cache-Control', 'no-store');
+    if (req.url === '/stop') res.once('finish', stop);
     res.end(JSON.stringify({ role, ...status() }));
-    if (req.url === '/stop') stop();
   });
   server.headersTimeout = 3000; server.requestTimeout = 3000; server.keepAliveTimeout = 1000;
   await new Promise<void>((resolve, reject) => {
@@ -60,5 +60,11 @@ export async function ownRuntime(state: string, role: Role, status: () => object
   return server;
 }
 export async function releaseRuntime(server: Server) {
-  server.closeAllConnections(); await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
+  // Keep in-flight authenticated replies intact. Destroying every connection
+  // before close could turn a successful stop into ECONNRESET for its caller.
+  await new Promise<void>((resolve, reject) => {
+    const timer = setTimeout(() => server.closeAllConnections(), 3500);
+    server.close(error => { clearTimeout(timer); error ? reject(error) : resolve(); });
+    server.closeIdleConnections();
+  });
 }

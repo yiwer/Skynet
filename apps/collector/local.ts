@@ -64,7 +64,7 @@ async function qualifiedPath(settings: Settings, transcriptPath: string) {
   return actual;
 }
 
-export async function collectOnce(state: string) {
+export async function collectOnce(state: string, options: { capture?: boolean } = {}) {
   const settings = settingsSchema.parse(await readCollectorSettings(state));
   const delivery = await DeliveryQueue.open(state);
   try {
@@ -78,7 +78,7 @@ export async function collectOnce(state: string) {
   catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
   const errors: string[] = [];
   const queuedEvents: { file: string; event: z.infer<typeof hostEventSchema>; observedAt: string }[] = [];
-  for (const file of await readdir(join(state, 'spool'))) {
+  for (const file of options.capture === false ? [] : await readdir(join(state, 'spool'))) {
     if (!file.endsWith('.json')) continue;
     try {
       const queued = await readJson(join(state, 'spool', file));
@@ -110,7 +110,7 @@ export async function collectOnce(state: string) {
       await unlink(join(state, 'spool', file));
     } catch (error) { errors.push((error as Error).message); }
   }
-  for (const source of tracked) {
+  for (const source of options.capture === false ? [] : tracked) {
     try {
       const pending = delivery.latest(settings.source, source.sessionId);
       // Compare new bytes with the latest frozen generation, even while offline.
@@ -176,7 +176,7 @@ export async function collectOnce(state: string) {
     await atomicJson(join(state, 'tracked.json'), tracked);
   });
   const status = { checkedAt: new Date().toISOString(), tracked: tracked.length, ...delivered, errors: [...errors, ...delivered.errors],
-    delivery: await delivery.health(), capability: 'unverified' };
+    delivery: await delivery.health(), capability: 'unverified', capture: options.capture === false ? 'disabled; frozen-delivery-only' : 'enabled' };
   await atomicJson(join(state, 'status.json'), status);
   await reportDeliveryHealth(state, settings, status.delivery);
   return status;

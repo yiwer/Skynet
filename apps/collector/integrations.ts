@@ -66,14 +66,15 @@ export async function planConfiguration(path: string, entries: Record<string, un
   let value: any; try { value = before ? JSON.parse(before) : {}; } catch { throw new Error('Host configuration is invalid JSON; no settings were replaced'); }
   if (!value || typeof value !== 'object' || Array.isArray(value) || (value.hooks && (typeof value.hooks !== 'object' || Array.isArray(value.hooks)))) throw new Error('Host hooks configuration has an unsupported shape');
   value.hooks ??= {};
-  for (const [event, entry] of Object.entries(entries)) {
+  for (const event of new Set([...Object.keys(entries), ...Object.keys(owned ?? {})])) {
+    const entry = entries[event];
     const original = value.hooks[event] ?? [];
     if (!Array.isArray(original)) throw new Error('Host hook event has an unsupported shape');
     const previous = owned?.[event];
     const matches = previous ? original.filter(item => JSON.stringify(item) === JSON.stringify(previous)) : [];
     if (previous && matches.length !== 1) throw new Error('Skynet hook ownership conflict; existing configuration was retained');
     if (!previous && original.some(item => JSON.stringify(item).includes('skynet-launcher.mjs'))) throw new Error('An unregistered Skynet hook exists; resolve its ownership before setup');
-    value.hooks[event] = [...original.filter(item => item !== matches[0]), entry];
+    value.hooks[event] = [...original.filter(item => item !== matches[0]), ...(entry === undefined ? [] : [entry])];
   }
   return { path, before, after: JSON.stringify(value, null, 2) + '\n', entries };
 }
