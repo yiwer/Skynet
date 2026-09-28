@@ -1,6 +1,6 @@
 # Skynet
 
-内部 Coding Agent 工作观察与会话存档平台。用户已确认整体设计，已完成 PRD v1.0 与 v2.0、研究与架构文档，以及 Web 平台原型。现已实现首条合成会话存档链；真实 Codex Desktop 自动采集仍待验收，V1 尚未完成。
+内部 Coding Agent 工作观察与会话存档平台。用户已确认整体设计，已完成 PRD v1.0 与 v2.0、研究与架构文档，以及 Web 平台原型。现已实现认证存档、导出与单原件恢复，并实测两个 CLI 的自动采集和服务器独立原生续聊；真实 Codex Desktop 界面与完整发布门槛仍待验收，V1 尚未完成。进度见 [V1 实施记录](docs/planning/v1-implementation.md)。
 
 ## 文档入口
 
@@ -9,6 +9,7 @@
 | [首条存档链的实现与验证](docs/implementation/issue-4.md) | 本地合成演示、Linux 单机部署、公开接口、测试结果与尚未通过的 Desktop 条件 |
 | [服务器导出与隔离恢复](docs/implementation/issue-5.md) | 可读导出、版本化恢复包、严格校验与新目录恢复；真实原生后端合成续聊已测，Desktop UI 仍待验收 |
 | [Codex CLI 存档与恢复](docs/implementation/issue-6.md) | 正常 hook 信任、两个项目自动采集、公开导出及服务器包原生续聊；支持范围与 hook 延迟实测 |
+| [Claude Code CLI 链路](docs/implementation/issue-7.md) | 普通 hooks、多项目采集、完整导出与服务器包原生续聊；单原件范围与未验证条件 |
 | [PRD v1.0](docs/requirements/PRD.md) | 首版实施与验收依据：71 条用户故事、实施决策、22 组验收场景与发布门槛 |
 | [V1 验收标准](docs/requirements/v1-acceptance.md) | 把 PRD v1.0 的 AC-01…AC-22 与 G0—G4 整理成可执行的验收步骤、证据与判定规则 |
 | [PRD v2.0](docs/requirements/PRD-v2.md) | V2：数据报表、对话视图、活动记录、会话组装审计与员工使用能力评估；用户故事 72—176，验收场景 AC-23…AC-38 |
