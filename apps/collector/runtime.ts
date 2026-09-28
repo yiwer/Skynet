@@ -8,6 +8,7 @@ import { hostEventSchema } from '../../packages/contracts/archive.js';
 import { identitySchema, installationSchema, jsonFile, optionalJson } from './install-state.js';
 import { askRuntime, ownRuntime, releaseRuntime } from './runtime-control.js';
 import { autostartStatus } from './autostart.js';
+import { registeredEntries } from './entries.js';
 export { ensureRunning } from './supervisor.js';
 
 async function routeCodex(state: string, installation: ReturnType<typeof installationSchema.parse>) {
@@ -72,8 +73,11 @@ export async function runInstalled(state: string) {
       try {
         const installation = installationSchema.parse(await jsonFile(join(state, 'installation.json')));
         errors.push(...await routeCodex(state, installation));
-        for (const client of installation.clients.filter(item => item.configured)) {
-          try { await collectOnce(join(state, 'sources', client.source)); } catch { errors.push(`Collector unavailable: ${client.source}; state retained`); }
+        for (const client of installation.clients) {
+          // Removing the last entry stops native reads; only already frozen
+          // pending bytes remain eligible for delivery.
+          if (!await optionalJson(join(state, 'sources', client.source, 'settings.json'))) continue;
+          try { await collectOnce(join(state, 'sources', client.source), { capture: client.configured }); } catch { errors.push(`Collector unavailable: ${client.source}; state retained`); }
         }
         const request = await optionalJson(join(state, 'health-request.json'));
         if (request || Date.now() >= nextHealth) {
@@ -102,7 +106,10 @@ export async function runInstalled(state: string) {
   } finally { await unlink(lockPath).catch(() => undefined); await releaseRuntime(lease); if (process.connected) process.disconnect(); }
 }
 export async function installedStatus(state: string) {
-  const installation = installationSchema.parse(await jsonFile(join(state, 'installation.json')));
+  const value = await optionalJson(join(state, 'installation.json'));
+  if (!value) return { installed: false, stateDirectory: state, background: 'not-configured',
+    notice: '尚未绑定。插件与 npm 接入均需要 Node 24；在本地终端设置个人 SKYNET_KEY 后运行随包 setup，并完成宿主正常信任。' };
+  const installation = installationSchema.parse(value);
   const identity = identitySchema.parse(await jsonFile(join(state, 'identity.json')));
   const runtime = await optionalJson(join(state, 'runtime.json')); const server = await optionalJson(join(state, 'health.json'));
   let supervisor: any = null; let worker: any = null; let controlError: string | null = null;
@@ -120,6 +127,7 @@ export async function installedStatus(state: string) {
       confirmedUploads: tracked.filter((item: any) => item.acknowledgedSnapshotId).length, queuedEvents: queued.filter(file => file.endsWith('.json')).length, capture, gap });
   }
   return { installed: true, deviceId: identity.deviceId, deploymentId: installation.deploymentId, stateDirectory: state,
+    entries: registeredEntries(installation),
     background: supervisor?.worker?.instance === worker?.instance && worker?.supervisorInstance === supervisor?.instance && worker?.state === 'running' ? 'running' : 'unavailable', runtime,
     supervisor, worker, controlError, lastSweepCompletedAt: runtime?.checkedAt ?? null,
     autostart: await autostartStatus(state), server: server && { ...server, fresh: Date.now() - Date.parse(server.checkedAt) < 20_000 }, clients,

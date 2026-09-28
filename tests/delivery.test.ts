@@ -12,11 +12,11 @@ const hash = (bytes: Buffer) => createHash('sha256').update(bytes).digest('hex')
 test('frozen offline generations survive source loss and process/server restarts, back off, retain rejected evidence and recover through device Web', { timeout: 240_000 }, async () => {
   const sandbox = await createSandbox(); let browser: Browser | undefined;
   let upstream = ''; let mode: 'online' | 'offline' | 'limited' | 'server-error' | 'wrong-ack' = 'online';
-  let archiveRequests = 0; const committedResponses: any[] = [];
+  let archiveRequests = 0; const archiveRequestTimes: number[] = []; const committedResponses: any[] = [];
   const proxy = createServer(async (incoming, outgoing) => {
     try {
       const path = incoming.url!; const archive = path.startsWith('/api/chunks/') || path.startsWith('/api/snapshots') || path === '/api/artifacts/assemble';
-      if (archive) archiveRequests++;
+      if (archive) { archiveRequests++; archiveRequestTimes.push(Date.now()); }
       if (mode === 'offline') { incoming.socket.destroy(); return; }
       if (archive && mode === 'limited') { outgoing.writeHead(429, { 'Retry-After': '1', 'Content-Type': 'application/json' }).end('{}'); return; }
       if (archive && mode === 'server-error') { outgoing.writeHead(503, { 'Content-Type': 'application/json' }).end('{}'); return; }
@@ -67,7 +67,9 @@ test('frozen offline generations survive source loss and process/server restarts
     const beforeSkipped = archiveRequests;
     const offlineB = bytes(record('离线重写后的活动')); await writeFile(transcriptPath, offlineB); await unlink(sidecar);
     const frozenB = await run(); assert.equal(frozenB.delivery.pendingSnapshots, 2);
-    assert.equal(archiveRequests, beforeSkipped, 'process restart preserves nextAttemptAt and does not hammer the server');
+    assert.ok(archiveRequestTimes.slice(beforeSkipped).every(at => at >= Date.parse(frozenA.delivery.nextAttemptAt)),
+      'process restart never sends before persisted nextAttemptAt; a slow process launch may legitimately cross the deadline');
+    if (archiveRequests === beforeSkipped) assert.equal(frozenB.delivery.nextAttemptAt, frozenA.delivery.nextAttemptAt);
     const plans = await readdir(join(state, 'delivery', 'pending')); assert.equal(plans.length, 2);
     for (const plan of plans) {
       const value = JSON.parse(await readFile(join(state, 'delivery', 'pending', plan), 'utf8'));
@@ -95,7 +97,8 @@ test('frozen offline generations survive source loss and process/server restarts
     const limitedBytes = Buffer.concat([offlineB, bytes(record('限流期间活动'))]); await writeFile(transcriptPath, limitedBytes); mode = 'limited';
     const limited = await run(); assert.equal(limited.delivery.lastFailure.kind, 'rate-limited'); assert.equal(limited.delivery.pendingSnapshots, 1);
     assert.ok(Date.parse(limited.delivery.nextAttemptAt) - Date.parse(limited.delivery.lastFailure.at) >= 1000);
-    const requestCount = archiveRequests; await run(); assert.equal(archiveRequests, requestCount);
+    const requestCount = archiveRequests; await run();
+    assert.ok(archiveRequestTimes.slice(requestCount).every(at => at >= Date.parse(limited.delivery.nextAttemptAt)), 'a restarted process respects persisted Retry-After');
     let deviceStatus = (await (await api('/api/devices/status')).json()).devices[0];
     assert.equal(deviceStatus.sources[0].report.pendingSnapshots, 1); assert.equal(deviceStatus.sources[0].report.lastFailure.kind, 'rate-limited');
     browser = await chromium.launch(); const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
