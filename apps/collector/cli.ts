@@ -1,13 +1,12 @@
-import { mkdir, readFile, open, unlink } from 'node:fs/promises';
+import { readFile, open, unlink } from 'node:fs/promises';
 import { resolve, join } from 'node:path';
 import { parseArgs } from 'node:util';
 import { setTimeout } from 'node:timers/promises';
-import { atomicJson, collectOnce, recordHook, setup } from './local.js';
-import { restorePackage } from './restore.js';
 
 const { values, positionals } = parseArgs({ allowPositionals: true, options: {
   state: { type: 'string' }, once: { type: 'boolean' },
   package: { type: 'string' }, target: { type: 'string' }, 'desktop-version': { type: 'string' }, runtime: { type: 'string' },
+  'source-version': { type: 'string' },
 } });
 const command = positionals[0];
 if (command !== 'restore' && !values.state) throw new Error('--state must name an explicit private collector directory');
@@ -22,23 +21,28 @@ async function stdin() {
 }
 
 if (command === 'restore') {
+  const { restorePackage } = await import('./restore.js');
+  const version = values['source-version'] ?? values['desktop-version'];
+  if (values['source-version'] && values['desktop-version'] && values['source-version'] !== values['desktop-version']) throw new Error('Conflicting restore source versions');
   if (!values.package || !values.target || !values.runtime) {
-    throw new Error('Restore requires --package FILE --target NEW_ABSOLUTE_DIRECTORY --runtime ABSOLUTE_NATIVE_EXECUTABLE (Codex Desktop also requires --desktop-version VERSION)');
+    throw new Error('Restore requires --package FILE --target NEW_ABSOLUTE_DIRECTORY --runtime ABSOLUTE_NATIVE_EXECUTABLE (Codex also requires --source-version VERSION)');
   }
   console.log(JSON.stringify(await restorePackage({ packagePath: values.package, target: values.target,
-    desktopVersion: values['desktop-version'], runtime: values.runtime })));
+    sourceVersion: version, runtime: values.runtime })));
 } else if (command === 'hook') {
+  const { recordHook, recordHookGap } = await import('./hook.js');
   // Hooks never veto work, print payloads, or wait for the network.
   try { await recordHook(state, await stdin()); }
   catch {
     try {
-      await mkdir(state, { recursive: true, mode: 0o700 });
-      await atomicJson(join(state, 'hook-gap.json'), { at: new Date().toISOString(), error: 'Host activity could not be queued; check hook input and local storage' });
+      await recordHookGap(state);
     } catch { /* A read-only/full disk cannot persist diagnostics; the host must still continue. */ }
   }
 } else if (command === 'setup') {
+  const { setup } = await import('./local.js');
   console.log(JSON.stringify(await setup(state, await stdin())));
 } else if (command === 'run') {
+  const { collectOnce } = await import('./local.js');
   const lockPath = join(state, 'collector.lock');
   const lock = await open(lockPath, 'wx', 0o600).catch(() => { throw new Error('Collector lock exists; ensure no collector is running before removing a stale lock'); });
   await lock.writeFile(String(process.pid)); await lock.close();

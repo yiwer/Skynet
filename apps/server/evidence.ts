@@ -4,6 +4,7 @@ import { readClaudeEvidence } from '../../packages/native/claude.js';
 
 const identifier = z.string().min(1);
 const textPart = z.object({ type: z.enum(['input_text', 'output_text']), text: z.string() });
+const toolOutput = z.union([z.string(), z.array(textPart)]);
 const recordSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('session_meta'), payload: z.object({ id: identifier }) }),
   z.object({
@@ -12,8 +13,10 @@ const recordSchema = z.discriminatedUnion('type', [
     payload: z.discriminatedUnion('type', [
       z.object({ type: z.literal('message'), role: z.enum(['user', 'assistant', 'system', 'developer']),
         content: z.array(textPart).min(1).refine(parts => parts.some(part => part.text.length > 0)) }),
-      z.object({ type: z.literal('function_call'), name: identifier, arguments: z.string(), call_id: identifier }),
-      z.object({ type: z.literal('function_call_output'), output: z.string(), call_id: identifier }),
+      z.object({ type: z.literal('function_call'), name: identifier, namespace: identifier.optional(), arguments: z.string(), call_id: identifier }),
+      z.object({ type: z.literal('function_call_output'), output: toolOutput, call_id: identifier }),
+      z.object({ type: z.literal('custom_tool_call'), name: identifier, input: z.string(), call_id: identifier }),
+      z.object({ type: z.literal('custom_tool_call_output'), output: toolOutput, call_id: identifier }),
     ]),
   }),
 ]);
@@ -39,10 +42,12 @@ export function readEvidence(bytes: Buffer, source: Source = 'codex-desktop') {
       if (payload.type === 'message') {
         role = payload.role;
         text = payload.content.map(part => part.text).join('\n');
+      } else if (payload.type === 'custom_tool_call') {
+        role = 'tool request'; text = `${payload.name}\n${payload.input}`;
       } else if (payload.type === 'function_call') {
-        role = 'tool request'; text = `${payload.name}\n${payload.arguments}`;
+        role = 'tool request'; text = `${payload.namespace ? `${payload.namespace}.` : ''}${payload.name}\n${payload.arguments}`;
       } else {
-        role = 'tool result'; text = payload.output;
+        role = 'tool result'; text = typeof payload.output === 'string' ? payload.output : payload.output.map(part => part.text).join('\n');
       }
       events.push({ line: index + 1, role, text, timestamp: sourceTimestamp(item.timestamp) });
     } catch { unrecognizedLines++; }

@@ -5,6 +5,7 @@ import { claudeIdentity } from './native/claude.js';
 
 export const MAX_RECOVERY_BYTES = Math.ceil(MAX_ARTIFACT_BYTES / 3) * 4 + 64 * 1024;
 export const measuredDesktop = { version: '26.924.2738.0', runtime: '0.158.0-alpha.2.1', os: 'win32', arch: 'x64' } as const;
+export const measuredCodexCli = { version: '0.157.1', runtime: '0.157.1', os: 'win32', arch: 'x64' } as const;
 export const measuredClaude = { version: '2.1.281', runtime: '2.1.281', os: 'win32', arch: 'x64' } as const;
 const checksum = (value: string | Buffer) => createHash('sha256').update(value).digest('hex');
 const packageContentSchema = z.object({
@@ -38,16 +39,19 @@ export function recoveryInfo(manifest: Manifest, bytes: Buffer) {
     } as const;
   }
   const metadata = nativeMetadata(bytes);
-  const matchingBaseline = manifest.sourceVersion === measuredDesktop.version && manifest.sourceOs === measuredDesktop.os
-    && metadata?.payload.cli_version === measuredDesktop.runtime && metadata.payload.id === manifest.sourceSessionId;
+  const baseline = manifest.source === 'codex-cli' ? measuredCodexCli : measuredDesktop;
+  const matchingBaseline = manifest.sourceVersion === baseline.version && manifest.sourceOs === baseline.os
+    && metadata?.payload.cli_version === baseline.runtime && metadata.payload.id === manifest.sourceSessionId;
   return {
     packageVersion: 1, scope: 'single-rollout', sourceCompleteness: 'unverified',
     sourceVersion: manifest.sourceVersion, sourceOs: manifest.sourceOs, nativeRuntimeVersion: metadata?.payload.cli_version ?? null,
     artifacts: [{ role: 'native-rollout', byteLength: manifest.byteLength, sha256: manifest.hash }],
-    desktopUi: 'unverified', nativeBackend: matchingBaseline ? 'fixture-tested' : 'unverified',
+    desktopUi: manifest.source === 'codex-cli' ? 'not-applicable' : 'unverified', nativeBackend: matchingBaseline ? 'fixture-tested' : 'unverified',
     preparation: matchingBaseline && bytes.at(-1) === 10 ? 'candidate' : 'unsupported',
-    measuredTarget: measuredDesktop,
-    limitation: '仅包含当前收到的单个原件；关联材料完整性与 Desktop UI 续聊未验证。后端合成测试不代表 Desktop 支持。',
+    measuredTarget: baseline,
+    limitation: manifest.source === 'codex-cli'
+      ? '仅包含当前收到的单个原件；已测版本的 CLI 合成恢复不覆盖附件、外部工具溢出文件或子会话，其他版本/OS 待验证。'
+      : '仅包含当前收到的单个原件；关联材料完整性与 Desktop UI 续聊未验证。后端合成测试不代表 Desktop 支持。',
   } as const;
 }
 
