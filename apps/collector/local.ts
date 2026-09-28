@@ -1,11 +1,13 @@
-import { mkdir, open, rename, readFile, readdir, realpath, stat, unlink } from 'node:fs/promises';
+import { mkdir, readFile, readdir, realpath, stat, unlink } from 'node:fs/promises';
 import { createHash, randomUUID } from 'node:crypto';
 import { hostname } from 'node:os';
 import { isAbsolute, join, relative, sep } from 'node:path';
 import { z } from 'zod';
 import { hostEventSchema, manifestSchema, MAX_ARTIFACT_BYTES, sourceSchema, type Source } from '../../packages/contracts/archive.js';
+import { atomicJson } from '../../packages/filesystem.js';
 import { claudeIdentity } from '../../packages/native/claude.js';
-import { syncDirectory } from '../../packages/filesystem.js';
+export { atomicJson } from '../../packages/filesystem.js';
+export { recordHook } from './hook.js';
 
 const settingsSchema = z.object({
   server: z.url(), deviceId: z.uuid(), deviceCredential: z.string().min(32),
@@ -17,13 +19,6 @@ const trackedSchema = z.object({ source: sourceSchema.optional(), sessionId: z.s
 type Tracked = z.infer<typeof trackedSchema>;
 const hash = (bytes: Buffer | string) => createHash('sha256').update(bytes).digest('hex');
 
-export async function atomicJson(path: string, value: unknown) {
-  const temporary = `${path}.${randomUUID()}.tmp`;
-  const handle = await open(temporary, 'wx', 0o600);
-  try { await handle.writeFile(JSON.stringify(value)); await handle.sync(); } finally { await handle.close(); }
-  await rename(temporary, path);
-  await syncDirectory(join(path, '..'));
-}
 async function readJson(path: string) { return JSON.parse(await readFile(path, 'utf8')); }
 
 export async function setup(state: string, input: { server: string; enrollmentCredential: string; nativeRoot: string; sourceVersion: string; sourceOs: string; source?: Source }) {
@@ -50,13 +45,6 @@ export async function setup(state: string, input: { server: string; enrollmentCr
   await atomicJson(join(state, 'settings.json'), settings);
   await mkdir(join(state, 'spool'), { mode: 0o700, recursive: true });
   return { deviceId: result.deviceId, state: 'bound', capability: 'unverified' };
-}
-
-export async function recordHook(state: string, event: unknown) {
-  // No imports with network side effects, network request, source scan, or transcript read here.
-  const input = hostEventSchema.parse(event);
-  await mkdir(join(state, 'spool'), { recursive: true, mode: 0o700 });
-  await atomicJson(join(state, 'spool', `${randomUUID()}.json`), { event: input, observedAt: new Date().toISOString() });
 }
 
 async function qualifiedPath(settings: Settings, transcriptPath: string) {
@@ -132,6 +120,7 @@ export async function collectOnce(state: string) {
       else {
         const metadata = JSON.parse(bytes.toString('utf8').split('\n')[0]!);
         if (metadata.type !== 'session_meta' || metadata.payload?.id !== source.sessionId) throw new Error('Native session identity mismatch');
+        if (settings.source === 'codex-cli') sourceVersion = z.string().min(1).max(256).parse(metadata.payload.cli_version);
       }
       const manifest = manifestSchema.parse({ protocolVersion: 1, sourceSessionId: source.sessionId, source: settings.source,
         sourceVersion, sourceOs: settings.sourceOs, project: source.project,
