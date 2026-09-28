@@ -1,0 +1,44 @@
+services:
+  db:
+    image: postgres:17.11-alpine
+    environment:
+      POSTGRES_DB: skynet
+      POSTGRES_USER: skynet
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set a generated hex password}
+    volumes:
+      - database:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U skynet -d skynet"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+  app:
+    build: ..
+    environment:
+      DATABASE_URL: postgresql://skynet:${POSTGRES_PASSWORD:?set a generated hex password}@db:5432/skynet
+    volumes:
+      - originals:/data/raw
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+  https:
+    image: caddy:2-alpine
+    environment:
+      SKYNET_HOST: ${SKYNET_HOST:?set the HTTPS host name}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - tls-data:/data
+      - tls-config:/config
+    depends_on:
+      - app
+    restart: unless-stopped
+volumes:
+  database:
+  originals:
+  tls-data:
+  tls-config:
