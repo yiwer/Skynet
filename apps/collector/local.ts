@@ -3,11 +3,13 @@ import { createHash, randomUUID } from 'node:crypto';
 import { hostname } from 'node:os';
 import { isAbsolute, join } from 'node:path';
 import { z } from 'zod';
-import { hostEventSchema, manifestSchema, MAX_ARTIFACT_BYTES, sourceSchema, type Source } from '../../packages/contracts/archive.js';
+import { hostEventSchema, manifestSchema, sourceSchema, type Source } from '../../packages/contracts/archive.js';
 import { atomicJson } from '../../packages/filesystem.js';
 import { claudeIdentity } from '../../packages/native/claude.js';
 import { readCollectorSettings } from './settings.js';
-import { captureSchema, CHUNK_BYTES } from '../../packages/contracts/materials.js';
+import { captureSchema } from '../../packages/contracts/materials.js';
+import { DeliveryQueue } from './delivery.js';
+import { reportDeliveryHealth } from './health.js';
 import { discoverMaterials, readNativeFile, safeNativePath } from './materials.js';
 export { atomicJson } from '../../packages/filesystem.js';
 export { recordHook } from './hook.js';
@@ -62,18 +64,15 @@ async function qualifiedPath(settings: Settings, transcriptPath: string) {
   return actual;
 }
 
-async function send(settings: Settings, path: string, init: RequestInit) {
-  const response = await fetch(new URL(path, settings.server), { ...init,
-    headers: { ...init.headers, Authorization: `Bearer ${settings.deviceCredential}` }, signal: AbortSignal.timeout(15_000) });
-  if (!response.ok) throw new ArchiveRequestError(response.status);
-  return response;
-}
-class ArchiveRequestError extends Error {
-  constructor(public status: number) { super(`Archive request failed (${status}); local state retained`); }
-}
-
 export async function collectOnce(state: string) {
   const settings = settingsSchema.parse(await readCollectorSettings(state));
+  const delivery = await DeliveryQueue.open(state);
+  try {
+    await readFile(join(state, 'retry-request.json'));
+    await delivery.retryNow();
+    await unlink(join(state, 'delivery-health.json')).catch(error => { if (error.code !== 'ENOENT') throw error; });
+    await unlink(join(state, 'retry-request.json'));
+  } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
   let tracked: Tracked[] = [];
   try { tracked = z.array(trackedSchema).parse(await readJson(join(state, 'tracked.json'))).map(entry => ({ ...entry, source: entry.source ?? settings.source })); }
   catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
@@ -111,40 +110,26 @@ export async function collectOnce(state: string) {
       await unlink(join(state, 'spool', file));
     } catch (error) { errors.push((error as Error).message); }
   }
-  let committed = 0;
-  let uploadedBytes = 0; let appended = 0;
-  async function upload(bytes: Buffer) {
-    if (bytes.length > MAX_ARTIFACT_BYTES) throw new Error('Artifact exceeds 64 MiB; material remains pending');
-    const chunkHash = hash(bytes);
-    if (bytes.length > 0 && bytes.length <= CHUNK_BYTES) {
-      await send(settings, `/api/chunks/${chunkHash}`, { method: 'PUT', headers: { 'Content-Type': 'application/octet-stream' }, body: new Uint8Array(bytes) });
-    } else {
-      const chunks = [];
-      for (let start = 0; start < bytes.length; start += CHUNK_BYTES) {
-        const part = bytes.subarray(start, start + CHUNK_BYTES); const partHash = hash(part);
-        await send(settings, `/api/chunks/${partHash}`, { method: 'PUT', headers: { 'Content-Type': 'application/octet-stream' }, body: new Uint8Array(part) });
-        chunks.push({ hash: partHash, byteLength: part.length });
-      }
-      await send(settings, '/api/artifacts/assemble', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ hash: chunkHash, byteLength: bytes.length, chunks }) });
-    }
-    uploadedBytes += bytes.length;
-    return chunkHash;
-  }
   for (const source of tracked) {
     try {
+      const pending = delivery.latest(settings.source, source.sessionId);
+      // Compare new bytes with the latest frozen generation, even while offline.
+      // Server ACK state remains separate until delivery actually commits.
+      const previous = pending ? { ...source, acknowledgedHash: pending.manifest.hash,
+        acknowledgedByteLength: pending.manifest.byteLength, capture: pending.manifest.capture,
+        materialFingerprint: pending.fingerprint, nativeVersion: pending.manifest.sourceVersion } : source;
       if (source.source !== settings.source) throw new Error('Tracked source does not match this collector binding');
       const transcriptPath = await qualifiedPath(settings, source.transcriptPath);
       const bytes = await readNativeFile(settings.nativeRoot, transcriptPath);
       const artifactHash = hash(bytes);
       // Read identity from the source artifact, never accept a hook pointing at another session.
-      let sourceVersion = source.nativeVersion ?? settings.sourceVersion;
+      let sourceVersion = previous.nativeVersion ?? settings.sourceVersion;
       let identityUnavailable = false;
       if (settings.source === 'claude-code-cli') {
         try { sourceVersion = claudeIdentity(bytes, source.sessionId).version; }
         catch (error) {
           // A previously identified tracked file can be truncated during native rewrite. Preserve bytes and old generations.
-          if (!source.acknowledgedSnapshotId || (error as Error).message.includes('mismatch')) throw error;
+          if (!previous.capture || (error as Error).message.includes('mismatch')) throw error;
           identityUnavailable = true;
         }
       }
@@ -152,64 +137,47 @@ export async function collectOnce(state: string) {
         let metadata;
         try { metadata = JSON.parse(bytes.toString('utf8').split('\n')[0]!); } catch { /* Partial rewrite is preserved only after prior identification. */ }
         if (metadata?.type === 'session_meta' && metadata.payload?.id !== source.sessionId) throw new Error('Native session identity mismatch');
-        if (metadata?.type !== 'session_meta' && !source.acknowledgedSnapshotId) throw new Error('Native session identity unavailable; material remains pending');
+        if (metadata?.type !== 'session_meta' && !previous.capture) throw new Error('Native session identity unavailable; material remains pending');
         identityUnavailable = metadata?.type !== 'session_meta';
         if (settings.source === 'codex-cli' && metadata?.payload?.cli_version) sourceVersion = z.string().min(1).max(256).parse(metadata.payload.cli_version);
       }
       const discovered = await discoverMaterials({ source: settings.source, nativeRoot: settings.nativeRoot, nativeTempRoot: settings.nativeTempRoot,
-        transcriptPath, sessionId: source.sessionId, project: source.project, bytes, previous: source.capture?.materials });
+        transcriptPath, sessionId: source.sessionId, project: source.project, bytes, previous: previous.capture?.materials });
       if (identityUnavailable) discovered.gaps.push({ code: 'unknown-format', reference: '当前原件无法重新读取完整身份；沿用此前已确认绑定，保留重写或截断字节' });
       const materials = discovered.artifacts.map(item => item.material);
       const fingerprint = hash(JSON.stringify({ materials, gaps: discovered.gaps, lineage: discovered.lineage, compacted: discovered.compacted, partialLine: discovered.partialLine }));
-      if (source.acknowledgedHash === artifactHash && source.materialFingerprint === fingerprint) continue;
-      const prefixMatches = source.acknowledgedByteLength !== undefined && bytes.length > source.acknowledgedByteLength
-        && hash(bytes.subarray(0, source.acknowledgedByteLength)) === source.acknowledgedHash;
-      const change = !source.acknowledgedHash ? 'initial' : source.acknowledgedHash === artifactHash ? 'materials'
-        : prefixMatches ? 'append' : bytes.length < source.acknowledgedByteLength! ? 'truncate' : 'rewrite';
-      const generation = source.capture && (change === 'append' || change === 'materials') ? source.capture.generation
-        : hash(`${settings.source}/${source.sessionId}/${source.qualifiedAt}/${source.acknowledgedSnapshotId ?? ''}/${artifactHash}`);
-      const capture = captureSchema.parse({ generation, revision: (source.capture?.revision ?? 0) + 1, change,
+      if (previous.acknowledgedHash === artifactHash && previous.materialFingerprint === fingerprint) continue;
+      const prefixMatches = previous.acknowledgedByteLength !== undefined && bytes.length > previous.acknowledgedByteLength
+        && hash(bytes.subarray(0, previous.acknowledgedByteLength)) === previous.acknowledgedHash;
+      const change = !previous.acknowledgedHash ? 'initial' : previous.acknowledgedHash === artifactHash ? 'materials'
+        : prefixMatches ? 'append' : bytes.length < previous.acknowledgedByteLength! ? 'truncate' : 'rewrite';
+      const generation = previous.capture && (change === 'append' || change === 'materials') ? previous.capture.generation
+        : hash(`${settings.source}/${source.sessionId}/${source.qualifiedAt}/${previous.capture?.generation ?? ''}/${artifactHash}`);
+      const capture = captureSchema.parse({ generation, revision: (previous.capture?.revision ?? 0) + 1, change,
         previousSnapshotId: source.acknowledgedSnapshotId, materials, gaps: discovered.gaps, lineage: discovered.lineage,
         compacted: discovered.compacted, partialLine: discovered.partialLine });
       const manifest = manifestSchema.parse({ protocolVersion: 1, sourceSessionId: source.sessionId, source: settings.source,
         sourceVersion, sourceOs: settings.sourceOs, project: source.project,
         hash: artifactHash, byteLength: bytes.length, qualifiedAt: source.qualifiedAt, capability: 'unverified', capture });
-      for (const item of discovered.artifacts) {
-        if (item.bytes && !source.capture?.materials.some(old => old.hash === item.material.hash)) await upload(item.bytes);
-      }
-      let response: Response | undefined; let usedAppend = false;
-      if (!source.appendRejected && source.acknowledgedSnapshotId && source.acknowledgedHash && source.acknowledgedByteLength
-        && bytes.length > source.acknowledgedByteLength
-        && hash(bytes.subarray(0, source.acknowledgedByteLength)) === source.acknowledgedHash) {
-        const delta = bytes.subarray(source.acknowledgedByteLength);
-        const appendHash = await upload(delta);
-        try {
-          response = await send(settings, '/api/snapshots/append', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ manifest, baseSnapshotId: source.acknowledgedSnapshotId, baseHash: source.acknowledgedHash,
-              baseByteLength: source.acknowledgedByteLength, appendHash, appendByteLength: delta.length }) });
-          usedAppend = true;
-        } catch (error) {
-          if (!(error instanceof ArchiveRequestError) || error.status !== 409) throw error;
-          // An unconfirmed baseline cannot justify an append. Retain the source and retry in full.
-          source.appendRejected = true;
-          await atomicJson(join(state, 'tracked.json'), tracked);
-        }
-      }
-      if (!response) {
-        await upload(bytes);
-        response = await send(settings, '/api/snapshots', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(manifest) });
-      }
-      const ack = z.object({ snapshotId: z.uuid(), state: z.literal('committed'), hash: z.string(), byteLength: z.number() }).parse(await response.json());
-      if (ack.hash !== artifactHash || ack.byteLength !== bytes.length) throw new Error('Archive acknowledgement does not match the snapshot');
-      if (usedAppend) appended++;
-      source.acknowledgedHash = artifactHash; source.capture = capture; source.materialFingerprint = fingerprint; source.nativeVersion = sourceVersion;
-      delete source.appendRejected;
-      source.acknowledgedSnapshotId = ack.snapshotId; source.acknowledgedByteLength = ack.byteLength;
-      await atomicJson(join(state, 'tracked.json'), tracked);
-      committed++;
+      await delivery.enqueue(manifest, fingerprint, [bytes, ...discovered.artifacts.flatMap(item => item.bytes ? [item.bytes] : [])]);
     } catch (error) { errors.push((error as Error).message); }
   }
-  const status = { checkedAt: new Date().toISOString(), tracked: tracked.length, committed, uploadedBytes, appended, errors, capability: 'unverified' };
+  const delivered = await delivery.deliver(settings, manifest => {
+    const source = tracked.find(item => item.source === manifest.source && item.sessionId === manifest.sourceSessionId);
+    return source?.acknowledgedSnapshotId && source.acknowledgedHash && source.acknowledgedByteLength !== undefined
+      ? { snapshotId: source.acknowledgedSnapshotId, hash: source.acknowledgedHash, byteLength: source.acknowledgedByteLength,
+        materialHashes: source.capture?.materials.map(item => item.hash) ?? [] } : undefined;
+  }, async (manifest, fingerprint, ack) => {
+    const source = tracked.find(item => item.source === manifest.source && item.sessionId === manifest.sourceSessionId);
+    if (!source) throw new Error('Frozen delivery no longer has its source binding');
+    source.acknowledgedHash = ack.hash; source.acknowledgedSnapshotId = ack.snapshotId; source.acknowledgedByteLength = ack.byteLength;
+    source.capture = manifest.capture; source.materialFingerprint = fingerprint; source.nativeVersion = manifest.sourceVersion;
+    delete source.appendRejected;
+    await atomicJson(join(state, 'tracked.json'), tracked);
+  });
+  const status = { checkedAt: new Date().toISOString(), tracked: tracked.length, ...delivered, errors: [...errors, ...delivered.errors],
+    delivery: await delivery.health(), capability: 'unverified' };
   await atomicJson(join(state, 'status.json'), status);
+  await reportDeliveryHealth(state, settings, status.delivery);
   return status;
 }
