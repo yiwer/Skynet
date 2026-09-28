@@ -1,6 +1,7 @@
 import { z } from 'zod';
+import { ARTIFACT_BYTES, captureSchema, COLLECTION_BYTES } from './materials.js';
 
-export const MAX_ARTIFACT_BYTES = 8 * 1024 * 1024;
+export const MAX_ARTIFACT_BYTES = ARTIFACT_BYTES;
 export const hashSchema = z.string().regex(/^[a-f0-9]{64}$/);
 const bounded = z.string().min(1).max(256);
 export const sourceSchema = z.enum(['codex-desktop', 'claude-code-cli']);
@@ -15,10 +16,11 @@ export const manifestSchema = z.object({
   sourceOs: bounded,
   project: z.string().max(1024),
   hash: hashSchema,
-  byteLength: z.number().int().min(1).max(MAX_ARTIFACT_BYTES),
+  byteLength: z.number().int().min(0).max(MAX_ARTIFACT_BYTES),
   qualifiedAt: z.iso.datetime(),
   capability: z.literal('unverified'),
-}).strict();
+  capture: captureSchema.optional(),
+}).strict().refine(value => value.byteLength + (value.capture?.materials.reduce((n, material) => n + material.byteLength, 0) ?? 0) <= COLLECTION_BYTES, 'Capture exceeds the collection size limit');
 export type Manifest = z.infer<typeof manifestSchema>;
 
 // Native host input is an unstable external contract; preserve raw artifacts independently.

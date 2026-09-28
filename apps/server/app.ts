@@ -8,6 +8,7 @@ import { RawStore } from './raw-store.js';
 import { readEvidence } from './evidence.js';
 import { enrollmentSchema, hashSchema, manifestSchema, MAX_ARTIFACT_BYTES } from '../../packages/contracts/archive.js';
 import { createRecoveryPackage, recoveryInfo } from '../../packages/recovery.js';
+import { assembleSchema, CHUNK_BYTES } from '../../packages/contracts/materials.js';
 
 class HttpError extends Error { constructor(public statusCode: number, message: string) { super(message); } }
 const credential = (authorization?: string) => {
@@ -19,7 +20,7 @@ export async function createApp(options: { db: Database; rawDirectory: string; w
   const { db } = options;
   await migrate(db);
   const raw = new RawStore(options.rawDirectory);
-  const app = Fastify({ bodyLimit: MAX_ARTIFACT_BYTES, logger: false, requestTimeout: 30_000 });
+  const app = Fastify({ bodyLimit: CHUNK_BYTES, logger: false, requestTimeout: 30_000 });
   app.setErrorHandler((error, _request, reply) => {
     if (error instanceof z.ZodError) return reply.code(400).send({ error: '请求格式无效' });
     const code = (error as { statusCode?: number }).statusCode ?? 500;
@@ -76,6 +77,11 @@ export async function createApp(options: { db: Database; rawDirectory: string; w
     const chunk = await db.query('SELECT byte_length FROM chunks WHERE device_id=$1 AND hash=$2', [owner.id, manifest.hash]);
     if (!chunk.rows[0] || chunk.rows[0].byte_length !== manifest.byteLength) throw new HttpError(409, '原件尚未持久化或长度不匹配');
     await raw.read(owner.id, manifest.hash); // Never acknowledge a missing or damaged artifact.
+    for (const material of manifest.capture?.materials ?? []) {
+      const stored = await db.query('SELECT byte_length FROM chunks WHERE device_id=$1 AND hash=$2', [owner.id, material.hash]);
+      if (!stored.rows[0] || stored.rows[0].byte_length !== material.byteLength) throw new HttpError(409, '关联原件尚未持久化或长度不匹配');
+      if ((await raw.read(owner.id, material.hash)).length !== material.byteLength) throw new HttpError(409, '关联原件长度不匹配');
+    }
     const manifestHash = digest(JSON.stringify(manifest));
     const id = randomUUID();
     const result = await db.query(`INSERT INTO snapshots(id,device_id,source_session_id,manifest_hash,manifest,hash)
@@ -84,6 +90,24 @@ export async function createApp(options: { db: Database; rawDirectory: string; w
     [id, owner.id, manifest.sourceSessionId, manifestHash, manifest, manifest.hash]);
     return { snapshotId: result.rows[0].id, state: 'committed', hash: manifest.hash, byteLength: manifest.byteLength,
       committedAt: result.rows[0].committed_at, backup: 'single-copy' };
+  });
+
+  app.post('/api/artifacts/assemble', { onRequest: deviceGuard }, async request => {
+    const owner = await device(request.headers.authorization);
+    const input = assembleSchema.parse(request.body);
+    const parts: Buffer[] = [];
+    for (const part of input.chunks) {
+      const stored = await db.query('SELECT byte_length FROM chunks WHERE device_id=$1 AND hash=$2', [owner.id, part.hash]);
+      if (!stored.rows[0] || stored.rows[0].byte_length !== part.byteLength) throw new HttpError(409, '分块未持久化');
+      const bytes = await raw.read(owner.id, part.hash);
+      if (bytes.length !== part.byteLength) throw new HttpError(409, '分块长度不匹配');
+      parts.push(bytes);
+    }
+    const bytes = Buffer.concat(parts);
+    if (digest(bytes) !== input.hash) throw new HttpError(422, '组装原件哈希不匹配');
+    await raw.write(owner.id, input.hash, bytes);
+    await db.query('INSERT INTO chunks(device_id,hash,byte_length) VALUES($1,$2,$3) ON CONFLICT DO NOTHING', [owner.id, input.hash, bytes.length]);
+    return { state: 'staged', hash: input.hash, byteLength: bytes.length };
   });
 
   app.get('/api/me', { onRequest: readerGuard }, async request => reader(request.headers.authorization));
@@ -118,6 +142,21 @@ export async function createApp(options: { db: Database; rawDirectory: string; w
     const record = await snapshot((request.params as { id: string }).id);
     return reply.header('Content-Disposition', `attachment; filename="${record.id}.jsonl"`)
       .type('application/octet-stream').send(await raw.read(record.device_id, record.hash));
+  });
+  app.get('/api/snapshots/:id/history', { onRequest: readerGuard }, async request => {
+    const record = await snapshot((request.params as { id: string }).id);
+    const result = await db.query(`SELECT id,committed_at,hash,manifest FROM snapshots
+      WHERE device_id=$1 AND source=$2 AND source_session_id=$3 ORDER BY committed_at DESC,id DESC LIMIT 100`,
+    [record.device_id, record.source, record.source_session_id]);
+    return { snapshots: result.rows, limit: 100 };
+  });
+  app.get('/api/snapshots/:id/materials/:materialId', { onRequest: readerGuard }, async (request, reply) => {
+    const params = request.params as { id: string; materialId: string };
+    const record = await snapshot(params.id);
+    const material = manifestSchema.parse(record.manifest).capture?.materials.find(item => item.id === params.materialId);
+    if (!material) throw new HttpError(404, '此快照没有该关联材料');
+    return reply.header('Content-Disposition', `attachment; filename="${material.id}.bin"`).type('application/octet-stream')
+      .send(await raw.read(record.device_id, material.hash));
   });
   app.get('/api/snapshots/:id/recovery', { onRequest: readerGuard }, async (request, reply) => {
     const record = await snapshot((request.params as { id: string }).id);
