@@ -171,7 +171,7 @@ export async function collectOnce(state: string) {
       for (const item of discovered.artifacts) {
         if (item.bytes && !source.capture?.materials.some(old => old.hash === item.material.hash)) await upload(item.bytes);
       }
-      let response: Response | undefined;
+      let response: Response | undefined; let usedAppend = false;
       if (source.acknowledgedSnapshotId && source.acknowledgedHash && source.acknowledgedByteLength
         && bytes.length > source.acknowledgedByteLength
         && hash(bytes.subarray(0, source.acknowledgedByteLength)) === source.acknowledgedHash) {
@@ -181,7 +181,7 @@ export async function collectOnce(state: string) {
           response = await send(settings, '/api/snapshots/append', { method: 'POST', headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ manifest, baseSnapshotId: source.acknowledgedSnapshotId, baseHash: source.acknowledgedHash,
               baseByteLength: source.acknowledgedByteLength, appendHash, appendByteLength: delta.length }) });
-          appended++;
+          usedAppend = true;
         } catch (error) {
           if (!(error instanceof ArchiveRequestError) || error.status !== 409) throw error;
           // An unconfirmed baseline cannot justify an append. Retain the source and retry in full.
@@ -195,6 +195,7 @@ export async function collectOnce(state: string) {
       }
       const ack = z.object({ snapshotId: z.uuid(), state: z.literal('committed'), hash: z.string(), byteLength: z.number() }).parse(await response.json());
       if (ack.hash !== artifactHash || ack.byteLength !== bytes.length) throw new Error('Archive acknowledgement does not match the snapshot');
+      if (usedAppend) appended++;
       source.acknowledgedHash = artifactHash; source.capture = capture; source.materialFingerprint = fingerprint; source.nativeVersion = sourceVersion;
       source.acknowledgedSnapshotId = ack.snapshotId; source.acknowledgedByteLength = ack.byteLength;
       await atomicJson(join(state, 'tracked.json'), tracked);
