@@ -24,6 +24,9 @@ function App() {
   const [canManageIdentities, setCanManageIdentities] = useState(false);
   const [view, setView] = useState<'archive' | 'identities' | 'delivery'>('archive');
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
+  const [sessionCursor, setSessionCursor] = useState<string | null>(null);
+  const [nextSessionCursor, setNextSessionCursor] = useState<string | null>(null);
+  const [sessionRetry, setSessionRetry] = useState(0);
   const [detail, setDetail] = useState<Detail | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailError, setDetailError] = useState('');
@@ -38,7 +41,7 @@ function App() {
   const [exportStatus, setExportStatus] = useState('');
   function logout(message = '') {
     setToken(''); setName(''); setEmployeeId(''); setCanManageIdentities(false); setView('archive');
-    setSessions([]); setDetail(null); setError(message);
+    setSessions([]); setSessionCursor(null); setNextSessionCursor(null); setDetail(null); setError(message);
   }
 
   useEffect(() => {
@@ -64,12 +67,12 @@ function App() {
   useEffect(() => {
     if (!token) return;
     const abort = new AbortController(); setBusy(true); setError('');
-    request('/api/sessions', token, abort.signal).then(response => response.json()).then(data => {
-      if (!abort.signal.aborted) setSessions(data.sessions);
+    request(`/api/sessions${sessionCursor ? `?cursor=${encodeURIComponent(sessionCursor)}` : ''}`, token, abort.signal).then(response => response.json()).then(data => {
+      if (!abort.signal.aborted) { setSessions(previous => sessionCursor ? [...previous, ...data.sessions] : data.sessions); setNextSessionCursor(data.nextCursor); }
     }).catch(failure => { if (!abort.signal.aborted) setError(failure.message); })
       .finally(() => { if (!abort.signal.aborted) setBusy(false); });
     return () => abort.abort();
-  }, [token, refresh]);
+  }, [token, refresh, sessionCursor, sessionRetry]);
   useEffect(() => {
     setDetail(null); setDetailError(''); setDetailLoading(false);
     setExportError(''); setExportStatus('');
@@ -108,7 +111,7 @@ function App() {
         {canManageIdentities && <button aria-current={view === 'identities' ? 'page' : undefined} onClick={() => setView('identities')}>接入与设备</button>}</nav>
       {view === 'delivery' ? <DeviceDelivery token={token} onUnauthorized={() => logout('身份已停用或凭据失效，请重新登录。')} /> : view === 'identities' && canManageIdentities ? <IdentityManagement token={token} currentEmployeeId={employeeId}
         onUnauthorized={() => logout('身份已停用或凭据失效，请重新登录。')} /> : <>
-      <div className="heading"><div><p className="eyebrow">共享存档 · 北京时间</p><h1>会话原件</h1></div><button disabled={busy} onClick={() => setRefresh(value => value + 1)}>{busy ? '正在刷新…' : '刷新存档'}</button></div>
+      <div className="heading"><div><p className="eyebrow">共享存档 · 北京时间</p><h1>会话原件</h1></div><button disabled={busy} onClick={() => { setSessionCursor(null); setRefresh(value => value + 1); }}>{busy ? '正在刷新…' : '刷新存档'}</button></div>
       <p className="notice">当前保存单副本。原件已提交与原生恢复已验证是不同状态；Desktop 原生能力待验证。</p>
       <InstallationHelp />
       <div className="workspace"><aside aria-label="会话列表"><h2>最近会话 <span>{sessions.length}</span></h2>
@@ -116,7 +119,8 @@ function App() {
         {!busy && sessions.length === 0 && <p className="muted">还没有已提交的会话。后台上传后刷新；暂存材料不会显示为已存档。</p>}
         <nav>{sessions.map(session => <a key={session.id} href={`#${session.id}`} className={`session ${selected === session.id ? 'selected' : ''}`} aria-current={selected === session.id ? 'page' : undefined}>
           <strong>{session.employee}</strong><span>{sourceLabel(session.source)}</span><span className="project">{session.project || '未归类项目'}</span><small>{date(session.committed_at)}</small><span className="badge">原件已提交</span></a>)}</nav>
-        <p className="muted small">最多显示最近 100 条会话。</p></aside>
+        {nextSessionCursor && <button disabled={busy} onClick={() => { setSessionCursor(nextSessionCursor); setSessionRetry(value => value + 1); }}>加载更多会话</button>}
+        <p className="muted small">按提交时间分页读取；刷新可查看最新快照。</p></aside>
         <article aria-label="会话详情">{!selected ? <div className="empty"><h2>选择一条会话</h2><p>阅读消息、工具结果与对应原件位置。</p></div> : detailLoading ? <p role="status">正在读取会话…</p> : detailError ? <>
           <p className="error" role="alert">{detailError}</p><button onClick={() => setDetailRetry(value => value + 1)}>重试读取会话</button>
         </> : detail && <>

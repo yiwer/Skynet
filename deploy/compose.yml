@@ -17,6 +17,7 @@ services:
     build: ..
     environment:
       DATABASE_URL: postgresql://skynet:${POSTGRES_PASSWORD:?set a generated hex password}@db:5432/skynet
+      SKYNET_PUBLIC_ORIGIN: https://${SKYNET_HOST:?set the HTTPS host name}
     volumes:
       - originals:/data/raw
     depends_on:

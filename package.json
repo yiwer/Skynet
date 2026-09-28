@@ -16,10 +16,12 @@
     "demo": "tsx tests/demo.ts",
     "test:linux": "tsx tests/linux-smoke.ts",
     "test:native-recovery": "tsx --test tests/native-recovery.test.ts",
-    "test:codex-cli-native": "tsx --test tests/native-codex-cli.test.ts"
+    "test:codex-cli-native": "tsx --test tests/native-codex-cli.test.ts",
+    "test:mcp-native": "tsx --test tests/native-mcp.test.ts"
   },
   "dependencies": {
     "@fastify/static": "^10.1.5",
+    "@modelcontextprotocol/sdk": "1.30.1",
     "fastify": "^5.6.1",
     "pg": "^8.16.3",
     "react": "^19.2.0",
