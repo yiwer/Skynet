@@ -79,6 +79,21 @@ test('ordinary Claude hooks archive two projects and a server-only package resum
       const installed = await installAgent(directory, origin, sourceEnv, employee.enrollmentCredential);
       installedState = installed.status.stateDirectory; state = join(installedState!, 'sources', 'claude-code-cli');
       assert.equal(installed.status.clients.find((item: any) => item.source === 'claude-code-cli').detected, true);
+      // Setup's terminal has already closed. Kill only this isolated, authenticated
+      // installation's worker and prove real native activity reaches the archive
+      // after its supervisor restarts it, without another setup or enrollment Key.
+      const before = JSON.parse(await installed.run('status')); process.kill(before.worker.pid, 'SIGKILL');
+      let after: any;
+      for (let attempt = 0; attempt < 40; attempt++) {
+        after = JSON.parse(await installed.run('status'));
+        if (after.background === 'running' && after.worker.instance !== before.worker.instance) break;
+        await setTimeout(200);
+      }
+      assert.equal(after.background, 'running'); assert.notEqual(after.worker.instance, before.worker.instance);
+      assert.equal(after.deviceId, before.deviceId); assert.equal(after.supervisor.instance, before.supervisor.instance);
+      await writeFile(join(directory, 'native-runtime-recovery.json'), JSON.stringify({ setupParentExited: true,
+        source: 'claude-code-cli', workerCrashRecovered: true, autostart: after.autostart,
+        priorWorker: before.worker.instance, currentWorker: after.worker.instance, supervisor: after.supervisor.instance }, null, 2));
     } else await sandbox.collectorCommand('setup', state, { server: origin, enrollmentCredential: employee.enrollmentCredential,
       nativeRoot: join(sourceConfig, 'projects'), source: 'claude-code-cli', sourceVersion: '2.1.281', sourceOs: process.platform });
     const hooks = Object.fromEntries(['SessionStart', 'UserPromptSubmit', 'PostToolUse', 'Stop', 'SessionEnd'].map(event => [event,

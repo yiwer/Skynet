@@ -52,6 +52,8 @@ npm run test:mcp-native
 
 已有完整普通测试 12 项全部通过；增加持久成员与定位版本后进行针对性及最终整合回归，结果见下述最终记录。真实 Codex CLI **0.157.1** 与 Claude Code **2.1.281** 已各完成正常 HTTPS DCR / PKCE 授权和 **20 次** MCP 调用，包括搜索两页、三个独立匹配及按命中位置读取精确原文后缀。验证模型实际收到结果，没有依赖仅服务端或 SDK 成功。模型是确定性 loopback；没有付费调用，没有关闭 TLS 验证，没有修改用户客户端配置或全局证书库。
 
-初次完整回归：`%TEMP%/skynet-test-cBj8QC/search-evidence.json`；持久成员、在途事务与过期回归：`%TEMP%/skynet-test-B4BMNH/search-evidence.json`；真实 MCP：`%TEMP%/skynet-test-SQXBme/native-mcp-evidence.json`。后续最终验证使用独立目录并在此追加，避免把早期测试视为最终集成测试。
+初次完整回归：`%TEMP%/skynet-test-cBj8QC/search-evidence.json`；持久成员、在途事务与过期回归：`%TEMP%/skynet-test-B4BMNH/search-evidence.json`；真实 MCP：`%TEMP%/skynet-test-SQXBme/native-mcp-evidence.json`。
+
+最终合入公共分支 `198856b`（#12 当前用户后台、#17 确认一致性、查询缓存有界等待修复）后，typecheck / build 与全部 **14 项**普通测试通过，97.96 秒。搜索最终证据：`%TEMP%/skynet-test-bJzbct/search-evidence.json` 与 `search-{320,375,1440}.png`，截图已视觉复核。同期一致性证据 `skynet-test-ZfWuvw`、离线补传 `skynet-test-XNgDAr`、实际 npm 安装 / 后台生命周期 `skynet-test-prSNvt`。最终两真实 CLI 各 **20 次**调用再次通过：`%TEMP%/skynet-test-1zx8Gq/native-mcp-evidence.json`；此次含持久查询集合与原件行 / block / 解析版本定位。
 
 正常 Desktop UI、真实千问分析、目标部署证书及五工作日试点仍待对应任务验收。
