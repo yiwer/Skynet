@@ -6,6 +6,7 @@ import type { Database } from './database.js';
 import { exportFormat, type ArchiveQuery } from './archive-query.js';
 import { registerMcpAuth } from './mcp-auth.js';
 import { HttpError } from './identities.js';
+import { searchSchema, locationSchema } from '../../packages/contracts/search.js';
 
 export async function registerMcp(app: FastifyInstance, db: Database, archive: ArchiveQuery, publicOrigin: string) {
   const { guard } = await registerMcpAuth(app, db, publicOrigin);
@@ -28,6 +29,10 @@ export async function registerMcp(app: FastifyInstance, db: Database, archive: A
     mcp.registerTool('list_sessions', { description: '分页列出全体员工的会话快照。nextCursor 保持同一查询时间范围。',
       annotations, inputSchema: { cursor: z.string().max(1024).optional(), limit: z.number().int().min(1).max(10).default(10) } },
     input => result(() => archive.sessions(input.cursor, input.limit)));
+    mcp.registerTool('search_sessions', { description: '按员工、项目、Agent、北京时间来源日期与字面内容组合检索。每个匹配快照返回首个命中位置；history=all 查历史快照。即使 hits 为空也必须沿 nextCursor 继续，complete 才表示全部扫描完毕。',
+      annotations, inputSchema: searchSchema }, input => result(() => archive.search(input)));
+    mcp.registerTool('read_location', { description: '打开 search_sessions 返回的固定快照证据位置，读取原文、未知原件行或关联文本。next 继续读取上下文，位置按 UTF-16 字符计数。',
+      annotations, inputSchema: { snapshotId, location: locationSchema } }, input => result(() => archive.locationPage(input.snapshotId, input.location)));
     mcp.registerTool('read_snapshot', { description: '分页读取快照原文及证据行、来源时间、完整性和恢复能力。大工具输出通过 next.textOffset 继续，零丢字。',
       annotations, inputSchema: { snapshotId, offset, textOffset: offset } },
     input => result(() => archive.evidencePage(input.snapshotId, input.offset, input.textOffset)));
