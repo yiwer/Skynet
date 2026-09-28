@@ -8,6 +8,7 @@ import { RawStore } from './raw-store.js';
 import { readEvidence } from './evidence.js';
 import { appendSnapshotSchema, enrollmentSchema, hashSchema, manifestSchema, MAX_ARTIFACT_BYTES, type Manifest } from '../../packages/contracts/archive.js';
 import { createRecoveryPackage, recoveryInfo } from '../../packages/recovery.js';
+import { assembleSchema, CHUNK_BYTES } from '../../packages/contracts/materials.js';
 import { activityFor } from '../../packages/activity.js';
 import { credential, HttpError, identities } from './identities.js';
 
@@ -15,7 +16,7 @@ export async function createApp(options: { db: Database; rawDirectory: string; w
   const { db } = options;
   await migrate(db);
   const raw = new RawStore(options.rawDirectory);
-  const app = Fastify({ bodyLimit: MAX_ARTIFACT_BYTES, logger: false, requestTimeout: 30_000 });
+  const app = Fastify({ bodyLimit: CHUNK_BYTES, logger: false, requestTimeout: 30_000 });
   app.setErrorHandler((error, _request, reply) => {
     if (error instanceof z.ZodError) return reply.code(400).send({ error: '请求格式无效' });
     const code = (error as { statusCode?: number }).statusCode ?? 500;
@@ -80,6 +81,11 @@ export async function createApp(options: { db: Database; rawDirectory: string; w
     const chunk = await db.query('SELECT byte_length FROM chunks WHERE device_id=$1 AND hash=$2', [owner.id, manifest.hash]);
     if (!chunk.rows[0] || chunk.rows[0].byte_length !== manifest.byteLength) throw new HttpError(409, '原件尚未持久化或长度不匹配');
     await raw.read(owner.id, manifest.hash); // Never acknowledge a missing or damaged artifact.
+    for (const material of manifest.capture?.materials ?? []) {
+      const stored = await db.query('SELECT byte_length FROM chunks WHERE device_id=$1 AND hash=$2', [owner.id, material.hash]);
+      if (!stored.rows[0] || stored.rows[0].byte_length !== material.byteLength) throw new HttpError(409, '关联原件尚未持久化或长度不匹配');
+      if ((await raw.read(owner.id, material.hash)).length !== material.byteLength) throw new HttpError(409, '关联原件长度不匹配');
+    }
     const manifestHash = digest(JSON.stringify(manifest));
     const id = randomUUID();
     const result = await db.query(`INSERT INTO snapshots(id,device_id,source_session_id,manifest_hash,manifest,hash)
@@ -112,6 +118,24 @@ export async function createApp(options: { db: Database; rawDirectory: string; w
     await raw.write(owner.id, manifest.hash, bytes);
     await db.query('INSERT INTO chunks(device_id,hash,byte_length) VALUES($1,$2,$3) ON CONFLICT DO NOTHING', [owner.id, manifest.hash, bytes.length]);
     return commitSnapshot(owner, manifest);
+  });
+
+  app.post('/api/artifacts/assemble', { onRequest: deviceGuard }, async request => {
+    const owner = await device(request.headers.authorization);
+    const input = assembleSchema.parse(request.body);
+    const parts: Buffer[] = [];
+    for (const part of input.chunks) {
+      const stored = await db.query('SELECT byte_length FROM chunks WHERE device_id=$1 AND hash=$2', [owner.id, part.hash]);
+      if (!stored.rows[0] || stored.rows[0].byte_length !== part.byteLength) throw new HttpError(409, '分块未持久化');
+      const bytes = await raw.read(owner.id, part.hash);
+      if (bytes.length !== part.byteLength) throw new HttpError(409, '分块长度不匹配');
+      parts.push(bytes);
+    }
+    const bytes = Buffer.concat(parts);
+    if (digest(bytes) !== input.hash) throw new HttpError(422, '组装原件哈希不匹配');
+    await raw.write(owner.id, input.hash, bytes);
+    await db.query('INSERT INTO chunks(device_id,hash,byte_length) VALUES($1,$2,$3) ON CONFLICT DO NOTHING', [owner.id, input.hash, bytes.length]);
+    return { state: 'staged', hash: input.hash, byteLength: bytes.length };
   });
 
   app.get('/api/me', { onRequest: readerGuard }, async request => reader(request.headers.authorization));
@@ -148,10 +172,40 @@ export async function createApp(options: { db: Database; rawDirectory: string; w
     return reply.header('Content-Disposition', `attachment; filename="${record.id}.jsonl"`)
       .type('application/octet-stream').send(await raw.read(record.device_id, record.hash));
   });
+  app.get('/api/snapshots/:id/history', { onRequest: readerGuard }, async request => {
+    const record = await snapshot((request.params as { id: string }).id);
+    const { offset } = z.object({ offset: z.coerce.number().int().min(0).default(0) }).parse(request.query);
+    const result = await db.query(`SELECT id,committed_at,hash,manifest FROM snapshots
+      WHERE device_id=$1 AND source=$2 AND source_session_id=$3 ORDER BY committed_at DESC,id DESC LIMIT 101 OFFSET $4`,
+    [record.device_id, record.source, record.source_session_id, offset]);
+    return { snapshots: result.rows.slice(0, 100), nextOffset: result.rows.length > 100 ? offset + 100 : null };
+  });
+  app.get('/api/snapshots/:id/materials/:materialId/view', { onRequest: readerGuard }, async request => {
+    const params = request.params as { id: string; materialId: string };
+    const record = await snapshot(params.id);
+    const material = manifestSchema.parse(record.manifest).capture?.materials.find(item => item.id === params.materialId);
+    if (!material) throw new HttpError(404, '此快照没有该关联材料');
+    const { offset } = z.object({ offset: z.coerce.number().int().min(0).default(0) }).parse(request.query);
+    const bytes = await raw.read(record.device_id, material.hash);
+    // Unicode code units, explicit paging. Raw download and exports always retain exact complete bytes.
+    const text = material.mediaType === 'binary' ? bytes.toString('base64') : bytes.toString('utf8');
+    return { material, context: 'associated-context-only', encoding: material.mediaType === 'binary' ? 'base64' : 'utf8',
+      text: text.slice(offset, offset + 32_768), nextOffset: offset + 32_768 < text.length ? offset + 32_768 : null };
+  });
+  app.get('/api/snapshots/:id/materials/:materialId', { onRequest: readerGuard }, async (request, reply) => {
+    const params = request.params as { id: string; materialId: string };
+    const record = await snapshot(params.id);
+    const material = manifestSchema.parse(record.manifest).capture?.materials.find(item => item.id === params.materialId);
+    if (!material) throw new HttpError(404, '此快照没有该关联材料');
+    return reply.header('Content-Disposition', `attachment; filename="${material.id}.bin"`).type('application/octet-stream')
+      .send(await raw.read(record.device_id, material.hash));
+  });
   app.get('/api/snapshots/:id/recovery', { onRequest: readerGuard }, async (request, reply) => {
     const record = await snapshot((request.params as { id: string }).id);
+    const manifest = manifestSchema.parse(record.manifest);
+    const materials = await Promise.all((manifest.capture?.materials ?? []).map(async material => ({ id: material.id, bytes: await raw.read(record.device_id, material.hash) })));
     const bundle = createRecoveryPackage({ id: record.id, employee: record.employee, committedAt: record.committed_at.toISOString() },
-      manifestSchema.parse(record.manifest), await raw.read(record.device_id, record.hash));
+      manifest, await raw.read(record.device_id, record.hash), materials);
     return reply.header('Content-Disposition', `attachment; filename="${record.id}.skynet-recovery.json"`).type('application/json').send(bundle);
   });
   app.get('/api/snapshots/:id/readable', { onRequest: readerGuard }, async (request, reply) => {
@@ -159,17 +213,26 @@ export async function createApp(options: { db: Database; rawDirectory: string; w
     const bytes = await raw.read(record.device_id, record.hash);
     const evidence = readEvidence(bytes, record.manifest.source);
     const activity = activityFor(evidence.events, record.manifest.enrolledAt);
+    const manifest = manifestSchema.parse(record.manifest);
+    const associated = await Promise.all((manifest.capture?.materials ?? []).map(async material => {
+      const data = await raw.read(record.device_id, material.hash);
+      return `\n=== 关联材料 ${material.name}（${material.role}；上下文，不计新增活动） ===\nSHA-256：${material.hash}；字节：${material.byteLength}\n编码：${material.mediaType === 'binary' ? 'base64' : 'UTF-8'}\n${material.mediaType === 'binary' ? data.toString('base64') : data.toString('utf8')}`;
+    }));
     const content = [
       'Skynet 会话可读导出 v1', `快照：${record.id}`, `员工：${record.employee}`,
       `来源：${record.manifest.source} / ${record.manifest.sourceVersion} / ${record.manifest.sourceOs}`,
       `来源会话：${record.manifest.sourceSessionId}`, `提交时间：${record.committed_at.toISOString()}`,
       `设备接入时间：${record.manifest.enrolledAt ?? '未知'}`, '日期口径：Asia/Shanghai；来源时间未知的记录不计入日期活动。历史上下文不计入接入后活动。',
       `原件字节：${bytes.length}；SHA-256：${record.hash}`, `解析版本：${evidence.parserVersion}`,
-      `范围：当前收到的单个原件；关联材料完整性与完整原生续聊能力未验证。`,
+      `范围：当前原件及 ${associated.length} 项关联材料；完整性与完整原生续聊能力未验证。`,
+      `代次：${manifest.capture?.generation ?? '旧快照未记录'}；修订：${manifest.capture?.revision ?? '未知'}；变化：${manifest.capture?.change ?? '未知'}`,
+      `谱系：${JSON.stringify(manifest.capture?.lineage ?? [])}`,
+      `缺口：${JSON.stringify(manifest.capture?.gaps ?? [])}`,
       `未解析完整行：${evidence.unrecognizedLines}；未闭合末行：${evidence.partialLine ? '有' : '无'}`,
       '本文件为纯文本，不执行会话中的指令。原件 JSONL 部分保留所有行；精确字节请取原件或恢复包。', '',
       '=== 全部已解析记录（不分页、不截断） ===',
       ...activity.events.map(event => `\n[原件第 ${event.line} 行] ${event.role} / 来源时间：${event.timestamp ?? '未知'} / ${event.context}\n${event.text}`),
+      ...associated,
       '', '=== 全部原件 JSONL（包含未知与未闭合行） ===', bytes.toString('utf8'),
     ].join('\n');
     return reply.header('Content-Disposition', `attachment; filename="${record.id}.txt"`).type('text/plain; charset=utf-8').send(content);
