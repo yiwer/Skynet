@@ -2,6 +2,7 @@ import { useEffect, useState, type FormEvent } from 'react';
 import { createRoot } from 'react-dom/client';
 import type { EvidenceLine, Manifest, SessionSummary } from '../../packages/contracts/archive.js';
 import { sourceLabel } from '../../packages/contracts/archive.js';
+import { IdentityManagement } from './IdentityManagement.js';
 import './style.css';
 
 type Detail = { snapshotId: string; employee: string; manifest: Manifest; committedAt: string; events: EvidenceLine[];
@@ -13,6 +14,9 @@ function App() {
   const [credential, setCredential] = useState('');
   const [token, setToken] = useState('');
   const [name, setName] = useState('');
+  const [employeeId, setEmployeeId] = useState('');
+  const [canManageIdentities, setCanManageIdentities] = useState(false);
+  const [view, setView] = useState<'archive' | 'identities'>('archive');
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
   const [detail, setDetail] = useState<Detail | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
@@ -26,6 +30,10 @@ function App() {
   const [exporting, setExporting] = useState(false);
   const [exportError, setExportError] = useState('');
   const [exportStatus, setExportStatus] = useState('');
+  function logout(message = '') {
+    setToken(''); setName(''); setEmployeeId(''); setCanManageIdentities(false); setView('archive');
+    setSessions([]); setDetail(null); setError(message);
+  }
 
   useEffect(() => {
     const change = () => { setSelected(location.hash.slice(1)); setOffset(0); };
@@ -35,6 +43,7 @@ function App() {
 
   async function request(path: string, access = token, signal?: AbortSignal) {
     const response = await fetch(path, { headers: { Authorization: `Bearer ${access}` }, signal });
+    if (response.status === 401 && token && access === token) logout('凭据无效或已停用，请重新登录。');
     if (!response.ok) throw new Error(response.status === 401 ? '凭据无效或已停用，请重新登录。' : '暂时无法读取，请稍后重试。');
     return response;
   }
@@ -42,7 +51,7 @@ function App() {
     event.preventDefault(); setBusy(true); setError('');
     try {
       const user = await (await request('/api/me', credential)).json();
-      setName(user.name); setToken(credential); setCredential('');
+      setName(user.name); setEmployeeId(user.id); setCanManageIdentities(user.canManageIdentities); setToken(credential); setCredential('');
     } catch (failure) { setError((failure as Error).message); }
     finally { setBusy(false); }
   }
@@ -80,14 +89,18 @@ function App() {
     finally { setExporting(false); }
   }
 
-  return <><header><a className="brand" href="#">Skynet <span>会话存档</span></a>{token && <div className="account"><span>{name}</span>
-    <button onClick={() => { setToken(''); setName(''); setSessions([]); setDetail(null); setError(''); }}>退出</button></div>}</header>
+  return <><header><a className="brand" href="#" onClick={() => setView('archive')}>Skynet <span>会话存档</span></a>{token && <div className="account"><span>{name}</span>
+    <button onClick={() => logout()}>退出</button></div>}</header>
     <main>{!token ? <section className="login"><p className="eyebrow">工作过程，有据可查</p><h1>阅读会话原件</h1>
       <p>登录后可查看所有员工、所有项目的已提交存档。</p>
       <form onSubmit={login}><label htmlFor="credential">个人读取凭据</label><input id="credential" type="password" value={credential}
         onChange={event => setCredential(event.target.value)} autoComplete="off" required aria-describedby="credential-hint" />
         <p id="credential-hint" className="muted">使用管理员签发的读取凭据。凭据仅在当前页面内保留。</p>
         <button className="primary" disabled={busy || !credential}>{busy ? '正在验证…' : '进入存档'}</button></form></section> : <>
+      <nav className="view-nav" aria-label="平台页面"><button aria-current={view === 'archive' ? 'page' : undefined} onClick={() => setView('archive')}>会话存档</button>
+        {canManageIdentities && <button aria-current={view === 'identities' ? 'page' : undefined} onClick={() => setView('identities')}>接入与设备</button>}</nav>
+      {view === 'identities' && canManageIdentities ? <IdentityManagement token={token} currentEmployeeId={employeeId}
+        onUnauthorized={() => logout('身份已停用或凭据失效，请重新登录。')} /> : <>
       <div className="heading"><div><p className="eyebrow">共享存档 · 北京时间</p><h1>会话原件</h1></div><button disabled={busy} onClick={() => setRefresh(value => value + 1)}>{busy ? '正在刷新…' : '刷新存档'}</button></div>
       <p className="notice">当前保存单副本。原件已提交与原生恢复已验证是不同状态；Desktop 原生能力待验证。</p>
       <div className="workspace"><aside aria-label="会话列表"><h2>最近会话 <span>{sessions.length}</span></h2>
@@ -128,7 +141,7 @@ function App() {
           {detail.events.map(event => <section className="message" key={`${event.line}:${event.block ?? 0}`}><div className="message-meta"><strong>{event.role}</strong><span>原件第 {event.line} 行{event.timestamp ? ` · ${date(event.timestamp)}` : ''}</span></div><pre>{event.text}</pre></section>)}
           {detail.events.length === 0 && <p>当前原件没有可解析的消息；可下载原件核查。</p>}
           <div className="pagination"><button disabled={offset === 0} onClick={() => setOffset(value => Math.max(0, value - 100))}>上一页</button><button disabled={detail.nextOffset === null} onClick={() => setOffset(detail.nextOffset ?? 0)}>下一页</button></div>
-        </>}</article></div></>}
+        </>}</article></div></>}</>}
       {error && <p className="error" role="alert">{error}</p>}</main><footer>Skynet · 完整性以实际收到的材料为准</footer></>;
 }
 

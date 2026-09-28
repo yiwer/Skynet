@@ -55,8 +55,8 @@ export async function createSandbox() {
         server!.once('exit', code => { clearTimeout(timer); reject(new Error(`Server exited (${code}): ${stderr}`)); });
       });
     }
-    async function provision(employeeName: string) {
-      return JSON.parse(await command(process.execPath, ['dist/apps/server/provision.js'], env, JSON.stringify({ name: employeeName })));
+    async function provision(employeeName: string, canManageIdentities?: boolean) {
+      return JSON.parse(await command(process.execPath, ['dist/apps/server/provision.js'], env, JSON.stringify({ name: employeeName, canManageIdentities })));
     }
     async function collectorCommand(action: string, state: string, input?: unknown) {
       return command(process.execPath, ['dist/apps/collector/cli.js', action, '--state', state, ...(action === 'run' ? ['--once'] : [])], env, input === undefined ? '' : JSON.stringify(input));

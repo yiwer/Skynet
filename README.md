@@ -9,6 +9,7 @@
 | [首条存档链的实现与验证](docs/implementation/issue-4.md) | 本地合成演示、Linux 单机部署、公开接口、测试结果与尚未通过的 Desktop 条件 |
 | [服务器导出与隔离恢复](docs/implementation/issue-5.md) | 可读导出、版本化恢复包、严格校验与新目录恢复；真实原生后端合成续聊已测，Desktop UI 仍待验收 |
 | [Codex CLI 存档与恢复](docs/implementation/issue-6.md) | 正常 hook 信任、两个项目自动采集、公开导出及服务器包原生续聊；支持范围与 hook 延迟实测 |
+| [账号与设备停用](docs/implementation/issue-20.md) | 显式维护权限、Web 停用、逐请求撤销校验及审计；保留共享历史读取，真实安装前置验收仍待通过 |
 | [PRD v1.0](docs/requirements/PRD.md) | 首版实施与验收依据：71 条用户故事、实施决策、22 组验收场景与发布门槛 |
 | [V1 验收标准](docs/requirements/v1-acceptance.md) | 把 PRD v1.0 的 AC-01…AC-22 与 G0—G4 整理成可执行的验收步骤、证据与判定规则 |
 | [PRD v2.0](docs/requirements/PRD-v2.md) | V2：数据报表、对话视图、活动记录、会话组装审计与员工使用能力评估；用户故事 72—176，验收场景 AC-23…AC-38 |
