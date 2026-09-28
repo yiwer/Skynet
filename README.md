@@ -14,6 +14,7 @@
 | [npm 单授权值接入](docs/implementation/issue-11.md) | 内部离线 npm 包、自动检测与配置、私有共享身份/后台、真实 CLI 安装链；完整 G1 与 Desktop 仍待验收 |
 | [账号与设备停用](docs/implementation/issue-20.md) | 显式维护权限、Web 停用、逐请求撤销校验及审计；保留共享历史读取，真实安装前置验收仍待通过 |
 | [离线持久队列与补传](docs/implementation/issue-16.md) | 原件与关联材料先落盘再交付、跨进程退避、ACK 后清理、设备同步页面；完整 G2 仍待验收 |
+| [崩溃与确认丢失后的快照一致性](docs/implementation/issue-17.md) | 持久上传键、事务提交、接入确认恢复及进程强杀回归；完整 G2 仍待验收 |
 | [Agent 内授权读取](docs/implementation/issue-26.md) | HTTPS MCP / OAuth、共享原文与材料分页、完整导出；两个真实 CLI 正常授权与查询已测，完整发布门槛仍待验收 |
 | [PRD v1.0](docs/requirements/PRD.md) | 首版实施与验收依据：71 条用户故事、实施决策、22 组验收场景与发布门槛 |
 | [V1 验收标准](docs/requirements/v1-acceptance.md) | 把 PRD v1.0 的 AC-01…AC-22 与 G0—G4 整理成可执行的验收步骤、证据与判定规则 |

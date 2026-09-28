@@ -23,6 +23,7 @@ test('frozen offline generations survive source loss and process/server restarts
       const parts: Buffer[] = []; for await (const part of incoming) parts.push(Buffer.from(part));
       const response = await fetch(`${upstream}${path}`, { method: incoming.method,
         headers: { ...(incoming.headers.authorization ? { Authorization: incoming.headers.authorization } : {}),
+          ...(incoming.headers['idempotency-key'] ? { 'Idempotency-Key': String(incoming.headers['idempotency-key']) } : {}),
           ...(incoming.headers['content-type'] ? { 'Content-Type': incoming.headers['content-type'] } : {}) },
         body: parts.length ? Buffer.concat(parts) : undefined });
       const content = Buffer.from(await response.arrayBuffer());

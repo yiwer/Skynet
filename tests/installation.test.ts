@@ -78,7 +78,11 @@ test('offline npm package with scripts disabled → one key setup → owned hook
     await command(claudeHook.command, claudeHook.args, env, JSON.stringify({ hook_event_name: 'UserPromptSubmit', session_id: claudeId, transcript_path: claudePath, cwd: '/synthetic/claude' }));
     for (let attempt = 0; attempt < 60; attempt++) { sessions = (await (await fetch(`${origin}/api/sessions`, { headers })).json()).sessions; if (sessions.length === 2) break; await setTimeout(200); }
     assert.equal(sessions.length, 2);
-    const recoveries = await Promise.all(sessions.map(async item => (await fetch(`${origin}/api/snapshots/${item.id}`, { headers })).json()));
+    const recoveries = await Promise.all(sessions.map(async item => {
+      const detail = await fetch(`${origin}/api/snapshots/${item.id}`, { headers });
+      assert.equal(detail.status, 200);
+      return detail.json();
+    }));
     assert.ok(recoveries.every(item => item.employee === '安装合成员工'));
     assert.ok(recoveries.every(item => item.deviceId === identity.deviceId), 'both adapters commit under one server-owned device');
     const status = JSON.parse(await installed.run('status')); assert.equal(status.clients.find((client: any) => client.source === 'codex-cli').confirmedUploads, 1);
