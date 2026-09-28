@@ -14,15 +14,16 @@
 - #9：代次、精确关联材料、分块上传和 v2 恢复包已通过 `70befed` 合并，集成的 7 项普通测试通过。真实 Codex 后端分支经服务器包恢复后保留父文本、工具和图像；独立附件数据库回填、Claude 侧文件续聊映射及 Desktop UI 仍未验证。每件 64 MiB、集合 128 MiB 的边界和超限缺口明确显示。
 - #11：内部 npm 包、单 Key setup、受限中央身份、共享后台和分项状态已通过 `acd2f5b` 合并，集成 8 项普通测试通过。两个真实 CLI 均通过安装入口采集及服务器独立恢复；Codex 另覆盖交互终端和 exec。稳定 launcher 200 次 P95 为 71.59 ms。G0/G1 仍未通过，当前后台尚不代表登录自启。
 - #12：开始实现终端退出后的后台运行、受控崩溃恢复及当前用户自启机制；真实 Desktop 图标启动和重新登录/重启仍须实际验收。
-- #16：开始实现原件与清单先持久入队、断网退避补传、积压和拒绝状态；与 #11 共用身份和后台接口。G1 安装前置验收仍开放。
+- #16：原件与清单先持久入队、断网退避补传、配额和设备同步状态已通过 `4ce4170` 合并。集成 10 项普通测试通过；实现分支另通过两个 CLI 安装模式及 Desktop 后端的原生回归。离线后改写/删除源头、429、错误凭据及错误 ACK 均保留队列；G1/G2 仍开放。
+- #17：开始补齐上传幂等冲突、服务提交与客户端推进之间的崩溃窗口，以及 setup 注册确认丢失后的身份恢复。
 - #20：维护者停用账号/设备、逐请求撤销及操作审计已通过 `ec65e04` 合并；与 #8 集成的 6 项公开流程测试通过，可信接入边界保留。#11 安装前置验收仍未通过。
-- #26：已开始实现个人 OAuth 授权的 HTTPS MCP 读取与导出，复用已合并的身份撤销边界；尚未完成真实客户端授权验收。
-- #10、#13–#15、#17–#19、#21–#25、#27–#33：尚未完成；依赖与门槛继续按 ticket 图核查。
+- #26：个人 OAuth 授权的 HTTPS MCP 读取与导出正在收尾；实现分支已通过两个真实 CLI 的正常授权、分页和导出字节校验，模型为确定性替身。共享查询缓存与最终集成回归尚未完成，完整门禁仍开放。
+- #10、#13–#15、#18–#19、#21–#25、#27–#33：尚未完成；依赖与门槛继续按 ticket 图核查。
 - G0–G4：未通过。原生恢复、真实分析、客户端 MCP 授权与五个工作日试点必须保留实测证据。
 - [草稿 PR #55](https://github.com/yiwer/Skynet/pull/55) 已保存实现与规格关闭引用；保持草稿，尚无 ticket 通过验收或被关闭。
 - 本地类型检查、构建、公开入口 E2E、Linux 容器持久卷重启验证及初次 GitHub CI 通过；[两路评审](../implementation/review-issue-4.md) 的可修复代码问题已在 `9ad3277` 修复，并通过 `920b92f` 合并，回归检查通过。
 
-运行与复现见 [首条存档链](../implementation/issue-4.md)、[导出与恢复](../implementation/issue-5.md)、[Codex CLI 链路](../implementation/issue-6.md)、[Claude CLI 链路](../implementation/issue-7.md)、[旧会话与增量](../implementation/issue-8.md)、[关联材料](../implementation/issue-9.md)、[身份停用](../implementation/issue-20.md)。目前需补齐的外部条件见 [原生客户端验收状态](../implementation/native-validation-status.md)。
+运行与复现见 [首条存档链](../implementation/issue-4.md)、[导出与恢复](../implementation/issue-5.md)、[Codex CLI 链路](../implementation/issue-6.md)、[Claude CLI 链路](../implementation/issue-7.md)、[旧会话与增量](../implementation/issue-8.md)、[关联材料](../implementation/issue-9.md)、[单 Key 安装](../implementation/issue-11.md)、[离线补传](../implementation/issue-16.md)、[身份停用](../implementation/issue-20.md)。目前需补齐的外部条件见 [原生客户端验收状态](../implementation/native-validation-status.md)。
 
 ## 已确认的开发环境
 
