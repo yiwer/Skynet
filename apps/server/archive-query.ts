@@ -7,6 +7,8 @@ import { activityFor, beijingDate } from '../../packages/activity.js';
 import { manifestSchema } from '../../packages/contracts/archive.js';
 import { createRecoveryPackage, recoveryInfo } from '../../packages/recovery.js';
 import { QueryCache } from './query-cache.js';
+import { archiveSearch } from './archive-search.js';
+import { locationSchema, type EvidenceLocation } from '../../packages/contracts/search.js';
 
 export const exportFormat = z.enum(['raw', 'readable', 'recovery']);
 export type ExportFormat = z.infer<typeof exportFormat>;
@@ -20,6 +22,7 @@ const textEnd = (text: string, start: number, length: number) => {
 
 // Authentication belongs to each transport. Facts, evidence locations and exports belong here.
 export function archiveQuery(db: Database, raw: RawStore) {
+  const search = archiveSearch(db, raw);
   // Sizes are charged conservatively for UTF-16 text and native JSON parse structures.
   const evidenceCache = new QueryCache<Awaited<ReturnType<typeof parsed>>>(192 * 1024 * 1024, value => value.estimatedBytes);
   const exportCache = new QueryCache<{ bytes: Buffer; contentType: string; filename: string; text?: string }>(256 * 1024 * 1024,
@@ -66,11 +69,11 @@ export function archiveQuery(db: Database, raw: RawStore) {
     const activity = activityFor(evidence.events, record.manifest.enrolledAt);
     return { record, evidence, activity, recovery: recoveryInfo(record.manifest, bytes), estimatedBytes: bytes.length * 3 };
   }
-  async function detail(id: string, offset = 0) {
+  async function detail(id: string, offset = 0, summary = false) {
     const { record, evidence, activity, recovery } = await evidenceCache.get(`${id}:${beijingDate(new Date())}`, () => parsed(id));
     return { snapshotId: record.id, employee: record.employee, deviceId: record.device_id, manifest: record.manifest,
       committedAt: record.committed_at, state: 'committed', backup: 'single-copy', ...evidence, recovery,
-      activity: activity.activity, events: activity.events.slice(offset, offset + 100), total: evidence.events.length,
+      activity: activity.activity, events: summary ? [] : activity.events.slice(offset, offset + 100), total: evidence.events.length,
       nextOffset: offset + 100 < evidence.events.length ? offset + 100 : null };
   }
   async function evidencePage(id: string, offset = 0, textOffset = 0) {
@@ -182,6 +185,25 @@ export function archiveQuery(db: Database, raw: RawStore) {
     return { material: file.material, context: 'associated-context-only', encoding: file.material.mediaType === 'binary' ? 'base64' : 'utf8',
       text: text.slice(offset, end), nextOffset: end < text.length ? end : null };
   }
-  return { sessions, snapshot, detail, evidencePage, manifestPage, exported, prepareExport, exportPage, history, material, materialPage };
+  async function locationPage(id: string, input: EvidenceLocation) {
+    const location = locationSchema.parse(input);
+    if (location.kind === 'raw') return search.rawPage(await snapshot(id), location.line, location.textOffset);
+    if (location.kind === 'material') {
+      const page = await materialPage(id, location.materialId, location.textOffset, 2048);
+      return { ...page, snapshotId: id, kind: 'material', textOffset: location.textOffset,
+        next: page.nextOffset === null ? null : { ...location, textOffset: page.nextOffset } };
+    }
+    const { evidence } = await evidenceCache.get(`${id}:${beijingDate(new Date())}`, () => parsed(id));
+    if (location.parserVersion && location.parserVersion !== evidence.parserVersion) throw new HttpError(409,
+      `证据解析版本已改变；原件未变，请重新搜索，或下载原件查看第 ${location.line ?? 1} 行`);
+    const offset = location.line === undefined ? location.offset : evidence.events.findIndex(event => event.line === location.line && event.block === location.block);
+    if (offset < 0) throw new HttpError(400, '该原件行或 block 没有对应的已解析记录');
+    const page = await evidencePage(id, offset, location.textOffset);
+    const nextEvent = page.next ? evidence.events[page.next.offset] : undefined;
+    return { ...page, kind: 'event', next: page.next === null ? null : { kind: 'event', ...page.next,
+      line: nextEvent?.line, block: nextEvent?.block, parserVersion: evidence.parserVersion } };
+  }
+  return { sessions, snapshot, detail, evidencePage, manifestPage, exported, prepareExport, exportPage, history, material, materialPage,
+    search: search.search, locationPage };
 }
 export type ArchiveQuery = ReturnType<typeof archiveQuery>;
