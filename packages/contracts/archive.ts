@@ -4,9 +4,9 @@ import { ARTIFACT_BYTES, captureSchema, COLLECTION_BYTES } from './materials.js'
 export const MAX_ARTIFACT_BYTES = ARTIFACT_BYTES;
 export const hashSchema = z.string().regex(/^[a-f0-9]{64}$/);
 const bounded = z.string().min(1).max(256);
-export const sourceSchema = z.enum(['codex-desktop', 'claude-code-cli']);
+export const sourceSchema = z.enum(['codex-desktop', 'codex-cli', 'claude-code-cli']);
 export type Source = z.infer<typeof sourceSchema>;
-export const sourceLabel = (source: Source) => source === 'claude-code-cli' ? 'Claude Code CLI' : 'Codex Desktop';
+export const sourceLabel = (source: Source) => ({ 'codex-desktop': 'Codex Desktop', 'codex-cli': 'Codex CLI', 'claude-code-cli': 'Claude Code CLI' })[source];
 export const enrollmentSchema = z.object({ installationId: z.uuid(), name: bounded }).strict();
 export const manifestSchema = z.object({
   protocolVersion: z.literal(1),
@@ -18,10 +18,24 @@ export const manifestSchema = z.object({
   hash: hashSchema,
   byteLength: z.number().int().min(0).max(MAX_ARTIFACT_BYTES),
   qualifiedAt: z.iso.datetime(),
+  // Set by the server from device enrollment; absent on pre-migration snapshots.
+  enrolledAt: z.iso.datetime().optional(),
   capability: z.literal('unverified'),
   capture: captureSchema.optional(),
 }).strict().refine(value => value.byteLength + (value.capture?.materials.reduce((n, material) => n + material.byteLength, 0) ?? 0) <= COLLECTION_BYTES, 'Capture exceeds the collection size limit');
 export type Manifest = z.infer<typeof manifestSchema>;
+
+export const appendSnapshotSchema = z.object({
+  manifest: manifestSchema,
+  baseSnapshotId: z.uuid(), baseHash: hashSchema,
+  baseByteLength: z.number().int().min(1).max(MAX_ARTIFACT_BYTES),
+  appendHash: hashSchema, appendByteLength: z.number().int().min(1).max(MAX_ARTIFACT_BYTES),
+}).strict();
+
+export function sourceTimestamp(value: unknown): string | null {
+  const parsed = z.iso.datetime({ offset: true }).safeParse(value);
+  return parsed.success ? parsed.data : null;
+}
 
 // Native host input is an unstable external contract; preserve raw artifacts independently.
 export const hostEventSchema = z.object({

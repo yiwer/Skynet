@@ -2,7 +2,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { lstat, mkdir, open, readFile, unlink } from 'node:fs/promises';
 import { dirname, isAbsolute, join, parse, resolve } from 'node:path';
-import { measuredDesktop, measuredClaude, nativeMetadata, readRecoveryPackage, MAX_RECOVERY_BYTES } from '../../packages/recovery.js';
+import { measuredDesktop, measuredCodexCli, measuredClaude, nativeMetadata, readRecoveryPackage, MAX_RECOVERY_BYTES } from '../../packages/recovery.js';
 import { claudeIdentity } from '../../packages/native/claude.js';
 import { z } from 'zod';
 import { syncDirectory } from '../../packages/filesystem.js';
@@ -28,7 +28,7 @@ async function durableFile(path: string, bytes: Buffer | string) {
   try { await handle.writeFile(bytes); await handle.sync(); } finally { await handle.close(); }
 }
 
-export async function restorePackage(options: { packagePath: string; target: string; desktopVersion?: string; runtime: string }) {
+export async function restorePackage(options: { packagePath: string; target: string; sourceVersion?: string; runtime: string }) {
   const target = await newTarget(options.target);
   const info = await lstat(options.packagePath);
   if (!info.isFile() || info.isSymbolicLink() || info.size > MAX_RECOVERY_BYTES) throw new Error('Expected a bounded regular recovery package file');
@@ -43,11 +43,13 @@ export async function restorePackage(options: { packagePath: string; target: str
     }
   } catch { throw new Error('Native rollout contains invalid UTF-8 or JSON records'); }
   const isClaude = bundle.manifest.source === 'claude-code-cli';
+  const isCodexCli = bundle.manifest.source === 'codex-cli';
   let runtimeVersion: string; let parts: string[]; let fileName: string;
   if (isClaude) {
     if (!z.uuid().safeParse(bundle.manifest.sourceSessionId).success) throw new Error('Native Claude session identity is invalid');
     runtimeVersion = claudeIdentity(bundle.bytes, bundle.manifest.sourceSessionId).version;
-    if (bundle.manifest.sourceVersion !== measuredClaude.version || runtimeVersion !== measuredClaude.runtime
+    if ((options.sourceVersion !== undefined && options.sourceVersion !== bundle.manifest.sourceVersion)
+      || bundle.manifest.sourceVersion !== measuredClaude.version || runtimeVersion !== measuredClaude.runtime
       || bundle.manifest.sourceOs !== measuredClaude.os || process.platform !== measuredClaude.os || process.arch !== measuredClaude.arch) {
       throw new Error('Unsupported source/target Claude CLI, OS or architecture combination; no files were changed');
     }
@@ -55,10 +57,11 @@ export async function restorePackage(options: { packagePath: string; target: str
   } else {
     const metadata = nativeMetadata(bundle.bytes);
     if (!metadata || metadata.payload.id !== bundle.manifest.sourceSessionId) throw new Error('Native session identity or metadata is invalid');
-    if (bundle.manifest.sourceVersion !== options.desktopVersion || bundle.manifest.sourceOs !== process.platform
-      || options.desktopVersion !== measuredDesktop.version || process.platform !== measuredDesktop.os || process.arch !== measuredDesktop.arch
-      || metadata.payload.cli_version !== measuredDesktop.runtime) {
-      throw new Error('Unsupported source/target Desktop, runtime, OS or architecture combination; no files were changed');
+    const baseline = isCodexCli ? measuredCodexCli : measuredDesktop;
+    if (bundle.manifest.sourceVersion !== options.sourceVersion || bundle.manifest.sourceOs !== process.platform
+      || options.sourceVersion !== baseline.version || process.platform !== baseline.os || process.arch !== baseline.arch
+      || metadata.payload.cli_version !== baseline.runtime) {
+      throw new Error('Unsupported source/target Agent, runtime, OS or architecture combination; no files were changed');
     }
     runtimeVersion = metadata.payload.cli_version;
     const date = new Date(metadata.timestamp).toISOString();
@@ -79,11 +82,11 @@ export async function restorePackage(options: { packagePath: string; target: str
   }
   const rolloutPath = join(directory, fileName);
   await durableFile(rolloutPath, bundle.bytes); await syncDirectory(directory);
-  const result = { state: isClaude ? 'prepared-claude-unverified' : 'prepared-desktop-unverified', snapshotId: bundle.snapshot.id, sourceEmployee: bundle.snapshot.employee,
+  const result = { state: isClaude ? 'prepared-claude-unverified' : isCodexCli ? 'prepared-cli' : 'prepared-desktop-unverified', snapshotId: bundle.snapshot.id, sourceEmployee: bundle.snapshot.employee,
     sourceSessionId: bundle.manifest.sourceSessionId, nativeHome: target, rolloutPath,
     sha256: bundle.manifest.hash, byteLength: bundle.manifest.byteLength,
     sourceVersion: bundle.manifest.sourceVersion, runtimeVersion, os: process.platform,
-    desktopUi: isClaude ? 'not-applicable' : 'unverified', nativeBackend: 'fixture-tested',
+    desktopUi: isClaude || isCodexCli ? 'not-applicable' : 'unverified', nativeBackend: 'fixture-tested', source: bundle.manifest.source,
     limitation: isClaude ? 'Only this archived Claude transcript was restored. Set CLAUDE_CONFIG_DIR to nativeHome and resume sourceSessionId with independently configured authentication. Associated materials, workspace and credentials are not restored; live-model continuation is unverified.'
       : 'Only this archived rollout was restored. Associated materials, workspace, credentials and Desktop UI continuation are not restored or verified.' };
   await durableFile(join(target, 'restore-receipt.json'), JSON.stringify(result, null, 2));

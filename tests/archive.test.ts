@@ -79,6 +79,10 @@ test('public enrollment → local hook → background → committed archive → 
       responseItem({ type: 'function_call', name: 'shell', arguments: {}, call_id: 'wrong-arguments' }),
       responseItem({ type: 'function_call_output', call_id: 'missing-output' }),
       responseItem({ type: 'function_call_output', call_id: 'wrong-output', output: {} }),
+      responseItem({ type: 'function_call_output', call_id: 'mixed-output', output: [
+        { type: 'input_text', text: 'Text beside an unsupported image must not masquerade as the complete tool result' },
+        { type: 'input_image', image_url: 'synthetic://image' },
+      ] }),
       responseItem({ type: 'function_call_output', output: 'missing call ID' }),
       responseItem({ type: 'message', content: [{ type: 'input_text', text: 'missing role' }] }),
       responseItem({ type: 'message', role: 'unknown-role', content: [{ type: 'input_text', text: 'wrong role' }] }),

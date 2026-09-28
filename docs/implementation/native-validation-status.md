@@ -19,8 +19,9 @@
 - Desktop 内置运行时以 app-server 模式在隔离 home 生成原生 JSONL；将该文件复制到空 home 后，按原 ID resume 并完成合成续轮。请求中保留先前上下文。这是后端机制诊断，未经过 Skynet 服务器导出，也未验证实际 Desktop 界面、真实模型、工具历史或附件恢复。
 - 后续 #5 产品测试已越过直接复制阶段：真实内置后端生成消息及工具结果，经公开 collector/API 上传并下载恢复包，删除测试源 home 后，仅用下载包在新 home 恢复并原生续轮；原 ID、上下文和工具历史均保留。可复现脚本随仓库交付，见 [#5 记录](issue-5.md)。这仍不等于 Desktop 界面与自动 hook 采集通过。
 - `hooks/list` 能列出用户定义、当前哈希和 `untrusted` 状态。一次诊断使用过宿主的信任绕过开关以观察原生事件格式；该结果仅用于输入契约研究，**不作为接入、信任或验收证据**。产品、演示与正常验收流程不得使用该开关或写入信任哈希。
-- Codex CLI 0.157.1 已通过实际终端界面完成新建目录与单条测试 hook 的普通审核，定义详情显示 `Trusted`、事件列表显示 1 个 Active；独立 exec 随后 exit 0 并触发 UserPromptSubmit。提升权限终端不能启动共享 daemon，CLI 自身提示的 `--no-daemon` 独立运行模式可用；没有禁用 sandbox 或绕过 hook 信任。#6 仍需对产品 hook 重复正常审核并测试完整链路。
+- Codex CLI 0.157.1 已通过实际终端界面完成新建目录与单条测试 hook 的普通审核，定义详情显示 `Trusted`、事件列表显示 1 个 Active；独立 exec 随后 exit 0 并触发 UserPromptSubmit。提升权限终端不能启动共享 daemon，CLI 自身提示的 `--no-daemon` 独立运行模式可用；没有禁用 sandbox 或绕过 hook 信任。#6 后续已对真实产品 hook 重复正常审核并完成两个项目的自动存档、Web 工具结果查询及服务器包原生 CLI 恢复，见 [#6 记录](issue-6.md)。实验使用普通只读 MCP 与本机合成模型；真实代码修改、关联材料和完整 G0 仍待验证。
 - Claude Code 2.1.281 普通 print 模式实际执行 Read 并触发六种 hooks；仅复制 JSONL 到新 home 和不同空工作区，令源原件不可用后，原生 resume 仍保留原 prompt、工具请求和结果。跨工作区的 SessionStart 可能先报告不存在的推导路径，后续 UserPromptSubmit 才给出实际路径。此处是机制诊断，产品链路由 #7 继续验证。
+- #7 随后的产品链路已通过：普通 hooks 自动登记两个测试项目，后台同步并核对最终落盘哈希，认证 Web 与可读导出可查；删除测试源 home 后，公开恢复命令仅用服务器下载包建立新 home，真实 Claude CLI 以同一 UUID 续聊，模型请求保留原始消息与结构化工具结果。见 [#7 复现记录](issue-7.md)。该实验使用确定性本机模型，尚未覆盖关联材料与全部 G0。
 - Desktop 启动诊断已定位两个环境问题：隔离 profile 必须具有标准 `USERPROFILE/AppData/Roaming` 与 `Local` 目录，直接启动 MSIX 可执行文件还缺少包身份。修正目录并经官方 `Invoke-CommandInDesktopPackage` 做一次隔离包上下文诊断后，未修改安装版在约 3.93 秒创建 renderer 页面目标。此结果仅证明页面目标创建，未检查 DOM 完整加载、登录、信任或续聊，也不能替代普通测试账户的正常启动验收。原 Desktop 实例保持运行，诊断实例已关闭。
 
 原始研究、脚本和合成证据保存在执行机器的 `%TEMP%/skynet-v1-implementation/`，供后续实现代理复用；这些临时文件不构成仓库内可持续复现的发布验收材料。

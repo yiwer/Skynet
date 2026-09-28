@@ -1,11 +1,13 @@
-import { mkdir, open, rename, readFile, readdir, realpath, stat, unlink } from 'node:fs/promises';
+import { mkdir, readFile, readdir, realpath, stat, unlink } from 'node:fs/promises';
 import { createHash, randomUUID } from 'node:crypto';
 import { hostname } from 'node:os';
 import { isAbsolute, join, relative, sep } from 'node:path';
 import { z } from 'zod';
 import { hostEventSchema, manifestSchema, MAX_ARTIFACT_BYTES, sourceSchema, type Source } from '../../packages/contracts/archive.js';
+import { atomicJson } from '../../packages/filesystem.js';
 import { claudeIdentity } from '../../packages/native/claude.js';
-import { syncDirectory } from '../../packages/filesystem.js';
+export { atomicJson } from '../../packages/filesystem.js';
+export { recordHook } from './hook.js';
 
 const settingsSchema = z.object({
   server: z.url(), deviceId: z.uuid(), deviceCredential: z.string().min(32),
@@ -13,17 +15,11 @@ const settingsSchema = z.object({
   source: sourceSchema.default('codex-desktop'),
 });
 type Settings = z.infer<typeof settingsSchema>;
-const trackedSchema = z.object({ source: sourceSchema.optional(), sessionId: z.string(), transcriptPath: z.string(), project: z.string(), qualifiedAt: z.iso.datetime(), lastObservedAt: z.iso.datetime().optional(), acknowledgedHash: z.string().optional() });
+const trackedSchema = z.object({ source: sourceSchema.optional(), sessionId: z.string(), transcriptPath: z.string(), project: z.string(), qualifiedAt: z.iso.datetime(), lastObservedAt: z.iso.datetime().optional(), acknowledgedHash: z.string().optional(),
+  acknowledgedSnapshotId: z.uuid().optional(), acknowledgedByteLength: z.number().int().min(1).optional() });
 type Tracked = z.infer<typeof trackedSchema>;
 const hash = (bytes: Buffer | string) => createHash('sha256').update(bytes).digest('hex');
 
-export async function atomicJson(path: string, value: unknown) {
-  const temporary = `${path}.${randomUUID()}.tmp`;
-  const handle = await open(temporary, 'wx', 0o600);
-  try { await handle.writeFile(JSON.stringify(value)); await handle.sync(); } finally { await handle.close(); }
-  await rename(temporary, path);
-  await syncDirectory(join(path, '..'));
-}
 async function readJson(path: string) { return JSON.parse(await readFile(path, 'utf8')); }
 
 export async function setup(state: string, input: { server: string; enrollmentCredential: string; nativeRoot: string; sourceVersion: string; sourceOs: string; source?: Source }) {
@@ -52,13 +48,6 @@ export async function setup(state: string, input: { server: string; enrollmentCr
   return { deviceId: result.deviceId, state: 'bound', capability: 'unverified' };
 }
 
-export async function recordHook(state: string, event: unknown) {
-  // No imports with network side effects, network request, source scan, or transcript read here.
-  const input = hostEventSchema.parse(event);
-  await mkdir(join(state, 'spool'), { recursive: true, mode: 0o700 });
-  await atomicJson(join(state, 'spool', `${randomUUID()}.json`), { event: input, observedAt: new Date().toISOString() });
-}
-
 async function qualifiedPath(settings: Settings, transcriptPath: string) {
   if (!isAbsolute(transcriptPath)) throw new Error('Transcript path must be absolute');
   const actual = await realpath(transcriptPath);
@@ -72,8 +61,11 @@ async function qualifiedPath(settings: Settings, transcriptPath: string) {
 async function send(settings: Settings, path: string, init: RequestInit) {
   const response = await fetch(new URL(path, settings.server), { ...init,
     headers: { ...init.headers, Authorization: `Bearer ${settings.deviceCredential}` }, signal: AbortSignal.timeout(15_000) });
-  if (!response.ok) throw new Error(`Archive request failed (${response.status}); local state retained`);
+  if (!response.ok) throw new ArchiveRequestError(response.status);
   return response;
+}
+class ArchiveRequestError extends Error {
+  constructor(public status: number) { super(`Archive request failed (${status}); local state retained`); }
 }
 
 export async function collectOnce(state: string) {
@@ -104,7 +96,9 @@ export async function collectOnce(state: string) {
       }
       const transcriptPath = await qualifiedPath(settings, event.transcript_path);
       if (existing) {
-        if (existing.transcriptPath !== transcriptPath) delete existing.acknowledgedHash;
+        if (existing.transcriptPath !== transcriptPath) {
+          delete existing.acknowledgedHash; delete existing.acknowledgedSnapshotId; delete existing.acknowledgedByteLength;
+        }
         existing.transcriptPath = transcriptPath; existing.project = event.cwd ?? existing.project; existing.lastObservedAt = observedAt;
       } else {
         const qualifiedAt = queuedEvents.filter(item => item.event.session_id === event.session_id && item.observedAt >= settings.enrolledAt)
@@ -116,6 +110,13 @@ export async function collectOnce(state: string) {
     } catch (error) { errors.push((error as Error).message); }
   }
   let committed = 0;
+  let uploadedBytes = 0; let appended = 0;
+  async function upload(bytes: Buffer) {
+    const chunkHash = hash(bytes);
+    await send(settings, `/api/chunks/${chunkHash}`, { method: 'PUT', headers: { 'Content-Type': 'application/octet-stream' }, body: new Uint8Array(bytes) });
+    uploadedBytes += bytes.length;
+    return chunkHash;
+  }
   for (const source of tracked) {
     try {
       if (source.source !== settings.source) throw new Error('Tracked source does not match this collector binding');
@@ -132,20 +133,42 @@ export async function collectOnce(state: string) {
       else {
         const metadata = JSON.parse(bytes.toString('utf8').split('\n')[0]!);
         if (metadata.type !== 'session_meta' || metadata.payload?.id !== source.sessionId) throw new Error('Native session identity mismatch');
+        if (settings.source === 'codex-cli') sourceVersion = z.string().min(1).max(256).parse(metadata.payload.cli_version);
       }
       const manifest = manifestSchema.parse({ protocolVersion: 1, sourceSessionId: source.sessionId, source: settings.source,
         sourceVersion, sourceOs: settings.sourceOs, project: source.project,
         hash: artifactHash, byteLength: bytes.length, qualifiedAt: source.qualifiedAt, capability: 'unverified' });
-      await send(settings, `/api/chunks/${artifactHash}`, { method: 'PUT', headers: { 'Content-Type': 'application/octet-stream' }, body: new Uint8Array(bytes) });
-      const response = await send(settings, '/api/snapshots', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(manifest) });
+      let response: Response | undefined;
+      if (source.acknowledgedSnapshotId && source.acknowledgedHash && source.acknowledgedByteLength
+        && bytes.length > source.acknowledgedByteLength
+        && hash(bytes.subarray(0, source.acknowledgedByteLength)) === source.acknowledgedHash) {
+        const delta = bytes.subarray(source.acknowledgedByteLength);
+        const appendHash = await upload(delta);
+        try {
+          response = await send(settings, '/api/snapshots/append', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ manifest, baseSnapshotId: source.acknowledgedSnapshotId, baseHash: source.acknowledgedHash,
+              baseByteLength: source.acknowledgedByteLength, appendHash, appendByteLength: delta.length }) });
+          appended++;
+        } catch (error) {
+          if (!(error instanceof ArchiveRequestError) || error.status !== 409) throw error;
+          // An unconfirmed baseline cannot justify an append. Retain the source and retry in full.
+          delete source.acknowledgedSnapshotId; delete source.acknowledgedByteLength;
+          await atomicJson(join(state, 'tracked.json'), tracked);
+        }
+      }
+      if (!response) {
+        await upload(bytes);
+        response = await send(settings, '/api/snapshots', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(manifest) });
+      }
       const ack = z.object({ snapshotId: z.uuid(), state: z.literal('committed'), hash: z.string(), byteLength: z.number() }).parse(await response.json());
       if (ack.hash !== artifactHash || ack.byteLength !== bytes.length) throw new Error('Archive acknowledgement does not match the snapshot');
       source.acknowledgedHash = artifactHash;
+      source.acknowledgedSnapshotId = ack.snapshotId; source.acknowledgedByteLength = ack.byteLength;
       await atomicJson(join(state, 'tracked.json'), tracked);
       committed++;
     } catch (error) { errors.push((error as Error).message); }
   }
-  const status = { checkedAt: new Date().toISOString(), tracked: tracked.length, committed, errors, capability: 'unverified' };
+  const status = { checkedAt: new Date().toISOString(), tracked: tracked.length, committed, uploadedBytes, appended, errors, capability: 'unverified' };
   await atomicJson(join(state, 'status.json'), status);
   return status;
 }
