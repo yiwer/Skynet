@@ -22,13 +22,19 @@ test('offline npm package with scripts disabled → one key setup → owned hook
       await writeFile(join(bin, 'codex.cmd'), '@echo off\r\n');
       await mkdir(join(bin, 'node_modules', '@openai', 'codex', 'bin'), { recursive: true });
       await writeFile(join(bin, 'node_modules', '@openai', 'codex', 'bin', 'codex.js'), "console.log('codex-cli 0.157.1')");
-    } else { const file = join(bin, 'codex'); await writeFile(file, `#!${process.execPath}\nconsole.log('codex-cli 0.157.1')\n`); await chmod(file, 0o700); }
+      await writeFile(join(bin, 'claude.cmd'), '@echo off\r\n');
+      await mkdir(join(bin, 'node_modules', '@anthropic-ai', 'claude-code'), { recursive: true });
+      await writeFile(join(bin, 'node_modules', '@anthropic-ai', 'claude-code', 'cli.js'), "console.log('2.1.281 (Claude Code)')");
+    } else { for (const [client, text] of [['codex', 'codex-cli 0.157.1'], ['claude', '2.1.281 (Claude Code)']]) {
+      const file = join(bin, client!); await writeFile(file, `#!${process.execPath}\nconsole.log(${JSON.stringify(text)})\n`); await chmod(file, 0o700);
+    } }
     const env: NodeJS.ProcessEnv = { ...Object.fromEntries(['SystemRoot', 'WINDIR', 'COMSPEC', 'PATHEXT', 'ProgramFiles', 'ProgramFiles(x86)', 'ProgramData'].filter(key => process.env[key]).map(key => [key, process.env[key]])),
       PATH: [bin, dirname(process.execPath), ...(process.platform === 'win32' ? [join(process.env.SystemRoot!, 'System32'), join(process.env.SystemRoot!, 'System32', 'WindowsPowerShell', 'v1.0')] : ['/usr/bin', '/bin'])].join(delimiter),
       HOME: home, USERPROFILE: home, APPDATA: roaming, LOCALAPPDATA: local, XDG_STATE_HOME: join(home, 'state'),
       CODEX_HOME: codex, CLAUDE_CONFIG_DIR: join(home, '.claude'), TEMP: join(home, 'tmp'), TMP: join(home, 'tmp') };
     const existing = { hooks: { UserPromptSubmit: [{ matcher: 'third-party', hooks: [{ type: 'command', command: 'echo existing-hook' }] }] }, arbitrarySetting: { retained: true } };
     await writeFile(join(codex, 'hooks.json'), JSON.stringify(existing));
+    await mkdir(join(home, '.claude')); await writeFile(join(home, '.claude', 'settings.json'), JSON.stringify(existing));
     const employee = await sandbox.provision('安装合成员工'); const reader = await sandbox.provision('安装合成读者'); const origin = await sandbox.startServer();
     const installed = await installAgent(sandbox.directory, origin, env, employee.enrollmentCredential);
     state = installed.status.stateDirectory;
@@ -38,6 +44,8 @@ test('offline npm package with scripts disabled → one key setup → owned hook
     const identity = JSON.parse(await readFile(join(state!, 'identity.json'), 'utf8'));
     const sourceSettings = await readFile(join(state!, 'sources', 'codex-cli', 'settings.json'), 'utf8');
     assert.ok(!sourceSettings.includes(identity.deviceCredential));
+    const claudeSettings = await readFile(join(state!, 'sources', 'claude-code-cli', 'settings.json'), 'utf8');
+    assert.ok(!claudeSettings.includes(identity.deviceCredential));
     if (process.platform === 'win32') {
       const script = "$a=Get-Acl -LiteralPath $env:SKYNET_TEST_STATE; [pscustomobject]@{protected=$a.AreAccessRulesProtected;rules=@($a.Access | ForEach-Object{$_.IdentityReference.Translate([System.Security.Principal.SecurityIdentifier]).Value});sid=[System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value} | ConvertTo-Json -Compress";
       const result = JSON.parse(await command('powershell.exe', ['-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(script, 'utf16le').toString('base64')], { ...env, SKYNET_TEST_STATE: state }));
@@ -63,10 +71,22 @@ test('offline npm package with scripts disabled → one key setup → owned hook
     let sessions: any[] = [];
     for (let attempt = 0; attempt < 80; attempt++) { sessions = (await (await fetch(`${origin}/api/sessions`, { headers })).json()).sessions; if (sessions.length) break; await setTimeout(200); }
     assert.equal(sessions.length, 1); assert.equal(sessions[0].source, 'codex-cli');
+    const claudeHooks = JSON.parse(await readFile(join(home, '.claude', 'settings.json'), 'utf8'));
+    assert.deepEqual(claudeHooks.hooks.UserPromptSubmit[0], existing.hooks.UserPromptSubmit[0]);
+    const claudeId = randomUUID(); const claudePath = join(home, '.claude', 'projects', `${claudeId}.jsonl`);
+    await writeFile(claudePath, JSON.stringify({ type: 'user', sessionId: claudeId, uuid: randomUUID(), version: '2.1.281', timestamp: new Date().toISOString(),
+      message: { role: 'user', content: '同一设备的第二种来源' } }) + '\n');
+    const claudeHook = claudeHooks.hooks.UserPromptSubmit.at(-1).hooks[0];
+    await command(claudeHook.command, claudeHook.args, env, JSON.stringify({ hook_event_name: 'UserPromptSubmit', session_id: claudeId, transcript_path: claudePath, cwd: '/synthetic/claude' }));
+    for (let attempt = 0; attempt < 60; attempt++) { sessions = (await (await fetch(`${origin}/api/sessions`, { headers })).json()).sessions; if (sessions.length === 2) break; await setTimeout(200); }
+    assert.equal(sessions.length, 2);
+    const recoveries = await Promise.all(sessions.map(async item => (await fetch(`${origin}/api/snapshots/${item.id}`, { headers })).json()));
+    assert.ok(recoveries.every(item => item.employee === '安装合成员工'));
+    assert.ok(recoveries.every(item => item.deviceId === identity.deviceId), 'both adapters commit under one server-owned device');
     const status = JSON.parse(await installed.run('status')); assert.equal(status.clients.find((client: any) => client.source === 'codex-cli').confirmedUploads, 1);
     assert.ok(status.clients.find((client: any) => client.source === 'codex-cli').firstEvent);
     browser = await chromium.launch(); const page = await browser.newPage(); await page.goto(origin); await page.getByLabel('个人读取凭据').fill(reader.readerCredential); await page.getByRole('button', { name: '进入存档' }).click();
-    await page.getByRole('link').filter({ hasText: '安装合成员工' }).click(); await expect(page.getByText('会话记录显示测试通过。')).toBeVisible();
+    await page.getByRole('link').filter({ hasText: '安装合成员工' }).filter({ hasText: 'Codex CLI' }).click(); await expect(page.getByText('会话记录显示测试通过。')).toBeVisible();
     // Unknown app-server origin is retained without falsely counting Desktop work.
     const unknown = await syntheticSession(join(codex, 'sessions'));
     await command(process.execPath, [join(state!, 'skynet-launcher.mjs'), 'hook', '--state', join(state!, 'inbox', 'codex')], env, JSON.stringify(unknown.event));

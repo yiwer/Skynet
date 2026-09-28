@@ -26,8 +26,9 @@ async function version(path: string | null, client: 'codex' | 'claude') {
     // npm's Windows shim is not an executable. Resolve the official package's JS
     // launcher directly rather than passing a shell command through PATH.
     const isShim = path.endsWith('.cmd');
+    const packageEntry = client === 'codex' ? ['@openai', 'codex', 'bin', 'codex.js'] : ['@anthropic-ai', 'claude-code', 'cli.js'];
     const output = await execute(isShim ? process.execPath : path, isShim
-      ? [join(path, '..', 'node_modules', '@openai', 'codex', 'bin', 'codex.js'), '--version'] : ['--version'],
+      ? [join(path, '..', 'node_modules', ...packageEntry), '--version'] : ['--version'],
     { windowsHide: true, timeout: 10_000, env: { ...process.env, SKYNET_KEY: undefined } });
     return (client === 'codex' ? /^codex-cli (\S+)/ : /^(\S+) \(Claude Code\)/).exec(output.stdout.trim())?.[1] ?? null;
   } catch { return null; }

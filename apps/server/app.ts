@@ -164,7 +164,7 @@ export async function createApp(options: { db: Database; rawDirectory: string; w
     const bytes = await raw.read(record.device_id, record.hash);
     const evidence = readEvidence(bytes, record.manifest.source);
     const activity = activityFor(evidence.events, record.manifest.enrolledAt);
-    return { snapshotId: record.id, employee: record.employee, manifest: record.manifest,
+    return { snapshotId: record.id, employee: record.employee, deviceId: record.device_id, manifest: record.manifest,
       committedAt: record.committed_at, state: 'committed', backup: 'single-copy', ...evidence, recovery: recoveryInfo(record.manifest, bytes),
       activity: activity.activity, events: activity.events.slice(query.offset, query.offset + 100), total: evidence.events.length,
       nextOffset: query.offset + 100 < evidence.events.length ? query.offset + 100 : null };

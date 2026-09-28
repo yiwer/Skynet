@@ -47,6 +47,8 @@ const pty = createRequire(join(ptyRoot, 'package.json'))('node-pty');
         const beforePrompt = plain().length;
         send(probePrompt, 'Run the isolated loopback-provider conversation through the normal interactive CLI'); await setTimeout(300);
         send('\r', 'Submit the synthetic interactive prompt');
+        await setTimeout(1000);
+        if (!plain().slice(beforePrompt).includes('Synthetic CLI source or continuation completed')) send('\r', 'Confirm the prompt after terminal paste handling');
         await waitFor(/Synthetic CLI source or continuation completed/, beforePrompt);
       }
       send('/quit', 'Enter the normal quit command'); await setTimeout(400);
