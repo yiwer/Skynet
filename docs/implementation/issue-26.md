@@ -73,6 +73,8 @@ npm run test:mcp-native
 
 ## 尚待整体验收
 
-公网 / 内网实际域名证书、目标环境浏览器原生信任、其他客户端版本 / OS、真实正常用户 Desktop、真实分析和五工作日试点仍待验证。refresh 轮换通过公开 token API 验证，尚未让两个原生客户端各等待 15 分钟再验证自动刷新。不得把本票两 CLI 的合成模型 MCP 成功等同 G0—G4 或整个 V1 完成。
+2026-09-28 后续补做自然过期诊断：两个原生 CLI 首轮各完成 17 次调用后，实际等待 16 分钟，超过服务器真实 900 秒 access lifetime；不改数据库时间、TTL 或客户端凭据。两者再次启动后各自正常刷新令牌，无第二次登录，并各完成相同 17 次读取与字节校验。等待及后续读取实测 962,012 ms，整个诊断 969.28 秒；等待后流量包含两次成功 token 请求。证据为 `%TEMP%/skynet-test-LdFPlx/native-refresh-evidence.json`，完整证据 `native-mcp-refresh-full-evidence.json`。临时生成器为 `%TEMP%/skynet-v1-implementation/prepare-mcp-refresh-probe.mjs`，尚未纳入永久回归；所有测试进程与服务已关闭。
+
+公网 / 内网实际域名证书、目标环境浏览器原生信任、其他客户端版本 / OS、真实正常用户 Desktop、真实分析和五工作日试点仍待验证。不得把本票两 CLI 的合成模型 MCP 成功等同 G0—G4 或整个 V1 完成。
 
 协议依据：[MCP authorization 2025-11-25](https://modelcontextprotocol.io/specification/2025-11-25/basic/authorization)、[Streamable HTTP](https://modelcontextprotocol.io/specification/2025-11-25/basic/transports)、[官方 TypeScript SDK](https://github.com/modelcontextprotocol/typescript-sdk)。实现选择 DCR 和同域授权服务器；原生版本能力以上述实际测试为准。
