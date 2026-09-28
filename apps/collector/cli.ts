@@ -11,8 +11,8 @@ const { values, positionals } = parseArgs({ allowPositionals: true, options: {
   output: { type: 'string' }, origin: { type: 'string' }, deployment: { type: 'string' },
 } });
 const command = positionals[0];
-if (!['setup', 'status', 'restore', 'pack-agent'].includes(command ?? '') && !values.state) throw new Error('--state must name an explicit private collector directory');
-const state = values.state ? resolve(values.state) : ['setup', 'status'].includes(command ?? '') ? (await import('./install-state.js')).defaultState() : '';
+if (!['setup', 'status', 'start', 'stop', 'autostart-remove', 'restore', 'pack-agent'].includes(command ?? '') && !values.state) throw new Error('--state must name an explicit private collector directory');
+const state = values.state ? resolve(values.state) : ['setup', 'status', 'start', 'stop', 'autostart-remove'].includes(command ?? '') ? (await import('./install-state.js')).defaultState() : '';
 async function stdin() {
   let input = '';
   for await (const part of process.stdin) {
@@ -50,12 +50,25 @@ if (command === 'pack-agent') {
     console.log(JSON.stringify(await setup(state, await stdin())));
   } else console.log(JSON.stringify(await (await import('./installer.js')).install(state)));
 } else if (command === 'background') {
+  await (await import('./supervisor.js')).runSupervisor(state);
+} else if (command === 'background-worker') {
   await (await import('./runtime.js')).runInstalled(state);
+} else if (command === 'start') {
+  const { installationSchema, jsonFile } = await import('./install-state.js');
+  const installation = installationSchema.parse(await jsonFile(join(state, 'installation.json')));
+  await (await import('./supervisor.js')).ensureRunning(state, installation.node, installation.launcher);
+  console.log(JSON.stringify(await (await import('./runtime.js')).installedStatus(state)));
+} else if (command === 'stop') {
+  console.log(JSON.stringify(await (await import('./supervisor.js')).stopRuntime(state)));
+} else if (command === 'autostart-remove') {
+  console.log(JSON.stringify(await (await import('./autostart.js')).removeAutostart(state)));
 } else if (command === 'retry') {
   // Ask the owning background to retry; never start a competing installed writer.
   await (await import('../../packages/filesystem.js')).atomicJson(join(state, 'retry-request.json'), { requestedAt: new Date().toISOString() });
   console.log(JSON.stringify({ state: 'retry-requested', notice: 'The owning collector will make one immediate delivery attempt on its next sweep.' }));
 } else if (command === 'run') {
+  const settings = JSON.parse(await readFile(join(state, 'settings.json'), 'utf8'));
+  if (settings.sharedIdentity) throw new Error('Installed sources are owned by the shared background; use skynet start or skynet retry');
   const { collectOnce } = await import('./local.js');
   const lockPath = join(state, 'collector.lock');
   const lock = await open(lockPath, 'wx', 0o600).catch(() => { throw new Error('Collector lock exists; ensure no collector is running before removing a stale lock'); });
@@ -81,4 +94,4 @@ if (command === 'pack-agent') {
   }
   console.log(JSON.stringify(result));
   }
-} else throw new Error('Expected setup, hook, run, retry, status, restore, or pack-agent');
+} else throw new Error('Expected setup, start, stop, autostart-remove, hook, run, retry, status, restore, or pack-agent');

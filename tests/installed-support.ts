@@ -1,4 +1,4 @@
-import { dirname, join } from 'node:path';
+import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { command } from './support.js';
 import { mkdir, readFile } from 'node:fs/promises';
 
@@ -17,15 +17,26 @@ export async function installAgent(directory: string, origin: string, env: NodeJ
       { ...environment, SKYNET_TEST_SHIM: shim, SKYNET_TEST_COMMAND: action })
     : command(shim, [action], environment);
   const start = Date.now();
-  const stdout = await run('setup', { ...env, SKYNET_KEY: key });
+  let stdout: string;
+  try { stdout = await run('setup', { ...env, SKYNET_KEY: key }); }
+  catch (error) {
+    const candidate = resolve(process.platform === 'win32' ? env.LOCALAPPDATA! : process.platform === 'darwin'
+      ? join(env.HOME!, 'Library', 'Application Support') : env.XDG_STATE_HOME ?? join(env.HOME!, '.local', 'state'), 'Skynet');
+    const within = relative(resolve(directory), candidate);
+    if (within && within !== '..' && !within.startsWith(`..${sep}`) && !isAbsolute(within)) await stopInstalled(candidate);
+    throw error;
+  }
   const status = JSON.parse(stdout);
   return { cli, prefix, status, setupMs: Date.now() - start, packInstallAndSetupMs: Date.now() - started, output: installed + stdout,
     run };
 }
 export async function stopInstalled(state: string) {
-  try {
-    const { pid } = JSON.parse(await readFile(join(state, 'runtime.json'), 'utf8'));
-    // State is created by this test and contains its own spawned background PID.
-    process.kill(pid, 'SIGTERM');
-  } catch (error) { if (!['ENOENT', 'ESRCH'].includes((error as NodeJS.ErrnoException).code ?? '')) throw error; }
+  const launcher = join(state, 'skynet-launcher.mjs');
+  // These are uniquely generated test installations. Remove only their owned
+  // scheduled task, then ask their authenticated controller to stop its writer.
+  try { await readFile(launcher); } catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return; throw error; }
+  await command(process.execPath, [launcher, 'autostart-remove', '--state', state], process.env);
+  try { await readFile(join(state, 'runtime-control.json')); }
+  catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return; throw error; }
+  await command(process.execPath, [launcher, 'stop', '--state', state], process.env);
 }
