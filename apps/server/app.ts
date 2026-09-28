@@ -1,17 +1,18 @@
 import Fastify from 'fastify';
 import fastifyStatic from '@fastify/static';
-import { randomUUID } from 'node:crypto';
 import { resolve } from 'node:path';
 import { z } from 'zod';
-import { digest, migrate, newCredential, type Database } from './database.js';
+import { digest, migrate, type Database } from './database.js';
 import { RawStore } from './raw-store.js';
 import { readEvidence } from './evidence.js';
-import { appendSnapshotSchema, enrollmentSchema, hashSchema, manifestSchema, MAX_ARTIFACT_BYTES, sourceSchema, type Manifest } from '../../packages/contracts/archive.js';
+import { appendSnapshotSchema, hashSchema, manifestSchema, MAX_ARTIFACT_BYTES, sourceSchema } from '../../packages/contracts/archive.js';
 import { deliveryHealthSchema } from '../../packages/contracts/delivery.js';
 import { createRecoveryPackage, recoveryInfo } from '../../packages/recovery.js';
 import { assembleSchema, CHUNK_BYTES } from '../../packages/contracts/materials.js';
 import { activityFor } from '../../packages/activity.js';
-import { credential, HttpError, identities } from './identities.js';
+import { HttpError, identities } from './identities.js';
+import { archiveWriter } from './archive-write.js';
+import { enrollDevice } from './enrollment.js';
 
 export async function createApp(options: { db: Database; rawDirectory: string; webDirectory?: string }) {
   const { db } = options;
@@ -75,15 +76,7 @@ export async function createApp(options: { db: Database; rawDirectory: string; w
       nextOffset: result.rows.length > 50 ? offset + 50 : null };
   });
   app.post('/api/devices/enroll', async request => {
-    const input = enrollmentSchema.parse(request.body);
-    const employee = await db.query('SELECT id FROM employees WHERE enrollment_hash=$1 AND active', [digest(credential(request.headers.authorization))]);
-    if (!employee.rows[0]) throw new HttpError(401, '接入授权值无效或已停用');
-    const id = randomUUID(); const token = newCredential();
-    const created = await db.query(`INSERT INTO devices(id,employee_id,installation_id,name,credential_hash)
-      VALUES($1,$2,$3,$4,$5) ON CONFLICT(employee_id,installation_id) DO NOTHING RETURNING id,enrolled_at`,
-    [id, employee.rows[0].id, input.installationId, input.name, digest(token)]);
-    if (!created.rowCount) throw new HttpError(409, '该安装已绑定；请使用已有设备凭据');
-    return { deviceId: id, deviceCredential: token, employeeId: employee.rows[0].id, enrolledAt: created.rows[0].enrolled_at.toISOString() };
+    return enrollDevice(db, request.headers.authorization, request.body);
   });
 
   app.put('/api/chunks/:hash', { onRequest: deviceGuard }, async (request, reply) => {
@@ -96,28 +89,10 @@ export async function createApp(options: { db: Database; rawDirectory: string; w
     return reply.code(201).send({ hash, byteLength: request.body.length, state: 'staged' });
   });
 
-  async function commitSnapshot(owner: { id: string; enrolled_at: Date | null }, input: Manifest) {
-    // The uploader cannot choose the historical-activity boundary. Legacy devices remain unknown.
-    const manifest = manifestSchema.parse({ ...input, enrolledAt: owner.enrolled_at?.toISOString() });
-    const chunk = await db.query('SELECT byte_length FROM chunks WHERE device_id=$1 AND hash=$2', [owner.id, manifest.hash]);
-    if (!chunk.rows[0] || chunk.rows[0].byte_length !== manifest.byteLength) throw new HttpError(409, '原件尚未持久化或长度不匹配');
-    await raw.read(owner.id, manifest.hash); // Never acknowledge a missing or damaged artifact.
-    for (const material of manifest.capture?.materials ?? []) {
-      const stored = await db.query('SELECT byte_length FROM chunks WHERE device_id=$1 AND hash=$2', [owner.id, material.hash]);
-      if (!stored.rows[0] || stored.rows[0].byte_length !== material.byteLength) throw new HttpError(409, '关联原件尚未持久化或长度不匹配');
-      if ((await raw.read(owner.id, material.hash)).length !== material.byteLength) throw new HttpError(409, '关联原件长度不匹配');
-    }
-    const manifestHash = digest(JSON.stringify(manifest));
-    const id = randomUUID();
-    const result = await db.query(`INSERT INTO snapshots(id,device_id,source_session_id,manifest_hash,manifest,hash)
-      VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT(device_id,source,source_session_id,manifest_hash)
-      DO UPDATE SET manifest_hash=EXCLUDED.manifest_hash RETURNING id, committed_at`,
-    [id, owner.id, manifest.sourceSessionId, manifestHash, manifest, manifest.hash]);
-    return { snapshotId: result.rows[0].id, state: 'committed', hash: manifest.hash, byteLength: manifest.byteLength,
-      committedAt: result.rows[0].committed_at, backup: 'single-copy' };
-  }
+  const commitSnapshot = archiveWriter(db, raw);
+  const uploadKey = (headers: Record<string, unknown>) => z.uuid().optional().parse(headers['idempotency-key']);
   app.post('/api/snapshots', { onRequest: deviceGuard }, async request => {
-    return commitSnapshot(await device(request.headers.authorization), manifestSchema.parse(request.body));
+    return commitSnapshot(await device(request.headers.authorization), manifestSchema.parse(request.body), uploadKey(request.headers));
   });
   app.post('/api/snapshots/append', { onRequest: deviceGuard }, async request => {
     const owner = await device(request.headers.authorization);
@@ -138,7 +113,7 @@ export async function createApp(options: { db: Database; rawDirectory: string; w
     // while the old snapshot stays readable; the final database row is the atomic commit point.
     await raw.write(owner.id, manifest.hash, bytes);
     await db.query('INSERT INTO chunks(device_id,hash,byte_length) VALUES($1,$2,$3) ON CONFLICT DO NOTHING', [owner.id, manifest.hash, bytes.length]);
-    return commitSnapshot(owner, manifest);
+    return commitSnapshot(owner, manifest, uploadKey(request.headers));
   });
 
   app.post('/api/artifacts/assemble', { onRequest: deviceGuard }, async request => {

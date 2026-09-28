@@ -21,6 +21,10 @@ export async function stop(child?: ChildProcess) {
   if (!child || child.exitCode !== null || child.signalCode !== null) return;
   await new Promise<void>(resolveResult => { child.once('exit', () => resolveResult()); child.kill('SIGTERM'); });
 }
+export async function crash(child?: ChildProcess) {
+  if (!child || child.exitCode !== null || child.signalCode !== null) return;
+  await new Promise<void>(resolve => { child.once('exit', () => resolve()); child.kill('SIGKILL'); });
+}
 
 export async function createSandbox() {
   const directory = await mkdtemp(join(tmpdir(), 'skynet-test-'));
@@ -71,7 +75,7 @@ export async function createSandbox() {
     }
     const inspected = await execute('docker', ['inspect', '--format', '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}', name], { windowsHide: true });
     const containerDatabaseUrl = `postgresql://postgres:${password}@${inspected.stdout.trim()}:5432/${database}`;
-    return { directory, env, name, containerDatabaseUrl, startServer, stopServer: () => stop(server), startCollector, stopCollector: () => stop(collector),
+    return { directory, env, name, containerDatabaseUrl, startServer, stopServer: () => stop(server), crashServer: () => crash(server), startCollector, stopCollector: () => stop(collector),
       provision, collectorCommand, close };
   } catch (error) {
     await stop(server); await execute('docker', ['rm', '--force', name], { windowsHide: true });

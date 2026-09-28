@@ -43,6 +43,7 @@ test('resuming one old conversation preserves source dates, sends verified appen
       }
       const result = await fetch(`${upstream}${path}`, { method: request.method,
         headers: { ...(request.headers.authorization ? { Authorization: request.headers.authorization } : {}),
+          ...(request.headers['idempotency-key'] ? { 'Idempotency-Key': String(request.headers['idempotency-key']) } : {}),
           ...(request.headers['content-type'] ? { 'Content-Type': request.headers['content-type'] } : {}) },
         ...(body.length ? { body } : {}) });
       transfers.push({ path, bytes: body.length, status: result.status });
