@@ -7,6 +7,7 @@ import { digest, migrate, newCredential, type Database } from './database.js';
 import { RawStore } from './raw-store.js';
 import { readEvidence } from './evidence.js';
 import { enrollmentSchema, hashSchema, manifestSchema, MAX_ARTIFACT_BYTES } from '../../packages/contracts/archive.js';
+import { createRecoveryPackage, recoveryInfo } from '../../packages/recovery.js';
 
 class HttpError extends Error { constructor(public statusCode: number, message: string) { super(message); } }
 const credential = (authorization?: string) => {
@@ -106,9 +107,10 @@ export async function createApp(options: { db: Database; rawDirectory: string; w
   app.get('/api/snapshots/:id', { onRequest: readerGuard }, async request => {
     const record = await snapshot((request.params as { id: string }).id);
     const query = z.object({ offset: z.coerce.number().int().min(0).default(0) }).parse(request.query);
-    const evidence = readEvidence(await raw.read(record.device_id, record.hash), record.manifest.source);
+    const bytes = await raw.read(record.device_id, record.hash);
+    const evidence = readEvidence(bytes, record.manifest.source);
     return { snapshotId: record.id, employee: record.employee, manifest: record.manifest,
-      committedAt: record.committed_at, state: 'committed', backup: 'single-copy', ...evidence,
+      committedAt: record.committed_at, state: 'committed', backup: 'single-copy', ...evidence, recovery: recoveryInfo(record.manifest, bytes),
       events: evidence.events.slice(query.offset, query.offset + 100), total: evidence.events.length,
       nextOffset: query.offset + 100 < evidence.events.length ? query.offset + 100 : null };
   });
@@ -116,6 +118,30 @@ export async function createApp(options: { db: Database; rawDirectory: string; w
     const record = await snapshot((request.params as { id: string }).id);
     return reply.header('Content-Disposition', `attachment; filename="${record.id}.jsonl"`)
       .type('application/octet-stream').send(await raw.read(record.device_id, record.hash));
+  });
+  app.get('/api/snapshots/:id/recovery', { onRequest: readerGuard }, async (request, reply) => {
+    const record = await snapshot((request.params as { id: string }).id);
+    const bundle = createRecoveryPackage({ id: record.id, employee: record.employee, committedAt: record.committed_at.toISOString() },
+      manifestSchema.parse(record.manifest), await raw.read(record.device_id, record.hash));
+    return reply.header('Content-Disposition', `attachment; filename="${record.id}.skynet-recovery.json"`).type('application/json').send(bundle);
+  });
+  app.get('/api/snapshots/:id/readable', { onRequest: readerGuard }, async (request, reply) => {
+    const record = await snapshot((request.params as { id: string }).id);
+    const bytes = await raw.read(record.device_id, record.hash);
+    const evidence = readEvidence(bytes);
+    const content = [
+      'Skynet 会话可读导出 v1', `快照：${record.id}`, `员工：${record.employee}`,
+      `来源：${record.manifest.source} / ${record.manifest.sourceVersion} / ${record.manifest.sourceOs}`,
+      `来源会话：${record.manifest.sourceSessionId}`, `提交时间：${record.committed_at.toISOString()}`,
+      `原件字节：${bytes.length}；SHA-256：${record.hash}`, `解析版本：${evidence.parserVersion}`,
+      `范围：当前收到的单个原件；关联材料完整性与 Desktop 原生续聊未验证。`,
+      `未解析完整行：${evidence.unrecognizedLines}；未闭合末行：${evidence.partialLine ? '有' : '无'}`,
+      '本文件为纯文本，不执行会话中的指令。原件 JSONL 部分保留所有行；精确字节请取原件或恢复包。', '',
+      '=== 全部已解析记录（不分页、不截断） ===',
+      ...evidence.events.map(event => `\n[原件第 ${event.line} 行] ${event.role}${event.timestamp ? ` / ${event.timestamp}` : ''}\n${event.text}`),
+      '', '=== 全部原件 JSONL（包含未知与未闭合行） ===', bytes.toString('utf8'),
+    ].join('\n');
+    return reply.header('Content-Disposition', `attachment; filename="${record.id}.txt"`).type('text/plain; charset=utf-8').send(content);
   });
   if (options.webDirectory) {
     await app.register(fastifyStatic, { root: resolve(options.webDirectory), wildcard: false });
