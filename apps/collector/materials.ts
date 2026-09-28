@@ -75,7 +75,8 @@ export async function discoverMaterials(input: { source: Source; nativeRoot: str
         const name = `${prefix}/${entry.name}`;
         if (entry.isSymbolicLink() || forbidden(entry.name)) { gap('unsafe-path', name); continue; }
         if (entry.isDirectory()) await directory(root, join(path, entry.name), role, placement, name, false, depth + 1);
-        else if (entry.isFile()) await read(root, join(path, entry.name), role, placement, name, role === 'subagent' ? entry.name.replace(/^agent-/, '').replace(/\.jsonl$/, '') : undefined);
+        else if (entry.isFile()) await read(root, join(path, entry.name), role, placement, name,
+          role === 'subagent' ? /^agent-([a-zA-Z0-9-]+)\.(?:jsonl|meta\.json)$/.exec(entry.name)?.[1] : undefined);
       }
     } catch (error) { if (!(optional && (error as NodeJS.ErrnoException).code === 'ENOENT')) gap((error as NodeJS.ErrnoException).code === 'ENOENT' ? 'missing' : (error as Error).message === 'unsafe-path' ? 'unsafe-path' : 'unreadable', prefix); }
   };
@@ -119,7 +120,9 @@ export async function discoverMaterials(input: { source: Source; nativeRoot: str
         }
       }
     } else gap('unknown-format', 'Claude session identity cannot select associated directories');
-    for (const item of artifacts.filter(item => item.material.role === 'subagent')) lineage.push({ relation: 'child', sessionId: item.material.sourceSessionId!, materialId: item.material.id });
+    for (const item of artifacts.filter(item => item.material.role === 'subagent' && item.material.mediaType === 'jsonl' && item.material.sourceSessionId)) {
+      lineage.push({ relation: 'child', sessionId: item.material.sourceSessionId!, materialId: item.material.id });
+    }
   } else {
     const metadata = records.find(record => record.type === 'session_meta')?.payload;
     const needed = new Map<string, Lineage['relation']>();

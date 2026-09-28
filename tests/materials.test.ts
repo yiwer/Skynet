@@ -5,7 +5,7 @@ import { appendFile, mkdir, readFile, symlink, truncate, unlink, writeFile } fro
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { chromium, expect, type Browser } from '@playwright/test';
-import { createSandbox } from './support.js';
+import { createSandbox, command } from './support.js';
 import { sourceSchema } from '../packages/contracts/archive.js';
 import { readRecoveryPackage } from '../packages/recovery.js';
 
@@ -39,6 +39,7 @@ test('three sources retain generations, related bytes, bounded large output and 
         const sessionDir = join(project, sessionId); await mkdir(join(sessionDir, 'subagents'), { recursive: true }); await mkdir(join(sessionDir, 'tool-results'));
         sidecar = join(sessionDir, 'tool-results', 'large.txt'); largeBytes = Buffer.from('<script>window.materialInjected=true</script>\n' + 'large-output '.repeat(800_000)); await writeFile(sidecar, largeBytes);
         await writeFile(join(sessionDir, 'subagents', 'agent-child.jsonl'), jsonl(message('ASSOCIATED_CHILD')));
+        await writeFile(join(sessionDir, 'subagents', 'agent-child.meta.json'), JSON.stringify({ agentType: 'general-purpose' }));
         await writeFile(join(sessionDir, 'subagents', 'auth.json'), 'NEVER_UPLOAD_AUTH_MARKER');
         const outside = join(home, 'outside'); await mkdir(outside); await writeFile(join(outside, 'secret.txt'), 'NEVER_UPLOAD_SYMLINK_MARKER');
         await symlink(outside, join(sessionDir, 'subagents', 'escape'), process.platform === 'win32' ? 'junction' : 'dir');
@@ -64,6 +65,10 @@ test('three sources retain generations, related bytes, bounded large output and 
       assert.equal(first.events.filter((event: any) => event.text === 'same repeated activity').length, 2, 'same text in two records remains two activities');
       assert.equal(first.activity.today.counts.userTurns, 2, 'two same-text native records count twice; related parent context never adds activity');
       assert.ok(capture.materials.length >= 2); assert.ok(!JSON.stringify(capture).includes('NEVER_UPLOAD'));
+      if (source === 'claude-code-cli') {
+        assert.equal(capture.materials.find((item: any) => item.name === 'subagents/agent-child.meta.json').sourceSessionId, 'child');
+        assert.deepEqual(capture.lineage.filter((item: any) => item.relation === 'child').map((item: any) => item.sessionId), ['child']);
+      }
       if (source !== 'claude-code-cli') {
         const parentMaterial = capture.materials.find((item: any) => item.role === 'parent-transcript'); assert.ok(parentMaterial);
         assert.deepEqual(Buffer.from(await (await api(`/api/snapshots/${firstId}/materials/${parentMaterial.id}`)).arrayBuffer()), parent);
@@ -72,6 +77,15 @@ test('three sources retain generations, related bytes, bounded large output and 
       const bundleBytes = Buffer.from(await (await api(`/api/snapshots/${firstId}/recovery`)).arrayBuffer());
       const bundle = readRecoveryPackage(bundleBytes); assert.equal(bundle.packageVersion, 2); assert.deepEqual(bundle.bytes, original);
       assert.equal(bundle.materials.length, capture.materials.length);
+      if (source === 'claude-code-cli' && process.env.SKYNET_CLAUDE_RUNTIME) {
+        const packagePath = join(home, 'metadata-recovery.json'); const target = join(home, 'metadata-restored');
+        await writeFile(packagePath, bundleBytes);
+        await command(process.execPath, ['dist/apps/collector/cli.js', 'restore', '--package', packagePath, '--target', target,
+          '--runtime', process.env.SKYNET_CLAUDE_RUNTIME], sandbox.env);
+        assert.equal(await readFile(join(target, 'projects', 'skynet-restored', sessionId, 'subagents', 'agent-child.meta.json'), 'utf8'), JSON.stringify({ agentType: 'general-purpose' }));
+        assert.deepEqual(await readFile(join(target, 'projects', 'skynet-restored', sessionId, 'subagents', 'agent-child.jsonl')),
+          bundle.materials.find(item => item.material.name === 'subagents/agent-child.jsonl')!.bytes);
+      }
       for (const item of bundle.materials) { assert.equal(hash(item.bytes), item.material.hash); assert.ok(!item.bytes.includes(Buffer.from('NEVER_UPLOAD'))); }
       const bad = JSON.parse(bundleBytes.toString()); bad.materials.pop(); const { packageSha256: _, ...content } = bad; bad.packageSha256 = hash(JSON.stringify(content));
       assert.throws(() => readRecoveryPackage(Buffer.from(JSON.stringify(bad))), /material set is incomplete/);

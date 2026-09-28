@@ -12,6 +12,7 @@ import { reportDeliveryHealth } from './health.js';
 import { enroll, setupLock } from './enrollment.js';
 import { protectState } from './install-state.js';
 import { discoverMaterials, readNativeFile, safeNativePath } from './materials.js';
+import { CaptureMonitor } from './capture-health.js';
 export { atomicJson } from '../../packages/filesystem.js';
 export { recordHook } from './hook.js';
 
@@ -65,6 +66,27 @@ async function qualifiedPath(settings: Settings, transcriptPath: string) {
 
 export async function collectOnce(state: string, options: { capture?: boolean } = {}) {
   const settings = settingsSchema.parse(await readCollectorSettings(state));
+  const monitor = await CaptureMonitor.open(state);
+  monitor.setEnabled(options.capture !== false);
+  try {
+    try { if (options.capture !== false) { await readFile(join(state, 'hook-gap.json')); monitor.fail(null, undefined, 'hook-unobserved'); } }
+    catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') monitor.fail(error); }
+    const status = await collectSources(state, settings, monitor, options);
+    if (options.capture !== false) monitor.recover();
+    const capture = await monitor.save();
+    await reportDeliveryHealth(state, settings, status.delivery, capture);
+    return { ...status, coverage: capture };
+  } catch (error) {
+    monitor.fail(error);
+    const capture = await monitor.save();
+    // Even ENOSPC can be reported while this worker and its credentials remain
+    // readable. If both disk and network fail, no durable report is asserted.
+    await reportDeliveryHealth(state, settings, undefined, capture);
+    return { checkedAt: new Date().toISOString(), errors: [(error as Error).message], coverage: capture, capability: 'unverified' };
+  }
+}
+
+async function collectSources(state: string, settings: Settings, monitor: CaptureMonitor, options: { capture?: boolean }) {
   const delivery = await DeliveryQueue.open(state);
   try {
     await readFile(join(state, 'retry-request.json'));
@@ -84,12 +106,13 @@ export async function collectOnce(state: string, options: { capture?: boolean } 
       const event = hostEventSchema.parse(queued.event);
       const observedAt = z.iso.datetime().parse(queued.observedAt);
       queuedEvents.push({ file, event, observedAt });
-    } catch (error) { errors.push((error as Error).message); }
+    } catch (error) { errors.push((error as Error).message); monitor.fail(error); }
   }
   // A resumed Claude session can initially report a path derived from the new cwd,
   // then correct it at UserPromptSubmit. Prefer the latest real host observation.
   queuedEvents.sort((a, b) => b.observedAt.localeCompare(a.observedAt));
   for (const { file, event, observedAt } of queuedEvents) {
+    monitor.observe();
     try {
       if (observedAt < settings.enrolledAt) throw new Error('Activity predates enrollment');
       const existing = tracked.find(entry => entry.source === settings.source && entry.sessionId === event.session_id);
@@ -107,9 +130,10 @@ export async function collectOnce(state: string, options: { capture?: boolean } 
       }
       await atomicJson(join(state, 'tracked.json'), tracked);
       await unlink(join(state, 'spool', file));
-    } catch (error) { errors.push((error as Error).message); }
+    } catch (error) { errors.push((error as Error).message); monitor.fail(error, event.session_id); }
   }
   for (const source of options.capture === false ? [] : tracked) {
+    monitor.observe();
     try {
       const pending = delivery.latest(settings.source, source.sessionId);
       // Compare new bytes with the latest frozen generation, even while offline.
@@ -142,10 +166,11 @@ export async function collectOnce(state: string, options: { capture?: boolean } 
       }
       const discovered = await discoverMaterials({ source: settings.source, nativeRoot: settings.nativeRoot, nativeTempRoot: settings.nativeTempRoot,
         transcriptPath, sessionId: source.sessionId, project: source.project, bytes, previous: previous.capture?.materials });
+      if (discovered.gaps.some(gap => ['missing', 'unreadable', 'unsafe-path', 'size-limit'].includes(gap.code))) monitor.fail(null, source.sessionId, 'capture-unavailable');
       if (identityUnavailable) discovered.gaps.push({ code: 'unknown-format', reference: '当前原件无法重新读取完整身份；沿用此前已确认绑定，保留重写或截断字节' });
       const materials = discovered.artifacts.map(item => item.material);
       const fingerprint = hash(JSON.stringify({ materials, gaps: discovered.gaps, lineage: discovered.lineage, compacted: discovered.compacted, partialLine: discovered.partialLine }));
-      if (previous.acknowledgedHash === artifactHash && previous.materialFingerprint === fingerprint) continue;
+      if (previous.acknowledgedHash === artifactHash && previous.materialFingerprint === fingerprint) { monitor.recover(source.sessionId); continue; }
       const prefixMatches = previous.acknowledgedByteLength !== undefined && bytes.length > previous.acknowledgedByteLength
         && hash(bytes.subarray(0, previous.acknowledgedByteLength)) === previous.acknowledgedHash;
       const change = !previous.acknowledgedHash ? 'initial' : previous.acknowledgedHash === artifactHash ? 'materials'
@@ -159,7 +184,8 @@ export async function collectOnce(state: string, options: { capture?: boolean } 
         sourceVersion, sourceOs: settings.sourceOs, project: source.project,
         hash: artifactHash, byteLength: bytes.length, qualifiedAt: source.qualifiedAt, capability: 'unverified', capture });
       await delivery.enqueue(manifest, fingerprint, [bytes, ...discovered.artifacts.flatMap(item => item.bytes ? [item.bytes] : [])]);
-    } catch (error) { errors.push((error as Error).message); }
+      monitor.recover(source.sessionId);
+    } catch (error) { errors.push((error as Error).message); monitor.fail(error, source.sessionId); }
   }
   const delivered = await delivery.deliver(settings, manifest => {
     const source = tracked.find(item => item.source === manifest.source && item.sessionId === manifest.sourceSessionId);
@@ -177,6 +203,5 @@ export async function collectOnce(state: string, options: { capture?: boolean } 
   const status = { checkedAt: new Date().toISOString(), tracked: tracked.length, ...delivered, errors: [...errors, ...delivered.errors],
     delivery: await delivery.health(), capability: 'unverified', capture: options.capture === false ? 'disabled; frozen-delivery-only' : 'enabled' };
   await atomicJson(join(state, 'status.json'), status);
-  await reportDeliveryHealth(state, settings, status.delivery);
   return status;
 }

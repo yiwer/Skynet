@@ -1,0 +1,6 @@
+FROM node:24-bookworm-slim
+USER node
+WORKDIR /home/node
+RUN npm install --prefix /home/node/analysis-cli --save-exact --no-audit --no-fund @anthropic-ai/claude-code@2.1.281
+ENV PATH=/home/node/analysis-cli/node_modules/.bin:/usr/local/bin:/usr/bin:/bin
+CMD ["claude", "--version"]

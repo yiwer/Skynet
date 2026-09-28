@@ -82,6 +82,8 @@ test('plugin payloads share npm ownership; final entry removal delivers frozen b
       if (local.delivery.pendingSnapshots === 0) break; await setTimeout(150);
     }
     assert.equal(local.delivery.pendingSnapshots, 0); assert.equal(local.capture, 'disabled; frozen-delivery-only');
+    const coverage = JSON.parse(await readFile(join(sourceState, 'capture-health.json'), 'utf8'));
+    assert.equal(coverage.captureEnabled, false); assert.deepEqual(coverage.faults, [], 'removed hooks cannot create new capture gaps from unobserved native bytes');
     sessions = (await (await fetch(`${origin}/api/sessions`, { headers })).json()).sessions; assert.equal(sessions.length, 1);
     const raw = Buffer.from(await (await fetch(`${origin}/api/snapshots/${sessions[0].id}/raw`, { headers })).arrayBuffer()); assert.deepEqual(raw, frozen);
     const history = await (await fetch(`${origin}/api/snapshots/${sessions[0].id}/history`, { headers })).json(); assert.equal(history.snapshots.length, 2);

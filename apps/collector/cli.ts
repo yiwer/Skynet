@@ -48,7 +48,7 @@ if (command === 'pack-plugins') {
   catch {
     try {
       await recordHookGap(state);
-    } catch { /* A read-only/full disk cannot persist diagnostics; the host must still continue. */ }
+    } catch { process.stderr.write('Skynet: host activity was not queued and local diagnostics could not be saved; check storage and skynet status.\n'); }
   }
 } else if (command === 'setup') {
   if (values.state) {
@@ -93,7 +93,7 @@ if (command === 'pack-plugins') {
     console.log(JSON.stringify(await (await import('./runtime.js')).installedStatus(state)));
   } else {
   const result: Record<string, unknown> = {};
-  for (const filename of ['status.json', 'hook-gap.json']) {
+  for (const filename of ['status.json', 'hook-gap.json', 'capture-health.json']) {
     try { result[filename] = JSON.parse(await readFile(join(state, filename), 'utf8')); }
     catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
   }
