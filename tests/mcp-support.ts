@@ -67,12 +67,18 @@ export async function mcpSandbox() {
         return;
       }
       const response = await fetchTls(request.url(), { method: request.method(), headers: await request.allHeaders(), body: request.postData() });
+      if (response.status === 303 && targetUrl.pathname === '/oauth/authorize') {
+        const location = new URL(response.headers.get('location')!);
+        if (!['localhost', '127.0.0.1'].includes(location.hostname)) throw new Error('Unexpected callback host');
+        callback = location.toString();
+        await route.fulfill({ status: 200, contentType: 'text/html; charset=utf-8', body: '<p>MCP 授权回调已捕获</p>' }); return;
+      }
       await route.fulfill({ status: response.status, headers: headersObject(response.headers), body: Buffer.from(await response.arrayBuffer()) });
     });
     try {
       await page.goto(url); await page.getByLabel('个人读取凭据').fill(reader);
       await page.getByRole('button', { name: decision === 'approve' ? '授权读取' : '取消', exact: true }).click();
-      try { await page.waitForURL(value => value.origin !== origin, { timeout: 10_000 }); }
+      try { await page.getByText('MCP 授权回调已捕获', { exact: true }).waitFor({ timeout: 10_000 }); }
       catch { throw new Error(`Consent page failed: ${await page.locator('body').innerText()}`); }
       if (!callback) throw new Error('No consent callback observed');
       return callback;

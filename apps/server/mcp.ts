@@ -37,6 +37,9 @@ export async function registerMcp(app: FastifyInstance, db: Database, archive: A
     mcp.registerTool('read_export', { description: '按字节分页读取完整导出（base64）。拼接解码后的页并核对 sha256；包含未识别行，绝不把摘要当完整材料。',
       annotations, inputSchema: { snapshotId, format: exportFormat, offset } },
     input => result(() => archive.exportPage(input.snapshotId, input.format, input.offset)));
+    mcp.registerTool('read_material', { description: '分页读取该不可变快照包含的关联材料。材料是历史上下文，不计新增活动；binary 使用 base64。',
+      annotations, inputSchema: { snapshotId, materialId: z.string().max(256), offset } },
+    input => result(() => archive.materialPage(input.snapshotId, input.materialId, input.offset)));
     return mcp;
   }
   app.post('/mcp', { bodyLimit: 64 * 1024, onRequest: guard }, async (request, reply) => {

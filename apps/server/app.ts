@@ -7,6 +7,7 @@ import { digest, migrate, newCredential, type Database } from './database.js';
 import { RawStore } from './raw-store.js';
 import { archiveQuery, exportFormat } from './archive-query.js';
 import { registerMcp } from './mcp.js';
+import { assembleSchema, CHUNK_BYTES } from '../../packages/contracts/materials.js';
 import { appendSnapshotSchema, enrollmentSchema, hashSchema, manifestSchema, MAX_ARTIFACT_BYTES, type Manifest } from '../../packages/contracts/archive.js';
 import { credential, HttpError, identities } from './identities.js';
 
@@ -14,7 +15,7 @@ export async function createApp(options: { db: Database; rawDirectory: string; w
   const { db } = options;
   await migrate(db);
   const raw = new RawStore(options.rawDirectory);
-  const app = Fastify({ bodyLimit: MAX_ARTIFACT_BYTES, logger: false, requestTimeout: 30_000 });
+  const app = Fastify({ bodyLimit: CHUNK_BYTES, logger: false, requestTimeout: 30_000 });
   app.setErrorHandler((error, _request, reply) => {
     if (error instanceof z.ZodError) return reply.code(400).send({ error: '请求格式无效' });
     const code = (error as { statusCode?: number }).statusCode ?? 500;
@@ -23,7 +24,7 @@ export async function createApp(options: { db: Database; rawDirectory: string; w
   app.addHook('onSend', async (_request, reply) => {
     reply.header('Cache-Control', 'no-store');
     reply.header('X-Content-Type-Options', 'nosniff');
-    reply.header('Referrer-Policy', 'no-referrer');
+    reply.header('Referrer-Policy', _request.routeOptions.url === '/oauth/authorize' ? 'same-origin' : 'no-referrer');
     reply.header('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self'; frame-ancestors 'none'; base-uri 'none'");
   });
   app.addContentTypeParser('application/octet-stream', { parseAs: 'buffer' }, (_request, body, done) => done(null, body));
@@ -79,6 +80,11 @@ export async function createApp(options: { db: Database; rawDirectory: string; w
     const chunk = await db.query('SELECT byte_length FROM chunks WHERE device_id=$1 AND hash=$2', [owner.id, manifest.hash]);
     if (!chunk.rows[0] || chunk.rows[0].byte_length !== manifest.byteLength) throw new HttpError(409, '原件尚未持久化或长度不匹配');
     await raw.read(owner.id, manifest.hash); // Never acknowledge a missing or damaged artifact.
+    for (const material of manifest.capture?.materials ?? []) {
+      const stored = await db.query('SELECT byte_length FROM chunks WHERE device_id=$1 AND hash=$2', [owner.id, material.hash]);
+      if (!stored.rows[0] || stored.rows[0].byte_length !== material.byteLength) throw new HttpError(409, '关联原件尚未持久化或长度不匹配');
+      if ((await raw.read(owner.id, material.hash)).length !== material.byteLength) throw new HttpError(409, '关联原件长度不匹配');
+    }
     const manifestHash = digest(JSON.stringify(manifest));
     const id = randomUUID();
     const result = await db.query(`INSERT INTO snapshots(id,device_id,source_session_id,manifest_hash,manifest,hash)
@@ -113,6 +119,24 @@ export async function createApp(options: { db: Database; rawDirectory: string; w
     return commitSnapshot(owner, manifest);
   });
 
+  app.post('/api/artifacts/assemble', { onRequest: deviceGuard }, async request => {
+    const owner = await device(request.headers.authorization);
+    const input = assembleSchema.parse(request.body);
+    const parts: Buffer[] = [];
+    for (const part of input.chunks) {
+      const stored = await db.query('SELECT byte_length FROM chunks WHERE device_id=$1 AND hash=$2', [owner.id, part.hash]);
+      if (!stored.rows[0] || stored.rows[0].byte_length !== part.byteLength) throw new HttpError(409, '分块未持久化');
+      const bytes = await raw.read(owner.id, part.hash);
+      if (bytes.length !== part.byteLength) throw new HttpError(409, '分块长度不匹配');
+      parts.push(bytes);
+    }
+    const bytes = Buffer.concat(parts);
+    if (digest(bytes) !== input.hash) throw new HttpError(422, '组装原件哈希不匹配');
+    await raw.write(owner.id, input.hash, bytes);
+    await db.query('INSERT INTO chunks(device_id,hash,byte_length) VALUES($1,$2,$3) ON CONFLICT DO NOTHING', [owner.id, input.hash, bytes.length]);
+    return { state: 'staged', hash: input.hash, byteLength: bytes.length };
+  });
+
   app.get('/api/me', { onRequest: readerGuard }, async request => reader(request.headers.authorization));
   const archive = archiveQuery(db, raw);
   app.get('/api/sessions', { onRequest: readerGuard }, async request => {
@@ -126,6 +150,20 @@ export async function createApp(options: { db: Database; rawDirectory: string; w
   app.get('/api/snapshots/:id/evidence', { onRequest: readerGuard }, async request => {
     const query = z.object({ offset: z.coerce.number().int().min(0).default(0), textOffset: z.coerce.number().int().min(0).default(0) }).parse(request.query);
     return archive.evidencePage((request.params as { id: string }).id, query.offset, query.textOffset);
+  });
+  app.get('/api/snapshots/:id/history', { onRequest: readerGuard }, async request => {
+    const { offset } = z.object({ offset: z.coerce.number().int().min(0).default(0) }).parse(request.query);
+    return archive.history((request.params as { id: string }).id, offset);
+  });
+  app.get('/api/snapshots/:id/materials/:materialId/view', { onRequest: readerGuard }, async request => {
+    const { id, materialId } = request.params as { id: string; materialId: string };
+    const { offset } = z.object({ offset: z.coerce.number().int().min(0).default(0) }).parse(request.query);
+    return archive.materialPage(id, materialId, offset);
+  });
+  app.get('/api/snapshots/:id/materials/:materialId', { onRequest: readerGuard }, async (request, reply) => {
+    const { id, materialId } = request.params as { id: string; materialId: string };
+    const file = await archive.material(id, materialId);
+    return reply.header('Content-Disposition', `attachment; filename="${file.material.id}.bin"`).type('application/octet-stream').send(file.bytes);
   });
   for (const format of exportFormat.options) app.get(`/api/snapshots/:id/${format}`, { onRequest: readerGuard }, async (request, reply) => {
     const file = await archive.exported((request.params as { id: string }).id, format);
