@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
-import { dirname, join } from 'node:path';
-import { access, mkdir, readFile, writeFile } from 'node:fs/promises';
+import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
+import { access, mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { command } from './support.js';
 import { installAgent, stopInstalled } from './installed-support.js';
 
@@ -54,8 +54,16 @@ export async function installNativePlugins(directory: string, origin: string, en
     // no uninstall callback; the stable registered capture must still work.
     await command(first.runtime, host === 'claude'
       ? ['plugin', 'uninstall', first.pluginId, '--scope', 'user'] : ['plugin', 'remove', first.pluginId, '--json'], env);
-    if (host === 'codex') await assert.rejects(access(first.installedPath), /ENOENT/);
-    evidence.cacheRemovedByHost = host; evidence.marketplaceOnlyRemovalRequiresEntryRemove = true;
+    const cacheRemains = await access(first.installedPath).then(() => true, () => false);
+    if (cacheRemains) {
+      const owned = relative(resolve(directory), resolve(first.installedPath));
+      assert.ok(owned && owned !== '..' && !owned.startsWith(`..${sep}`) && !isAbsolute(owned));
+      await rename(first.installedPath, `${first.installedPath}-unavailable-owned-fixture`);
+    }
+    await assert.rejects(access(first.installedPath), /ENOENT/);
+    evidence.hostUninstallRemovedCache = !cacheRemains;
+    evidence.cacheUnavailableBy = cacheRemains ? 'test renamed only its owned leftover cache' : 'host uninstall';
+    evidence.marketplaceOnlyRemovalRequiresEntryRemove = true;
   }
   const run = (action: string) => command(process.execPath, [join(state, 'skynet-launcher.mjs'), action], env);
   const status = JSON.parse(await run('status'));

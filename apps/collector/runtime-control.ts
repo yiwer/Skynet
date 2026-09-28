@@ -3,6 +3,7 @@ import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { realpath, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { optionalJson, jsonFile } from './install-state.js';
+import { setTimeout as delay } from 'node:timers/promises';
 
 type Role = 'supervisor' | 'worker';
 type Control = { token: string; supervisorPort: number; workerPort: number };
@@ -26,6 +27,18 @@ async function control(state: string): Promise<Control> {
   return value;
 }
 export async function askRuntime(state: string, role: Role, action: 'status' | 'stop' = 'status'): Promise<any | null> {
+  for (let attempt = 0; ; attempt++) {
+    try { return await askOnce(state, role, action); }
+    catch (error) {
+      // A connection accepted concurrently with listener shutdown can reset
+      // before its request is read. Re-probe the authenticated endpoint: only
+      // a valid reply or a new ECONNREFUSED establishes its current state.
+      if ((error as NodeJS.ErrnoException).code !== 'ECONNRESET' || attempt === 3) throw error;
+      await delay(25 * (attempt + 1));
+    }
+  }
+}
+async function askOnce(state: string, role: Role, action: 'status' | 'stop'): Promise<any | null> {
   const config = await control(state);
   return new Promise((resolve, reject) => {
     const req = request({ host: '127.0.0.1', port: config[`${role}Port`], path: `/${action}`, method: action === 'stop' ? 'POST' : 'GET',

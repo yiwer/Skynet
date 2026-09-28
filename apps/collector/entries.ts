@@ -1,10 +1,10 @@
-import { open, unlink } from 'node:fs/promises';
 import { join } from 'node:path';
 import { z } from 'zod';
 import { atomicJson } from '../../packages/filesystem.js';
 import { channels, installationSchema, jsonFile, type Installation } from './install-state.js';
 import { applyConfiguration, planConfiguration } from './integrations.js';
 import { ensureRunning, stopRuntime } from './supervisor.js';
+import { setupLock } from './enrollment.js';
 
 export const packageEntrySchema = z.object({ channel: z.enum(channels), version: z.string().regex(/^\d+\.\d+\.\d+$/) }).strict();
 export function registeredEntries(installation: Installation | null) {
@@ -19,7 +19,7 @@ export function compareVersions(left: string, right: string) {
 }
 export async function removeEntry(state: string, channel: string) {
   const selected = z.enum(channels).parse(channel);
-  const lock = await open(join(state, 'setup.lock'), 'wx', 0o600).catch(() => { throw new Error('Another setup is running; no changes were made'); });
+  const release = await setupLock(state);
   try {
     const installation = installationSchema.parse(await jsonFile(join(state, 'installation.json')));
     const remaining = registeredEntries(installation).filter(entry => entry.channel !== selected);
@@ -32,15 +32,15 @@ export async function removeEntry(state: string, channel: string) {
     const stopsCapture = installation.clients.some(client => client.configured && !active.has(client.source));
     if (stopsCapture) await stopRuntime(state);
     try {
-    const clients = installation.clients.map(client => ({ ...client, configured: active.has(client.source),
-      notice: active.has(client.source) ? client.notice : '此来源没有已登记入口；已停止读取新原件，仅交付已经冻结的未确认材料。' }));
-    // Publish the capture fence before changing hooks. A crash or config-write
-    // failure must not restart native reads after the final owner left.
-    await atomicJson(join(state, 'installation.json'), { ...installation, entries: remaining, clients });
-    for (const plan of plans) await applyConfiguration(plan);
-    await atomicJson(join(state, 'installation.json'), { ...installation, entries: remaining, configurations: retained, clients });
-    return { removed: selected, entries: remaining, stateDirectory: state,
-      notice: '身份、共享后台、已登记会话及待确认材料保留。另用宿主的正常插件卸载命令移除市场入口；整体停用使用完整卸载流程。' };
+      const clients = installation.clients.map(client => ({ ...client, configured: active.has(client.source),
+        notice: active.has(client.source) ? client.notice : '此来源没有已登记入口；已停止读取新原件，仅交付已经冻结的未确认材料。' }));
+      // Publish the capture fence before changing hooks. A crash or config-write
+      // failure must not restart native reads after the final owner left.
+      await atomicJson(join(state, 'installation.json'), { ...installation, entries: remaining, clients });
+      for (const plan of plans) await applyConfiguration(plan);
+      await atomicJson(join(state, 'installation.json'), { ...installation, entries: remaining, configurations: retained, clients });
+      return { removed: selected, entries: remaining, stateDirectory: state,
+        notice: '身份、共享后台、已登记会话及待确认材料保留。另用宿主的正常插件卸载命令移除市场入口；整体停用使用完整卸载流程。' };
     } finally { if (stopsCapture) await ensureRunning(state, installation.node, installation.launcher); }
-  } finally { await lock.close(); await unlink(join(state, 'setup.lock')); }
+  } finally { await release(); }
 }
