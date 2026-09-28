@@ -1,12 +1,14 @@
 import { open, readdir, realpath, unlink, mkdir } from 'node:fs/promises';
 import { join, relative, isAbsolute, sep } from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { spawn } from 'node:child_process';
 import { setTimeout } from 'node:timers/promises';
 import { collectOnce } from './local.js';
 import { atomicJson } from '../../packages/filesystem.js';
 import { hostEventSchema } from '../../packages/contracts/archive.js';
 import { identitySchema, installationSchema, jsonFile, optionalJson } from './install-state.js';
+import { askRuntime, ownRuntime, releaseRuntime } from './runtime-control.js';
+import { autostartStatus } from './autostart.js';
+export { ensureRunning } from './supervisor.js';
 
 async function routeCodex(state: string, installation: ReturnType<typeof installationSchema.parse>) {
   const spool = join(state, 'inbox', 'codex', 'spool'); await mkdir(spool, { recursive: true, mode: 0o700 });
@@ -37,10 +39,30 @@ async function routeCodex(state: string, installation: ReturnType<typeof install
   return errors;
 }
 export async function runInstalled(state: string) {
+  if (!process.send || !process.connected) throw new Error('Installed workers must be started by the owning supervisor; use skynet start');
+  const supervisorInstance = await new Promise<string>((resolve, reject) => {
+    const timer = globalThis.setTimeout(() => reject(new Error('Supervisor handshake timed out')), 5000);
+    process.once('message', message => {
+      clearTimeout(timer);
+      if (typeof message === 'object' && message !== null && (message as any).type === 'start' && typeof (message as any).supervisorInstance === 'string') resolve((message as any).supervisorInstance);
+      else reject(new Error('Invalid supervisor handshake'));
+    });
+    process.send!({ type: 'initializing' });
+  });
   const lockPath = join(state, 'runtime.lock');
-  const lock = await open(lockPath, 'wx', 0o600).catch(() => { throw new Error('Shared background lock exists; inspect status before repair'); });
-  const instance = randomUUID(); await lock.writeFile(JSON.stringify({ pid: process.pid, instance })); await lock.close();
+  const instance = randomUUID(); const startedAt = new Date().toISOString();
   const stop = new AbortController(); process.once('SIGINT', () => stop.abort()); process.once('SIGTERM', () => stop.abort());
+  process.once('disconnect', () => stop.abort());
+  process.on('message', message => { if (typeof message === 'object' && message !== null && (message as any).type === 'stop') stop.abort(); });
+  const lease = await ownRuntime(state, 'worker', () => ({ pid: process.pid, instance, supervisorInstance, startedAt, state: stop.signal.aborted ? 'stopping' : 'running' }), () => stop.abort());
+  const legacy = await optionalJson(lockPath);
+  if (legacy && legacy.version !== 2) {
+    try { process.kill(legacy.pid, 0); throw new Error('Legacy worker may still be active; stop it using its original installation before migrating'); }
+    catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ESRCH') { await releaseRuntime(lease); throw error; } }
+  }
+  await atomicJson(lockPath, { version: 2, pid: process.pid, instance, supervisorInstance });
+  await atomicJson(join(state, 'runtime.json'), { pid: process.pid, instance, startedAt, checkedAt: null, errors: [] });
+  process.send({ type: 'ready', instance });
   const previousHealth = await optionalJson(join(state, 'health.json'));
   let nextHealth = Date.parse(previousHealth?.nextAttemptAt ?? '') || 0;
   let healthAttempts = previousHealth?.attempts ?? 0;
@@ -77,28 +99,15 @@ export async function runInstalled(state: string) {
       await atomicJson(join(state, 'runtime.json'), { pid: process.pid, instance, checkedAt: new Date().toISOString(), errors });
       if (!stop.signal.aborted) await setTimeout(1000, undefined, { signal: stop.signal }).catch(() => undefined);
     } while (!stop.signal.aborted);
-  } finally { await unlink(lockPath); }
-}
-export async function ensureRunning(state: string, node: string, launcher: string) {
-  const current = await optionalJson(join(state, 'runtime.json'));
-  if (current && Date.now() - Date.parse(current.checkedAt) < 6000) {
-    try { process.kill(current.pid, 0); return current; } catch { /* Dead process isn't a healthy background. */ }
-  }
-  const lock = await optionalJson(join(state, 'runtime.lock'));
-  if (lock) throw new Error('Background lock is stale or busy; no duplicate process was started. Lifecycle repair is required.');
-  const child = spawn(node, [launcher, 'background', '--state', state], { detached: true, windowsHide: true, stdio: 'ignore', env: { ...process.env, SKYNET_KEY: undefined } });
-  child.on('error', () => undefined); child.unref();
-  for (let attempt = 0; attempt < 100; attempt++) {
-    const health = await optionalJson(join(state, 'runtime.json'));
-    if (health?.pid === child.pid && Date.now() - Date.parse(health.checkedAt) < 6000) return health;
-    await setTimeout(100);
-  }
-  throw new Error('Background did not become healthy; installation is retained for inspection');
+  } finally { await unlink(lockPath).catch(() => undefined); await releaseRuntime(lease); if (process.connected) process.disconnect(); }
 }
 export async function installedStatus(state: string) {
   const installation = installationSchema.parse(await jsonFile(join(state, 'installation.json')));
   const identity = identitySchema.parse(await jsonFile(join(state, 'identity.json')));
   const runtime = await optionalJson(join(state, 'runtime.json')); const server = await optionalJson(join(state, 'health.json'));
+  let supervisor: any = null; let worker: any = null; let controlError: string | null = null;
+  try { supervisor = await askRuntime(state, 'supervisor'); worker = await askRuntime(state, 'worker'); }
+  catch (error) { controlError = (error as Error).message; }
   const clients = [];
   for (const client of installation.clients) {
     const sourceState = join(state, 'sources', client.source);
@@ -111,8 +120,9 @@ export async function installedStatus(state: string) {
       confirmedUploads: tracked.filter((item: any) => item.acknowledgedSnapshotId).length, queuedEvents: queued.filter(file => file.endsWith('.json')).length, capture, gap });
   }
   return { installed: true, deviceId: identity.deviceId, deploymentId: installation.deploymentId, stateDirectory: state,
-    background: runtime && Date.now() - Date.parse(runtime.checkedAt) < 6000 ? 'running' : 'unavailable', runtime,
-    autostart: 'not-installed; current-session-background-only', server: server && { ...server, fresh: Date.now() - Date.parse(server.checkedAt) < 20_000 }, clients,
+    background: supervisor?.worker?.instance === worker?.instance && worker?.supervisorInstance === supervisor?.instance && worker?.state === 'running' ? 'running' : 'unavailable', runtime,
+    supervisor, worker, controlError, lastSweepCompletedAt: runtime?.checkedAt ?? null,
+    autostart: await autostartStatus(state), server: server && { ...server, fresh: Date.now() - Date.parse(server.checkedAt) < 20_000 }, clients,
     codexUnclassifiedEvents: (await readdir(join(state, 'inbox', 'codex', 'spool')).catch(() => [])).filter(file => file.endsWith('.json')).length,
     notice: '配置、宿主信任、首次事件、服务器连接及原件确认分别验证。Desktop 与完整安装门槛尚未通过。' };
 }

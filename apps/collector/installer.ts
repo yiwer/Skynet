@@ -11,6 +11,8 @@ import { applyConfiguration, detectClients, hookEntries, planConfiguration } fro
 import { identitySchema, installationSchema, jsonFile, optionalJson, protectState, serverOrigin, type Installation } from './install-state.js';
 import { ensureRunning, installedStatus } from './runtime.js';
 import { enroll, setupLock } from './enrollment.js';
+import { initializeControl } from './runtime-control.js';
+import { installAutostart } from './autostart.js';
 
 export const deploymentSchema = z.object({ deploymentId: z.string().regex(/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$/),
   enrollmentOrigin: z.string(), protocolVersion: z.literal(1) }).strict();
@@ -92,6 +94,8 @@ export async function install(state: string) {
       await atomicJson(join(state, 'installation.json'), { ...installation, configurations: owned });
     }
     await atomicJson(join(state, 'installation.json'), installation);
+    await initializeControl(state);
+    await installAutostart(state, installation);
     const nonce = randomUUID(); await atomicJson(join(state, 'health-request.json'), { nonce });
     await ensureRunning(state, node, launcher);
     for (let attempt = 0; attempt < 160; attempt++) {

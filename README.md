@@ -12,6 +12,7 @@
 | [Claude Code CLI 链路](docs/implementation/issue-7.md) | 普通 hooks、多项目采集、完整导出与服务器包原生续聊；单原件范围与未验证条件 |
 | [旧会话续用与来源日期](docs/implementation/issue-8.md) | 仅同步宿主登记的旧会话、校验增量上传、历史上下文及来源日期；三来源公开流程与真实验收边界 |
 | [npm 单授权值接入](docs/implementation/issue-11.md) | 内部离线 npm 包、自动检测与配置、私有共享身份/后台、真实 CLI 安装链；完整 G1 与 Desktop 仍待验收 |
+| [当前用户后台与崩溃恢复](docs/implementation/issue-12.md) | 认证独占控制、共享后台、Windows 隐藏用户任务、真实 Claude 崩溃后自动采集；登录/重启/休眠及 Desktop 仍待验收 |
 | [账号与设备停用](docs/implementation/issue-20.md) | 显式维护权限、Web 停用、逐请求撤销校验及审计；保留共享历史读取，真实安装前置验收仍待通过 |
 | [离线持久队列与补传](docs/implementation/issue-16.md) | 原件与关联材料先落盘再交付、跨进程退避、ACK 后清理、设备同步页面；完整 G2 仍待验收 |
 | [崩溃与确认丢失后的快照一致性](docs/implementation/issue-17.md) | 持久上传键、事务提交、接入确认恢复及进程强杀回归；完整 G2 仍待验收 |
