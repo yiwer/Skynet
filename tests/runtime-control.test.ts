@@ -1,8 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp } from 'node:fs/promises';
+import { mkdtemp, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
+import { createServer } from 'node:http';
 import { askRuntime, initializeControl, ownRuntime, releaseRuntime } from '../apps/collector/runtime-control.js';
 
 test('an owned endpoint drains authenticated stop and in-flight status before releasing its lease', async () => {
@@ -25,4 +26,12 @@ test('an owned endpoint drains authenticated stop and in-flight status before re
       assert.equal(await askRuntime(state, 'worker'), null, 'completion is endpoint release, not a swallowed reset');
     } finally { if (server.listening) await releaseRuntime(server); }
   }
+  const config = JSON.parse(await readFile(join(state, 'runtime-control.json'), 'utf8'));
+  let attempts = 0;
+  const broken = createServer(request => { attempts++; request.socket.destroy(); });
+  await new Promise<void>(resolve => broken.listen(config.workerPort, '127.0.0.1', resolve));
+  try {
+    await assert.rejects(askRuntime(state, 'worker'), { code: 'ECONNRESET' });
+    assert.equal(attempts, 4, 'a persistently resetting endpoint is unavailable, never interpreted as stopped');
+  } finally { await new Promise<void>(resolve => broken.close(() => resolve())); }
 });
