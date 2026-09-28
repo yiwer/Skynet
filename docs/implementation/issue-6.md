@@ -64,6 +64,8 @@ npm run test:codex-cli-native
 
 2026-09-28 本机结果：Node 24.12.0、Windows x64、Codex CLI 0.157.1、PostgreSQL 17 隔离容器。类型检查、构建、普通公开流程 3 项测试及真实 CLI 集成测试通过。完整实验输出目录包含 `hook-review.txt`、`hook-review-controls.json`、`codex-cli-real-hook-web.png` 和 `codex-cli-native-evidence.json`，每次运行输出该目录。原生 CLI 实测覆盖消息/普通 MCP 工具请求与结果/原生续聊；不覆盖真实 `apply_patch`、附件/子会话/compact、其他 OS 或 CLI 版本。
 
+同日集成 #7 后，三来源共同类型检查、构建、4 项普通公开流程测试全部通过；并重新运行 Desktop 内置后端恢复、Codex CLI 正常 hook/恢复、Claude CLI 正常 hook/恢复三个原生测试，3 项全部通过。Codex 测试源文件使用 `tests/native-codex-cli.test.ts` 命名，原生测试不纳入默认 CI。合并保留 Claude 的独立身份解析、跨来源会话隔离、可选版本参数及原有恢复步骤。
+
 ## hook 延迟
 
 `hook` 入口现在只加载小型输入校验与原子落盘模块；setup、网络传输、恢复及 Zod 均由其他命令按需加载。仍以独占临时文件写入、fsync、rename 和适用 OS 的目录 fsync 提交本地队列，错误按原语义记录缺口并成功退出，不延迟到后台才确认事件。

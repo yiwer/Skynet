@@ -24,8 +24,8 @@ if (command === 'restore') {
   const { restorePackage } = await import('./restore.js');
   const version = values['source-version'] ?? values['desktop-version'];
   if (values['source-version'] && values['desktop-version'] && values['source-version'] !== values['desktop-version']) throw new Error('Conflicting restore source versions');
-  if (!values.package || !values.target || !version || !values.runtime) {
-    throw new Error('Restore requires --package FILE --target NEW_ABSOLUTE_DIRECTORY --source-version VERSION --runtime ABSOLUTE_NATIVE_EXECUTABLE');
+  if (!values.package || !values.target || !values.runtime) {
+    throw new Error('Restore requires --package FILE --target NEW_ABSOLUTE_DIRECTORY --runtime ABSOLUTE_NATIVE_EXECUTABLE (Codex also requires --source-version VERSION)');
   }
   console.log(JSON.stringify(await restorePackage({ packagePath: values.package, target: values.target,
     sourceVersion: version, runtime: values.runtime })));

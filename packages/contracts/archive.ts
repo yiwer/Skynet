@@ -3,9 +3,9 @@ import { z } from 'zod';
 export const MAX_ARTIFACT_BYTES = 8 * 1024 * 1024;
 export const hashSchema = z.string().regex(/^[a-f0-9]{64}$/);
 const bounded = z.string().min(1).max(256);
-export const sourceSchema = z.enum(['codex-desktop', 'codex-cli']);
+export const sourceSchema = z.enum(['codex-desktop', 'codex-cli', 'claude-code-cli']);
 export type Source = z.infer<typeof sourceSchema>;
-export const sourceLabel = (source: Source) => source === 'codex-cli' ? 'Codex CLI' : 'Codex Desktop';
+export const sourceLabel = (source: Source) => ({ 'codex-desktop': 'Codex Desktop', 'codex-cli': 'Codex CLI', 'claude-code-cli': 'Claude Code CLI' })[source];
 export const enrollmentSchema = z.object({ installationId: z.uuid(), name: bounded }).strict();
 export const manifestSchema = z.object({
   protocolVersion: z.literal(1),
@@ -31,6 +31,7 @@ export const hostEventSchema = z.object({
 
 export interface EvidenceLine {
   line: number;
+  block?: number;
   role: string;
   text: string;
   timestamp: string | null;

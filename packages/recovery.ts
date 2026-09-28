@@ -1,16 +1,18 @@
 import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import { manifestSchema, MAX_ARTIFACT_BYTES, hashSchema, type Manifest } from './contracts/archive.js';
+import { claudeIdentity } from './native/claude.js';
 
 export const MAX_RECOVERY_BYTES = Math.ceil(MAX_ARTIFACT_BYTES / 3) * 4 + 64 * 1024;
 export const measuredDesktop = { version: '26.924.2738.0', runtime: '0.158.0-alpha.2.1', os: 'win32', arch: 'x64' } as const;
 export const measuredCodexCli = { version: '0.157.1', runtime: '0.157.1', os: 'win32', arch: 'x64' } as const;
+export const measuredClaude = { version: '2.1.281', runtime: '2.1.281', os: 'win32', arch: 'x64' } as const;
 const checksum = (value: string | Buffer) => createHash('sha256').update(value).digest('hex');
 const packageContentSchema = z.object({
-  format: z.literal('skynet-codex-recovery'), packageVersion: z.literal(1),
+  format: z.enum(['skynet-codex-recovery', 'skynet-claude-recovery']), packageVersion: z.literal(1),
   snapshot: z.object({ id: z.uuid(), employee: z.string().min(1).max(256), committedAt: z.iso.datetime() }).strict(),
   manifest: manifestSchema,
-  scope: z.literal('single-rollout; associated materials not verified'),
+  scope: z.enum(['single-rollout; associated materials not verified', 'single-transcript; associated materials not verified']),
   artifact: z.object({ encoding: z.literal('base64'), data: z.string().min(1).max(Math.ceil(MAX_ARTIFACT_BYTES / 3) * 4) }).strict(),
 }).strict();
 const packageSchema = packageContentSchema.extend({ packageSha256: hashSchema }).strict();
@@ -23,6 +25,19 @@ export function nativeMetadata(bytes: Buffer) {
 }
 
 export function recoveryInfo(manifest: Manifest, bytes: Buffer) {
+  if (manifest.source === 'claude-code-cli') {
+    let version: string | null = null;
+    try { version = claudeIdentity(bytes, manifest.sourceSessionId).version; } catch { /* Unknown identity is visible, not a support claim. */ }
+    const matchingBaseline = manifest.sourceVersion === measuredClaude.version && version === measuredClaude.runtime && manifest.sourceOs === measuredClaude.os;
+    return {
+      packageVersion: 1, scope: 'single-transcript', sourceCompleteness: 'unverified',
+      sourceVersion: manifest.sourceVersion, sourceOs: manifest.sourceOs, nativeRuntimeVersion: version,
+      artifacts: [{ role: 'native-transcript', byteLength: manifest.byteLength, sha256: manifest.hash }],
+      desktopUi: 'not-applicable', nativeBackend: matchingBaseline ? 'fixture-tested' : 'unverified',
+      preparation: matchingBaseline && bytes.at(-1) === 10 ? 'candidate' : 'unsupported', measuredTarget: measuredClaude,
+      limitation: '仅包含当前收到的 Claude 原生会话原件；相同版本的隔离 CLI 与合成模型续聊已测，关联附件、子会话与真实模型续聊仍未验证。',
+    } as const;
+  }
   const metadata = nativeMetadata(bytes);
   const baseline = manifest.source === 'codex-cli' ? measuredCodexCli : measuredDesktop;
   const matchingBaseline = manifest.sourceVersion === baseline.version && manifest.sourceOs === baseline.os
@@ -42,8 +57,9 @@ export function recoveryInfo(manifest: Manifest, bytes: Buffer) {
 
 export function createRecoveryPackage(snapshot: { id: string; employee: string; committedAt: string }, manifest: Manifest, bytes: Buffer) {
   if (bytes.length !== manifest.byteLength || checksum(bytes) !== manifest.hash) throw new Error('Archive integrity check failed');
-  const content = packageContentSchema.parse({ format: 'skynet-codex-recovery', packageVersion: 1, snapshot, manifest,
-    scope: 'single-rollout; associated materials not verified', artifact: { encoding: 'base64', data: bytes.toString('base64') } });
+  const claude = manifest.source === 'claude-code-cli';
+  const content = packageContentSchema.parse({ format: claude ? 'skynet-claude-recovery' : 'skynet-codex-recovery', packageVersion: 1, snapshot, manifest,
+    scope: claude ? 'single-transcript; associated materials not verified' : 'single-rollout; associated materials not verified', artifact: { encoding: 'base64', data: bytes.toString('base64') } });
   return { ...content, packageSha256: checksum(JSON.stringify(content)) };
 }
 
@@ -53,6 +69,11 @@ export function readRecoveryPackage(input: Buffer) {
   try { parsed = packageSchema.parse(JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(input))); }
   catch { throw new Error('Malformed or unsupported recovery package'); }
   const { packageSha256, ...content } = parsed;
+  const claude = content.manifest.source === 'claude-code-cli';
+  if (content.format !== (claude ? 'skynet-claude-recovery' : 'skynet-codex-recovery')
+    || content.scope !== (claude ? 'single-transcript; associated materials not verified' : 'single-rollout; associated materials not verified')) {
+    throw new Error('Recovery package source, format and scope do not match');
+  }
   if (checksum(JSON.stringify(content)) !== packageSha256) throw new Error('Recovery package metadata checksum mismatch');
   const bytes = Buffer.from(content.artifact.data, 'base64');
   if (bytes.toString('base64') !== content.artifact.data || bytes.length !== content.manifest.byteLength || checksum(bytes) !== content.manifest.hash) {

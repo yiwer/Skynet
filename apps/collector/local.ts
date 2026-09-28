@@ -5,6 +5,7 @@ import { isAbsolute, join, relative, sep } from 'node:path';
 import { z } from 'zod';
 import { hostEventSchema, manifestSchema, MAX_ARTIFACT_BYTES, sourceSchema, type Source } from '../../packages/contracts/archive.js';
 import { atomicJson } from '../../packages/filesystem.js';
+import { claudeIdentity } from '../../packages/native/claude.js';
 export { atomicJson } from '../../packages/filesystem.js';
 export { recordHook } from './hook.js';
 
@@ -14,8 +15,8 @@ const settingsSchema = z.object({
   source: sourceSchema.default('codex-desktop'),
 });
 type Settings = z.infer<typeof settingsSchema>;
-type Tracked = { sessionId: string; transcriptPath: string; project: string; qualifiedAt: string; acknowledgedHash?: string };
-const trackedSchema = z.object({ sessionId: z.string(), transcriptPath: z.string(), project: z.string(), qualifiedAt: z.iso.datetime(), acknowledgedHash: z.string().optional() });
+const trackedSchema = z.object({ source: sourceSchema.optional(), sessionId: z.string(), transcriptPath: z.string(), project: z.string(), qualifiedAt: z.iso.datetime(), lastObservedAt: z.iso.datetime().optional(), acknowledgedHash: z.string().optional() });
+type Tracked = z.infer<typeof trackedSchema>;
 const hash = (bytes: Buffer | string) => createHash('sha256').update(bytes).digest('hex');
 
 async function readJson(path: string) { return JSON.parse(await readFile(path, 'utf8')); }
@@ -66,19 +67,37 @@ async function send(settings: Settings, path: string, init: RequestInit) {
 export async function collectOnce(state: string) {
   const settings = settingsSchema.parse(await readJson(join(state, 'settings.json')));
   let tracked: Tracked[] = [];
-  try { tracked = z.array(trackedSchema).parse(await readJson(join(state, 'tracked.json'))); }
+  try { tracked = z.array(trackedSchema).parse(await readJson(join(state, 'tracked.json'))).map(entry => ({ ...entry, source: entry.source ?? settings.source })); }
   catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
   const errors: string[] = [];
+  const queuedEvents: { file: string; event: z.infer<typeof hostEventSchema>; observedAt: string }[] = [];
   for (const file of await readdir(join(state, 'spool'))) {
     if (!file.endsWith('.json')) continue;
     try {
       const queued = await readJson(join(state, 'spool', file));
       const event = hostEventSchema.parse(queued.event);
       const observedAt = z.iso.datetime().parse(queued.observedAt);
+      queuedEvents.push({ file, event, observedAt });
+    } catch (error) { errors.push((error as Error).message); }
+  }
+  // A resumed Claude session can initially report a path derived from the new cwd,
+  // then correct it at UserPromptSubmit. Prefer the latest real host observation.
+  queuedEvents.sort((a, b) => b.observedAt.localeCompare(a.observedAt));
+  for (const { file, event, observedAt } of queuedEvents) {
+    try {
       if (observedAt < settings.enrolledAt) throw new Error('Activity predates enrollment');
+      const existing = tracked.find(entry => entry.source === settings.source && entry.sessionId === event.session_id);
+      if (existing?.lastObservedAt && existing.lastObservedAt >= observedAt) {
+        await unlink(join(state, 'spool', file)); continue;
+      }
       const transcriptPath = await qualifiedPath(settings, event.transcript_path);
-      if (!tracked.find(entry => entry.sessionId === event.session_id && entry.transcriptPath === transcriptPath)) {
-        tracked.push({ sessionId: event.session_id, transcriptPath, project: event.cwd ?? '', qualifiedAt: observedAt });
+      if (existing) {
+        if (existing.transcriptPath !== transcriptPath) delete existing.acknowledgedHash;
+        existing.transcriptPath = transcriptPath; existing.project = event.cwd ?? existing.project; existing.lastObservedAt = observedAt;
+      } else {
+        const qualifiedAt = queuedEvents.filter(item => item.event.session_id === event.session_id && item.observedAt >= settings.enrolledAt)
+          .reduce((earliest, item) => item.observedAt < earliest ? item.observedAt : earliest, observedAt);
+        tracked.push({ source: settings.source, sessionId: event.session_id, transcriptPath, project: event.cwd ?? '', qualifiedAt, lastObservedAt: observedAt });
       }
       await atomicJson(join(state, 'tracked.json'), tracked);
       await unlink(join(state, 'spool', file));
@@ -87,6 +106,7 @@ export async function collectOnce(state: string) {
   let committed = 0;
   for (const source of tracked) {
     try {
+      if (source.source !== settings.source) throw new Error('Tracked source does not match this collector binding');
       const transcriptPath = await qualifiedPath(settings, source.transcriptPath);
       const size = (await stat(transcriptPath)).size;
       if (size > MAX_ARTIFACT_BYTES) throw new Error('Artifact exceeds the 8 MiB first-slice limit; material remains pending');
@@ -95,9 +115,13 @@ export async function collectOnce(state: string) {
       const artifactHash = hash(bytes);
       if (source.acknowledgedHash === artifactHash) continue;
       // Read identity from the source artifact, never accept a hook pointing at another session.
-      const metadata = JSON.parse(bytes.toString('utf8').split('\n')[0]!);
-      if (metadata.type !== 'session_meta' || metadata.payload?.id !== source.sessionId) throw new Error('Native session identity mismatch');
-      const sourceVersion = settings.source === 'codex-cli' ? z.string().min(1).max(256).parse(metadata.payload.cli_version) : settings.sourceVersion;
+      let sourceVersion = settings.sourceVersion;
+      if (settings.source === 'claude-code-cli') sourceVersion = claudeIdentity(bytes, source.sessionId).version;
+      else {
+        const metadata = JSON.parse(bytes.toString('utf8').split('\n')[0]!);
+        if (metadata.type !== 'session_meta' || metadata.payload?.id !== source.sessionId) throw new Error('Native session identity mismatch');
+        if (settings.source === 'codex-cli') sourceVersion = z.string().min(1).max(256).parse(metadata.payload.cli_version);
+      }
       const manifest = manifestSchema.parse({ protocolVersion: 1, sourceSessionId: source.sessionId, source: settings.source,
         sourceVersion, sourceOs: settings.sourceOs, project: source.project,
         hash: artifactHash, byteLength: bytes.length, qualifiedAt: source.qualifiedAt, capability: 'unverified' });
