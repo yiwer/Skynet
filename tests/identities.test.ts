@@ -114,9 +114,24 @@ test('Web account/device revocation preserves shared history and enforces every 
     await alphaDownloadPage.getByRole('button', { name: '下载原件', exact: true }).click();
     assert.equal((await deniedDownload).status(), 401);
     await alphaDownloadPage.getByRole('button', { name: '进入存档' }).waitFor();
+    // Keep the real revoked response pending until the refresh has visibly entered its
+    // loading state. Logout aborts that request's effect, so its finally cannot reset busy.
+    let releaseRevocation!: () => void;
+    const revocationHeld = new Promise<void>(resolve => { releaseRevocation = resolve; });
+    await alphaPage.route('**/api/sessions', async route => {
+      const response = await route.fetch(); assert.equal(response.status(), 401);
+      await revocationHeld; await route.fulfill({ response });
+    }, { times: 1 });
     await alphaPage.getByRole('button', { name: '刷新存档' }).click();
-    await alphaPage.getByRole('button', { name: '进入存档' }).waitFor();
+    try { await expect(alphaPage.getByRole('button', { name: '正在刷新…', exact: true })).toBeDisabled(); }
+    finally { releaseRevocation(); }
+    await expect(alphaPage.getByRole('button', { name: '进入存档', exact: true })).toBeVisible();
     assert.equal(await alphaPage.getByText('甲设备一的历史材料仍可核查', { exact: true }).count(), 0, 'revoked login clears in-page archive data when a request is rejected');
+    await alphaPage.getByLabel('个人读取凭据').fill(beta.readerCredential);
+    await expect(alphaPage.getByRole('button', { name: '进入存档', exact: true })).toBeEnabled();
+    await alphaPage.getByRole('button', { name: '进入存档', exact: true }).click();
+    await expect(alphaPage.getByRole('button', { name: '刷新存档', exact: true })).toBeEnabled();
+    await expect(alphaPage.getByText('甲设备一的历史材料仍可核查', { exact: true })).toBeVisible();
     for (const path of ['/api/me', '/api/sessions', snapshotPath, `${snapshotPath}/raw`, `${snapshotPath}/readable`, `${snapshotPath}/recovery`]) {
       assert.equal((await api(path, alpha.readerCredential)).status, 401);
     }
