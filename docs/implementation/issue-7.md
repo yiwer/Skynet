@@ -75,6 +75,6 @@ node --import tsx --test tests/native-claude.test.ts
 
 ## 当前缺口
 
-- 只保存当前收到的单个原件，仍有 8 MiB 上限；关联附件、subagent、spilled tool results、file-history、压缩前材料等不能被这张恢复回执覆盖。[官方应用数据说明](https://code.claude.com/docs/en/claude-directory)列出了这些独立材料；它们的缺失不能被摘要替代。
+- 本票交付时仅覆盖 8 MiB 单原件；后续 [#9](issue-9.md) 已加入有界分块以及已知关联附件、subagent、spilled tool results、file-history、压缩前材料。未知引用和原生映射仍显示缺口，不将摘要视为原件替代。
 - 只验证 Windows x64 / Claude 2.1.281 的普通非交互 CLI 与合成模型组合。交互安装、插件市场、其他 OS/运行环境、真实模型及 G0 完整矩阵仍待验证。
 - 本票没有执行 G3 的 Claude Code + 千问按量链，也没有声称后台启动性能、5 个工作日试点或整个 V1 达标。
