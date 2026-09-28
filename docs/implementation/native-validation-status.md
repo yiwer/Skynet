@@ -21,7 +21,7 @@
 - `hooks/list` 能列出用户定义、当前哈希和 `untrusted` 状态。一次诊断使用过宿主的信任绕过开关以观察原生事件格式；该结果仅用于输入契约研究，**不作为接入、信任或验收证据**。产品、演示与正常验收流程不得使用该开关或写入信任哈希。
 - Codex CLI 0.157.1 已通过实际终端界面完成新建目录与单条测试 hook 的普通审核，定义详情显示 `Trusted`、事件列表显示 1 个 Active；独立 exec 随后 exit 0 并触发 UserPromptSubmit。提升权限终端不能启动共享 daemon，CLI 自身提示的 `--no-daemon` 独立运行模式可用；没有禁用 sandbox 或绕过 hook 信任。#6 仍需对产品 hook 重复正常审核并测试完整链路。
 - Claude Code 2.1.281 普通 print 模式实际执行 Read 并触发六种 hooks；仅复制 JSONL 到新 home 和不同空工作区，令源原件不可用后，原生 resume 仍保留原 prompt、工具请求和结果。跨工作区的 SessionStart 可能先报告不存在的推导路径，后续 UserPromptSubmit 才给出实际路径。此处是机制诊断，产品链路由 #7 继续验证。
-- 干净 Desktop profile 的启动探针仍退出 `1`。实际 MSIX 入口程序曾打开独立 loopback 调试端口，但没有页面 target。进一步透明协议诊断确认原生 initialize 与 configRequirements/read 成功，错误位于后续 Desktop bootstrap，排除了先前的网络要求失败猜测。原因仍在定位，没有修改启动安全要求或用户现有 Desktop。
+- Desktop 启动诊断已定位两个环境问题：隔离 profile 必须具有标准 `USERPROFILE/AppData/Roaming` 与 `Local` 目录，直接启动 MSIX 可执行文件还缺少包身份。修正目录并经官方 `Invoke-CommandInDesktopPackage` 做一次隔离包上下文诊断后，未修改安装版在约 3.93 秒创建 renderer 页面目标。此结果仅证明页面目标创建，未检查 DOM 完整加载、登录、信任或续聊，也不能替代普通测试账户的正常启动验收。原 Desktop 实例保持运行，诊断实例已关闭。
 
 原始研究、脚本和合成证据保存在执行机器的 `%TEMP%/skynet-v1-implementation/`，供后续实现代理复用；这些临时文件不构成仓库内可持续复现的发布验收材料。
 
