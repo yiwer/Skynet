@@ -20,6 +20,14 @@ export async function migrate(db: Database) {
       installation_id uuid NOT NULL, name text NOT NULL, credential_hash text UNIQUE NOT NULL,
       active boolean NOT NULL DEFAULT true, UNIQUE(employee_id, installation_id)
     );
+    ALTER TABLE employees ADD COLUMN IF NOT EXISTS can_manage_identities boolean NOT NULL DEFAULT false;
+    CREATE TABLE IF NOT EXISTS identity_audit (
+      id uuid PRIMARY KEY, actor_id uuid NOT NULL REFERENCES employees(id),
+      employee_id uuid NOT NULL REFERENCES employees(id), device_id uuid REFERENCES devices(id),
+      action text NOT NULL CHECK(action IN ('disable-employee','disable-device')),
+      occurred_at timestamptz NOT NULL DEFAULT now()
+    );
+    CREATE INDEX IF NOT EXISTS identity_audit_time ON identity_audit(occurred_at DESC,id DESC);
     CREATE TABLE IF NOT EXISTS chunks (
       device_id uuid NOT NULL REFERENCES devices(id), hash text NOT NULL,
       byte_length integer NOT NULL, PRIMARY KEY(device_id, hash)

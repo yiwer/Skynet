@@ -9,12 +9,7 @@ import { readEvidence } from './evidence.js';
 import { appendSnapshotSchema, enrollmentSchema, hashSchema, manifestSchema, MAX_ARTIFACT_BYTES, type Manifest } from '../../packages/contracts/archive.js';
 import { createRecoveryPackage, recoveryInfo } from '../../packages/recovery.js';
 import { activityFor } from '../../packages/activity.js';
-
-class HttpError extends Error { constructor(public statusCode: number, message: string) { super(message); } }
-const credential = (authorization?: string) => {
-  if (!authorization?.startsWith('Bearer ') || authorization.length > 256) throw new HttpError(401, '请提供有效凭据');
-  return authorization.slice(7);
-};
+import { credential, HttpError, identities } from './identities.js';
 
 export async function createApp(options: { db: Database; rawDirectory: string; webDirectory?: string }) {
   const { db } = options;
@@ -34,19 +29,27 @@ export async function createApp(options: { db: Database; rawDirectory: string; w
   });
   app.addContentTypeParser('application/octet-stream', { parseAs: 'buffer' }, (_request, body, done) => done(null, body));
 
-  async function reader(authorization?: string) {
-    const result = await db.query('SELECT id, name FROM employees WHERE reader_hash=$1 AND active', [digest(credential(authorization))]);
-    if (!result.rows[0]) throw new HttpError(401, '读取凭据无效或已停用');
-    return result.rows[0];
-  }
-  async function device(authorization?: string) {
-    const result = await db.query(`SELECT d.id, d.employee_id, d.enrolled_at FROM devices d JOIN employees e ON e.id=d.employee_id
-      WHERE d.credential_hash=$1 AND d.active AND e.active`, [digest(credential(authorization))]);
-    if (!result.rows[0]) throw new HttpError(401, '设备凭据无效或已停用');
-    return result.rows[0];
-  }
+  const identity = identities(db);
+  const { reader, device } = identity;
   const readerGuard = async (request: { headers: { authorization?: string } }) => { await reader(request.headers.authorization); };
   const deviceGuard = async (request: { headers: { authorization?: string } }) => { await device(request.headers.authorization); };
+  const managerGuard = async (request: { headers: { authorization?: string } }) => { await identity.manager(request.headers.authorization); };
+
+  app.get('/api/identities', { onRequest: managerGuard }, async request => {
+    const { offset } = z.object({ offset: z.coerce.number().int().min(0).default(0) }).parse(request.query);
+    return identity.list(request.headers.authorization, offset);
+  });
+  app.get('/api/identity-audit', { onRequest: managerGuard }, async request => {
+    const { offset } = z.object({ offset: z.coerce.number().int().min(0).default(0) }).parse(request.query);
+    return identity.audit(request.headers.authorization, offset);
+  });
+  for (const kind of ['employee', 'device'] as const) {
+    app.post(`/api/identities/${kind}s/:id/disable`, { onRequest: managerGuard }, async request => {
+      z.object({}).strict().parse(request.body ?? {});
+      const id = z.uuid().parse((request.params as { id: string }).id);
+      return identity.disable(request.headers.authorization, kind, id);
+    });
+  }
 
   app.get('/health', async () => ({ status: 'ok' }));
   app.post('/api/devices/enroll', async request => {
