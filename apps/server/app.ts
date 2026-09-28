@@ -90,7 +90,7 @@ export async function createApp(options: { db: Database; rawDirectory: string; w
     const result = await db.query(`SELECT * FROM (
       SELECT DISTINCT ON (s.device_id,s.source_session_id) s.id,e.name AS employee,s.source_session_id,
         s.manifest->>'project' AS project,s.committed_at,s.hash,(s.manifest->>'byteLength')::integer AS byte_length,
-        s.manifest->>'sourceVersion' AS source_version,s.manifest->>'sourceOs' AS source_os
+        s.manifest->>'sourceVersion' AS source_version,s.manifest->>'sourceOs' AS source_os,s.manifest->>'source' AS source
       FROM snapshots s JOIN devices d ON d.id=s.device_id JOIN employees e ON e.id=d.employee_id
       ORDER BY s.device_id,s.source_session_id,s.committed_at DESC,s.id DESC
     ) latest ORDER BY committed_at DESC LIMIT 100`);
@@ -106,7 +106,7 @@ export async function createApp(options: { db: Database; rawDirectory: string; w
   app.get('/api/snapshots/:id', { onRequest: readerGuard }, async request => {
     const record = await snapshot((request.params as { id: string }).id);
     const query = z.object({ offset: z.coerce.number().int().min(0).default(0) }).parse(request.query);
-    const evidence = readEvidence(await raw.read(record.device_id, record.hash));
+    const evidence = readEvidence(await raw.read(record.device_id, record.hash), record.manifest.source);
     return { snapshotId: record.id, employee: record.employee, manifest: record.manifest,
       committedAt: record.committed_at, state: 'committed', backup: 'single-copy', ...evidence,
       events: evidence.events.slice(query.offset, query.offset + 100), total: evidence.events.length,

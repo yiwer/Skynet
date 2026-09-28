@@ -1,6 +1,7 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { createRoot } from 'react-dom/client';
 import type { EvidenceLine, Manifest, SessionSummary } from '../../packages/contracts/archive.js';
+import { sourceLabel } from '../../packages/contracts/archive.js';
 import './style.css';
 
 type Detail = { snapshotId: string; employee: string; manifest: Manifest; committedAt: string; events: EvidenceLine[];
@@ -84,17 +85,17 @@ function App() {
         {busy && <p role="status">正在读取存档…</p>}
         {!busy && sessions.length === 0 && <p className="muted">还没有已提交的会话。后台上传后刷新；暂存材料不会显示为已存档。</p>}
         <nav>{sessions.map(session => <a key={session.id} href={`#${session.id}`} className={`session ${selected === session.id ? 'selected' : ''}`} aria-current={selected === session.id ? 'page' : undefined}>
-          <strong>{session.employee}</strong><span className="project">{session.project || '未归类项目'}</span><small>{date(session.committed_at)}</small><span className="badge">原件已提交</span></a>)}</nav>
+          <strong>{session.employee}</strong><span>{sourceLabel(session.source)}</span><span className="project">{session.project || '未归类项目'}</span><small>{date(session.committed_at)}</small><span className="badge">原件已提交</span></a>)}</nav>
         <p className="muted small">最多显示最近 100 条会话。</p></aside>
         <article aria-label="会话详情">{!selected ? <div className="empty"><h2>选择一条会话</h2><p>阅读消息、工具结果与对应原件位置。</p></div> : detailLoading ? <p role="status">正在读取会话…</p> : detailError ? <>
           <p className="error" role="alert">{detailError}</p><button onClick={() => setDetailRetry(value => value + 1)}>重试读取会话</button>
         </> : detail && <>
-          <div className="detail-heading"><div><p className="eyebrow">{detail.employee} · Codex Desktop</p><h2>{detail.manifest.project || '未归类项目'}</h2></div><button onClick={download}>下载原件</button></div>
+          <div className="detail-heading"><div><p className="eyebrow">{detail.employee} · {sourceLabel(detail.manifest.source)}</p><h2>{detail.manifest.project || '未归类项目'}</h2></div><button onClick={download}>下载原件</button></div>
           <dl><div><dt>提交时间</dt><dd>{date(detail.committedAt)}</dd></div><div><dt>来源环境</dt><dd>{detail.manifest.sourceVersion} / {detail.manifest.sourceOs}</dd></div>
             <div><dt>存档范围</dt><dd>{detail.manifest.byteLength.toLocaleString()} 字节 · 当前收到的单个原件</dd></div><div><dt>SHA-256</dt><dd className="hash">{detail.manifest.hash}</dd></div></dl>
           {(detail.unrecognizedLines > 0 || detail.partialLine) && <p className="notice">{detail.unrecognizedLines} 行未解析{detail.partialLine ? '，另有未闭合的末行' : ''}。全部字节仍保存在原件中。</p>}
           <p className="muted">共 {detail.total} 条已解析记录。消息只代表会话中记录的内容。</p>
-          {detail.events.map(event => <section className="message" key={event.line}><div className="message-meta"><strong>{event.role}</strong><span>原件第 {event.line} 行{event.timestamp ? ` · ${date(event.timestamp)}` : ''}</span></div><pre>{event.text}</pre></section>)}
+          {detail.events.map(event => <section className="message" key={`${event.line}:${event.block ?? 0}`}><div className="message-meta"><strong>{event.role}</strong><span>原件第 {event.line} 行{event.timestamp ? ` · ${date(event.timestamp)}` : ''}</span></div><pre>{event.text}</pre></section>)}
           {detail.events.length === 0 && <p>当前原件没有可解析的消息；可下载原件核查。</p>}
           <div className="pagination"><button disabled={offset === 0} onClick={() => setOffset(value => Math.max(0, value - 100))}>上一页</button><button disabled={detail.nextOffset === null} onClick={() => setOffset(detail.nextOffset ?? 0)}>下一页</button></div>
         </>}</article></div></>}
