@@ -29,6 +29,8 @@
 
 原始研究、脚本和合成证据保存在执行机器的 `%TEMP%/skynet-v1-implementation/`，供后续实现代理复用；这些临时文件不构成仓库内可持续复现的发布验收材料。
 
+独立附件重建补充诊断：在删除源 home、仅从服务器包恢复的隔离目录，原生 `thread/attachment/add` 可重放保存的附件类型、键和 payload，重复调用保持一项，但会生成新的 ID 和创建时间。在关闭该测试原生进程后，仅调整新目标数据库中的原始 ID/时间，再启动原生后端可准确列回这些字段。证据为 `%TEMP%/skynet-test-EqV52M/attachment-replay-details.json` 与 `skynet-test-3LFjW3/attachment-identity-details.json`，复现说明 `skynet-v1-implementation/native-attachment-restore.md`。这只是测量版本下的兼容性路径诊断，产品尚未集成，未知附件类型、外部文件引用及 Desktop UI 仍未验证。
+
 ## 当前阻塞与补齐方式
 
 #4 仍需一个能正常启动 Desktop 的隔离 OS 测试账号或专用测试机。通过宿主正常流程审查并信任采集 hook 后，创建含唯一上下文标记和无害工具结果的合成会话，验证自动入队、后台上传、另一测试用户读取、匿名拒绝及重启后的原件一致性。具体产品启动命令见 [首条存档链](issue-4.md)。

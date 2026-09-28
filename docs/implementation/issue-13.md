@@ -95,4 +95,6 @@ Linux 不据 Windows 结果宣称通过：较新主线 `099db05` 的 [CI 3639845
 
 仍待：#14 升级/修复/完整卸载；正常 Desktop 市场 UI、图标启动及 UI 原生续聊；真实登录/重启/休眠；其他 OS 安装链；完整 G1 和其他发布门槛。内部 CLI marketplace 验证不替代这些边界。
 
+控制端口的一个已观察边界也留给 #14：固定候选端口可能落入 Windows 保留范围或被其他进程占用；当前会明确报告无法建立所有权，重复同一状态目录不会重新分配端口。修复时须确认旧监督器和 worker 的所有权状态，不能停止无关监听者或用 PID 文件推定进程归属。
+
 接口依据：[Codex plugin packaging](https://developers.openai.com/plugins/build/plugins)、[Claude plugin reference](https://code.claude.com/docs/en/plugins-reference)。发行格式以生成的 catalog 和实测版本为准。
