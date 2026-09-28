@@ -22,8 +22,8 @@ async function stdin() {
 }
 
 if (command === 'restore') {
-  if (!values.package || !values.target || !values['desktop-version'] || !values.runtime) {
-    throw new Error('Restore requires --package FILE --target NEW_ABSOLUTE_DIRECTORY --desktop-version VERSION --runtime ABSOLUTE_CODEX_EXECUTABLE');
+  if (!values.package || !values.target || !values.runtime) {
+    throw new Error('Restore requires --package FILE --target NEW_ABSOLUTE_DIRECTORY --runtime ABSOLUTE_NATIVE_EXECUTABLE (Codex Desktop also requires --desktop-version VERSION)');
   }
   console.log(JSON.stringify(await restorePackage({ packagePath: values.package, target: values.target,
     desktopVersion: values['desktop-version'], runtime: values.runtime })));

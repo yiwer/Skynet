@@ -13,7 +13,7 @@ const settingsSchema = z.object({
   source: sourceSchema.default('codex-desktop'),
 });
 type Settings = z.infer<typeof settingsSchema>;
-const trackedSchema = z.object({ sessionId: z.string(), transcriptPath: z.string(), project: z.string(), qualifiedAt: z.iso.datetime(), lastObservedAt: z.iso.datetime().optional(), acknowledgedHash: z.string().optional() });
+const trackedSchema = z.object({ source: sourceSchema.optional(), sessionId: z.string(), transcriptPath: z.string(), project: z.string(), qualifiedAt: z.iso.datetime(), lastObservedAt: z.iso.datetime().optional(), acknowledgedHash: z.string().optional() });
 type Tracked = z.infer<typeof trackedSchema>;
 const hash = (bytes: Buffer | string) => createHash('sha256').update(bytes).digest('hex');
 
@@ -79,7 +79,7 @@ async function send(settings: Settings, path: string, init: RequestInit) {
 export async function collectOnce(state: string) {
   const settings = settingsSchema.parse(await readJson(join(state, 'settings.json')));
   let tracked: Tracked[] = [];
-  try { tracked = z.array(trackedSchema).parse(await readJson(join(state, 'tracked.json'))); }
+  try { tracked = z.array(trackedSchema).parse(await readJson(join(state, 'tracked.json'))).map(entry => ({ ...entry, source: entry.source ?? settings.source })); }
   catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
   const errors: string[] = [];
   const queuedEvents: { file: string; event: z.infer<typeof hostEventSchema>; observedAt: string }[] = [];
@@ -98,7 +98,7 @@ export async function collectOnce(state: string) {
   for (const { file, event, observedAt } of queuedEvents) {
     try {
       if (observedAt < settings.enrolledAt) throw new Error('Activity predates enrollment');
-      const existing = tracked.find(entry => entry.sessionId === event.session_id);
+      const existing = tracked.find(entry => entry.source === settings.source && entry.sessionId === event.session_id);
       if (existing?.lastObservedAt && existing.lastObservedAt >= observedAt) {
         await unlink(join(state, 'spool', file)); continue;
       }
@@ -109,7 +109,7 @@ export async function collectOnce(state: string) {
       } else {
         const qualifiedAt = queuedEvents.filter(item => item.event.session_id === event.session_id && item.observedAt >= settings.enrolledAt)
           .reduce((earliest, item) => item.observedAt < earliest ? item.observedAt : earliest, observedAt);
-        tracked.push({ sessionId: event.session_id, transcriptPath, project: event.cwd ?? '', qualifiedAt, lastObservedAt: observedAt });
+        tracked.push({ source: settings.source, sessionId: event.session_id, transcriptPath, project: event.cwd ?? '', qualifiedAt, lastObservedAt: observedAt });
       }
       await atomicJson(join(state, 'tracked.json'), tracked);
       await unlink(join(state, 'spool', file));
@@ -118,6 +118,7 @@ export async function collectOnce(state: string) {
   let committed = 0;
   for (const source of tracked) {
     try {
+      if (source.source !== settings.source) throw new Error('Tracked source does not match this collector binding');
       const transcriptPath = await qualifiedPath(settings, source.transcriptPath);
       const size = (await stat(transcriptPath)).size;
       if (size > MAX_ARTIFACT_BYTES) throw new Error('Artifact exceeds the 8 MiB first-slice limit; material remains pending');

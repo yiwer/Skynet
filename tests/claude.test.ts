@@ -1,10 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { randomUUID } from 'node:crypto';
-import { mkdir, writeFile, rename } from 'node:fs/promises';
+import { createHash, randomUUID } from 'node:crypto';
+import { access, mkdir, writeFile, rename } from 'node:fs/promises';
 import { join } from 'node:path';
 import { chromium, expect, type Browser } from '@playwright/test';
-import { createSandbox } from './support.js';
+import { command, createSandbox } from './support.js';
 
 test('Claude CLI native-shaped messages cross the public collector, API and browser with honest gaps', { timeout: 180_000 }, async () => {
   const sandbox = await createSandbox();
@@ -59,6 +59,17 @@ test('Claude CLI native-shaped messages cross the public collector, API and brow
     assert.equal(detail.events[0].timestamp, timestamp, 'old source timestamps survive new activity qualification');
     assert.equal(detail.events[1].line, detail.events[2].line, 'multiple blocks keep the original evidence line');
     assert.deepEqual(Buffer.from(await (await request(`/api/snapshots/${sessions[0].id}/raw`)).arrayBuffer()), bytes);
+    const readable = await (await request(`/api/snapshots/${sessions[0].id}/readable`)).text();
+    assert.ok(readable.includes('claude-jsonl-1') && readable.includes('合成编辑结果：false → true'));
+    assert.ok(readable.includes('{malformed-native-line}'), 'readable export includes unknown original material as text');
+    const recovery = await (await request(`/api/snapshots/${sessions[0].id}/recovery`)).json();
+    assert.equal(recovery.format, 'skynet-claude-recovery');
+    const recoveryPath = join(sandbox.directory, 'malformed-claude.skynet-recovery.json');
+    const recoveryTarget = join(sandbox.directory, 'must-not-be-created');
+    await writeFile(recoveryPath, JSON.stringify(recovery));
+    await assert.rejects(command(process.execPath, ['dist/apps/collector/cli.js', 'restore', '--package', recoveryPath,
+      '--target', recoveryTarget, '--runtime', process.execPath], sandbox.env), /invalid UTF-8 or JSON/);
+    await assert.rejects(access(recoveryTarget), { code: 'ENOENT' });
 
     // A genuine later path correction for the same ID must not keep reading the old path.
     const moved = join(nativeRoot, `moved-${sessionId}.jsonl`);
@@ -77,6 +88,26 @@ test('Claude CLI native-shaped messages cross the public collector, API and brow
     assert.match(JSON.parse(await sandbox.collectorCommand('run', state)).errors.join('\n'), /identity mismatch/);
     sessions = (await (await request('/api/sessions')).json()).sessions;
     assert.deepEqual(sessions.map((s: { project: string }) => s.project).sort(), ['/synthetic/project-a', '/synthetic/project-b']);
+
+    const shared = await sandbox.provision('跨客户端同 ID 员工');
+    const enrolled = await (await fetch(`${origin}/api/devices/enroll`, { method: 'POST', headers: {
+      Authorization: `Bearer ${shared.enrollmentCredential}`, 'Content-Type': 'application/json',
+    }, body: JSON.stringify({ installationId: randomUUID(), name: 'multi-source' }) })).json();
+    const sameId = randomUUID();
+    for (const source of ['claude-code-cli', 'codex-desktop']) {
+      const raw = Buffer.from(JSON.stringify(source === 'claude-code-cli'
+        ? { ...meta(), sessionId: sameId, type: 'user', message: { role: 'user', content: '独立 Claude 会话' } }
+        : { type: 'session_meta', payload: { id: sameId, cli_version: 'synthetic-1' } }) + '\n');
+      const hash = createHash('sha256').update(raw).digest('hex');
+      const headers = { Authorization: `Bearer ${enrolled.deviceCredential}` };
+      assert.equal((await fetch(`${origin}/api/chunks/${hash}`, { method: 'PUT', headers: { ...headers, 'Content-Type': 'application/octet-stream' }, body: raw })).status, 201);
+      const manifest = { protocolVersion: 1, sourceSessionId: sameId, source, sourceVersion: 'synthetic-1', sourceOs: process.platform,
+        project: '/synthetic/same-id', hash, byteLength: raw.length, qualifiedAt: new Date().toISOString(), capability: 'unverified' };
+      const committed = await (await fetch(`${origin}/api/snapshots`, { method: 'POST', headers: { ...headers, 'Content-Type': 'application/json' }, body: JSON.stringify(manifest) })).json();
+      assert.equal(committed.state, 'committed');
+    }
+    const sameIdSessions = (await (await request('/api/sessions')).json()).sessions.filter((s: { source_session_id: string }) => s.source_session_id === sameId);
+    assert.deepEqual(sameIdSessions.map((s: { source: string }) => s.source).sort(), ['claude-code-cli', 'codex-desktop'], 'source participates in identity even for the same device and native session ID');
 
     browser = await chromium.launch();
     const page = await browser.newPage();
