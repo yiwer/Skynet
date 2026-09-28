@@ -20,13 +20,14 @@
 - #18：开始验证真实隔离存储不足、权限拒绝与源头删除，补齐设备/会话缺口状态和恢复后的补传。
 - #20：维护者停用账号/设备、逐请求撤销及操作审计已通过 `ec65e04` 合并；与 #8 集成的 6 项公开流程测试通过，可信接入边界保留。#11 安装前置验收仍未通过。
 - #26：个人 OAuth 授权、HTTPS MCP、共享 Web/MCP 查询与分页导出已通过 `85a1533` 合并。两个真实 CLI 各完成 17 次 MCP 调用、正常授权及导出字节校验；后续自然等待 16 分钟，两者均无需重新登录即可自动刷新并重复通过读取。模型为确定性替身；实际域名部署及完整门禁仍开放。
-- #27：开始实现组合内容搜索、历史代次命中及 Web/MCP 共用的稳定证据定位。
-- #10、#14–#15、#19、#21–#25、#28–#33：尚未完成；依赖与门槛继续按 ticket 图核查。
+- #27：组合内容搜索、历史代次和稳定原件定位已通过 `96c3d92` 合并。分支 14 项普通测试、两个真实 CLI 各 20 次 MCP 调用通过；合并后搜索/MCP/缓存 3 项回归通过，105 个独立会话跨 37 页完整命中。查询成员可跨重启继续，过期明确报错；320/375/1440px 布局已检查。
+- #22：开始实现独立 Claude Code 分析运行时、结构化会话结果及 Web/MCP 原件证据跳转。隔离的真实 CLI 与本机确定性模型可先验证产品路径；实际千问模型、专用凭据与预算配置尚待提供，不视为 G3 通过。
+- #10、#14–#15、#19、#21、#23–#25、#28–#33：尚未完成；依赖与门槛继续按 ticket 图核查。
 - G0–G4：未通过。原生恢复、真实分析、客户端 MCP 授权与五个工作日试点必须保留实测证据。
 - [草稿 PR #55](https://github.com/yiwer/Skynet/pull/55) 已保存实现与规格关闭引用；保持草稿，尚无 ticket 通过验收或被关闭。
 - 本地类型检查、构建、公开入口 E2E、Linux 容器持久卷重启验证及初次 GitHub CI 通过；[两路评审](../implementation/review-issue-4.md) 的可修复代码问题已在 `9ad3277` 修复，并通过 `920b92f` 合并，回归检查通过。
 
-运行与复现见 [首条存档链](../implementation/issue-4.md)、[导出与恢复](../implementation/issue-5.md)、[Codex CLI 链路](../implementation/issue-6.md)、[Claude CLI 链路](../implementation/issue-7.md)、[旧会话与增量](../implementation/issue-8.md)、[关联材料](../implementation/issue-9.md)、[单 Key 安装](../implementation/issue-11.md)、[离线补传](../implementation/issue-16.md)、[身份停用](../implementation/issue-20.md)、[HTTPS MCP](../implementation/issue-26.md)。目前需补齐的外部条件见 [原生客户端验收状态](../implementation/native-validation-status.md)。
+运行与复现见 [首条存档链](../implementation/issue-4.md)、[导出与恢复](../implementation/issue-5.md)、[Codex CLI 链路](../implementation/issue-6.md)、[Claude CLI 链路](../implementation/issue-7.md)、[旧会话与增量](../implementation/issue-8.md)、[关联材料](../implementation/issue-9.md)、[单 Key 安装](../implementation/issue-11.md)、[共享后台](../implementation/issue-12.md)、[离线补传](../implementation/issue-16.md)、[提交一致性](../implementation/issue-17.md)、[身份停用](../implementation/issue-20.md)、[HTTPS MCP](../implementation/issue-26.md)、[组合搜索](../implementation/issue-27.md)。目前需补齐的外部条件见 [原生客户端验收状态](../implementation/native-validation-status.md)。
 
 ## 已确认的开发环境
 
