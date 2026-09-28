@@ -43,6 +43,7 @@ function App() {
   const [exportError, setExportError] = useState('');
   const [exportStatus, setExportStatus] = useState('');
   function logout(message = '') {
+    setBusy(false);
     setToken(''); setName(''); setEmployeeId(''); setCanManageIdentities(false); setView('archive');
     setSessions([]); setSessionCursor(null); setNextSessionCursor(null); setDetail(null); setError(message);
   }
