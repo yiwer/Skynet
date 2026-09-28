@@ -1,4 +1,4 @@
-import { open, readFile, readdir, realpath, unlink, mkdir } from 'node:fs/promises';
+import { open, readdir, realpath, unlink, mkdir } from 'node:fs/promises';
 import { join, relative, isAbsolute, sep } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { spawn } from 'node:child_process';
@@ -106,13 +106,13 @@ export async function installedStatus(state: string) {
     const capture = await optionalJson(join(sourceState, 'status.json'));
     const gap = await optionalJson(join(sourceState, 'hook-gap.json'));
     const queued = await readdir(join(sourceState, 'spool')).catch(() => []);
-    clients.push({ ...client, trust: tracked.length ? 'host-event-observed; all-hook-trust-not-asserted' : 'pending-host-confirmation',
+    clients.push({ ...client, trust: !client.configured ? 'not-configured' : tracked.length ? 'host-event-observed; all-hook-trust-not-asserted' : 'pending-host-confirmation',
       firstEvent: tracked.length ? tracked.map((item: any) => item.qualifiedAt).sort()[0] : null,
       confirmedUploads: tracked.filter((item: any) => item.acknowledgedSnapshotId).length, queuedEvents: queued.filter(file => file.endsWith('.json')).length, capture, gap });
   }
   return { installed: true, deviceId: identity.deviceId, deploymentId: installation.deploymentId, stateDirectory: state,
     background: runtime && Date.now() - Date.parse(runtime.checkedAt) < 6000 ? 'running' : 'unavailable', runtime,
-    autostart: 'not-installed; current-session-background-only', server, clients,
+    autostart: 'not-installed; current-session-background-only', server: server && { ...server, fresh: Date.now() - Date.parse(server.checkedAt) < 20_000 }, clients,
     codexUnclassifiedEvents: (await readdir(join(state, 'inbox', 'codex', 'spool')).catch(() => [])).filter(file => file.endsWith('.json')).length,
     notice: '配置、宿主信任、首次事件、服务器连接及原件确认分别验证。Desktop 与完整安装门槛尚未通过。' };
 }

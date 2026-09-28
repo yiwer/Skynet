@@ -4,7 +4,7 @@ import { homedir } from 'node:os';
 import { delimiter, join, resolve } from 'node:path';
 import { lstat, stat, open, readFile, realpath, rename, unlink, writeFile } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
-import { type Installation, optionalJson, plainDirectory } from './install-state.js';
+import { type Installation, plainDirectory } from './install-state.js';
 import { syncDirectory } from '../../packages/filesystem.js';
 
 const execute = promisify(execFile);

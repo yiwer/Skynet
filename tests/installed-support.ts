@@ -1,4 +1,4 @@
-import { dirname, join, resolve } from 'node:path';
+import { dirname, join } from 'node:path';
 import { command } from './support.js';
 import { mkdir, readFile } from 'node:fs/promises';
 
@@ -11,11 +11,16 @@ export async function installAgent(directory: string, origin: string, env: NodeJ
   const npmCli = process.env.npm_execpath ?? join(dirname(process.execPath), 'node_modules', 'npm', 'bin', 'npm-cli.js');
   const installed = await command(process.execPath, [npmCli, 'install', '--global', '--ignore-scripts', '--no-audit', '--no-fund', '--offline', '--prefix', prefix, packed.package], process.env);
   const cli = join(prefix, ...(process.platform === 'win32' ? [] : ['lib']), 'node_modules', '@skynet', 'agent', 'dist', 'apps', 'collector', 'cli.js');
+  const shim = join(prefix, ...(process.platform === 'win32' ? ['skynet.cmd'] : ['bin', 'skynet']));
+  const run = (action: string, environment = { ...env, SKYNET_KEY: undefined } as NodeJS.ProcessEnv) => process.platform === 'win32'
+    ? command('powershell.exe', ['-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from('& $env:SKYNET_TEST_SHIM $env:SKYNET_TEST_COMMAND; exit $LASTEXITCODE', 'utf16le').toString('base64')],
+      { ...environment, SKYNET_TEST_SHIM: shim, SKYNET_TEST_COMMAND: action })
+    : command(shim, [action], environment);
   const start = Date.now();
-  const stdout = await command(process.execPath, [cli, 'setup'], { ...env, SKYNET_KEY: key });
+  const stdout = await run('setup', { ...env, SKYNET_KEY: key });
   const status = JSON.parse(stdout);
   return { cli, prefix, status, setupMs: Date.now() - start, packInstallAndSetupMs: Date.now() - started, output: installed + stdout,
-    run: (action: string) => command(process.execPath, [cli, action], { ...env, SKYNET_KEY: undefined }) };
+    run };
 }
 export async function stopInstalled(state: string) {
   try {

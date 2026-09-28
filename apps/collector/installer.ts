@@ -1,5 +1,5 @@
 import { cp, lstat, mkdir, open, readFile, realpath, unlink, writeFile } from 'node:fs/promises';
-import { dirname, join, resolve } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { createRequire } from 'node:module';
 import { randomUUID } from 'node:crypto';
@@ -27,15 +27,28 @@ export async function install(state: string) {
     const identityValue = await optionalJson(join(state, 'identity.json'));
     let identity = identityValue ? identitySchema.parse(identityValue) : null;
     if (identity && identity.server !== server) throw new Error('Existing identity belongs to another server');
-    const clients = await detectClients();
-    if (!clients.some(client => client.detected)) throw new Error('No runnable Codex CLI, Claude Code CLI, or Windows Codex Desktop was detected');
+    const detected = await detectClients();
+    for (const client of detected) {
+      client.nativeRoot = await realpath(client.nativeRoot).catch(() => resolve(client.nativeRoot));
+      client.configPath = join(await realpath(dirname(client.configPath)).catch(() => resolve(dirname(client.configPath))), basename(client.configPath));
+    }
+    const clients = detected.map(client => {
+      const old = previous?.clients.find(item => item.source === client.source);
+      if (old?.configured && !client.detected) return { ...old, detected: false, notice: '之前已配置，当前未检测到宿主；保留已登记来源及待确认材料，请检查宿主或 PATH。' };
+      if (old?.configured && (resolve(old.nativeRoot) !== resolve(client.nativeRoot) || old.configPath !== client.configPath)) {
+        throw new Error('A configured native home changed; existing hooks and capture state were retained. Explicit migration is required.');
+      }
+      return client;
+    });
+    if (!clients.some(client => client.detected || client.configured)) throw new Error('No runnable Codex CLI, Claude Code CLI, or Windows Codex Desktop was detected');
     const node = await realpath(process.execPath); const launcher = join(state, 'skynet-launcher.mjs');
     const runtime = join(state, 'runtime', '0.1.0');
     const configurations: Installation['configurations'] = [];
     const plans = [];
-    for (const client of clients.filter(item => item.detected)) {
+    for (const client of clients.filter(item => item.detected || item.configured)) {
       await mkdir(client.nativeRoot, { recursive: true, mode: 0o700 });
       client.nativeRoot = await realpath(client.nativeRoot); client.configured = true;
+      client.configPath = join(await realpath(dirname(client.configPath)), basename(client.configPath));
       if (configurations.some(item => item.path === client.configPath)) continue;
       const entries = hookEntries(node, launcher, state, client.source !== 'claude-code-cli');
       const old = previous?.configurations.find(item => item.path === client.configPath);
