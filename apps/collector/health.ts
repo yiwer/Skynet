@@ -12,7 +12,7 @@ export async function reportDeliveryHealth(state: string, settings: { server: st
   let previous = volatileReports.get(state) ?? {};
   if (!volatileReports.has(state)) try { previous = JSON.parse(await readFile(path, 'utf8')); } catch { /* First report or unavailable local diagnostic. */ }
   const fingerprint = createHash('sha256').update(JSON.stringify({ delivery, capture: capture && { observation: capture.observation,
-    locallyPersisted: capture.locallyPersisted, faults: capture.faults.map(({ lastObservedAt: _last, ...fault }) => fault) } })).digest('hex');
+    locallyPersisted: capture.locallyPersisted, captureEnabled: capture.captureEnabled, faults: capture.faults.map(({ lastObservedAt: _last, ...fault }) => fault) } })).digest('hex');
   const elapsed = Date.now() - Date.parse(previous.checkedAt ?? '1970-01-01');
   // Do not hammer an unreachable or rejecting endpoint from the status path.
   const deliveryRecovered = delivery?.lastSuccessAt && delivery.lastSuccessAt !== previous.lastSuccessAt;

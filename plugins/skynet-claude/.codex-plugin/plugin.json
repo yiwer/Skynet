@@ -1,0 +1,18 @@
+{
+  "name": "skynet-claude",
+  "version": "0.1.0",
+  "description": "Claude-specific setup navigation for the shared Skynet collector. Distributed through the Claude marketplace.",
+  "author": {
+    "name": "Skynet"
+  },
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Skynet Claude",
+    "shortDescription": "Connect your shared session archive.",
+    "longDescription": "Claude-specific local setup navigation; use the Claude marketplace entry.",
+    "developerName": "Skynet",
+    "category": "Productivity",
+    "capabilities": [],
+    "defaultPrompt": "Help me use Skynet Claude."
+  }
+}

@@ -9,6 +9,7 @@ export const captureFaultSchema = z.object({
 }).strict().refine(value => (value.scope === 'session') === Boolean(value.sessionId), 'Session scope requires a native session identity');
 export const captureHealthSchema = z.object({
   checkedAt: z.iso.datetime(), observation: z.enum(['no-host-event', 'host-event-observed']),
+  captureEnabled: z.boolean().default(true),
   locallyPersisted: z.boolean(), faults: z.array(captureFaultSchema).max(128),
 }).strict();
 export type CaptureFault = z.infer<typeof captureFaultSchema>;

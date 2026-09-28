@@ -13,6 +13,7 @@ import { ensureRunning, installedStatus } from './runtime.js';
 import { enroll, setupLock } from './enrollment.js';
 import { initializeControl } from './runtime-control.js';
 import { installAutostart } from './autostart.js';
+import { compareVersions, packageEntrySchema, registeredEntries } from './entries.js';
 
 export const deploymentSchema = z.object({ deploymentId: z.string().regex(/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$/),
   enrollmentOrigin: z.string(), protocolVersion: z.literal(1) }).strict();
@@ -20,6 +21,9 @@ const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../../..')
 export async function install(state: string) {
   const deployment = deploymentSchema.parse(await jsonFile(join(packageRoot, 'deployment.json')).catch(() => { throw new Error('No valid deployment.json in this package; obtain the deployment-specific package from your platform operator'); }));
   const server = serverOrigin(deployment.enrollmentOrigin);
+  const manifest = await jsonFile(join(packageRoot, 'package.json'));
+  const entry = packageEntrySchema.parse(await optionalJson(join(packageRoot, 'entry.json')) ?? { channel: 'npm', version: manifest.version });
+  if (entry.version !== manifest.version) throw new Error('Package entry version does not match its payload');
   if (Number(process.versions.node.split('.')[0]) !== 24) throw new Error('Setup requires Node 24');
   await protectState(state);
   const releaseSetup = await setupLock(state);
@@ -27,6 +31,11 @@ export async function install(state: string) {
     const previousValue = await optionalJson(join(state, 'installation.json'));
     const previous = previousValue ? installationSchema.parse(previousValue) : null;
     if (previous && previous.deploymentId !== deployment.deploymentId) throw new Error('This user environment is already bound to another deployment');
+    if (previous) {
+      const activeVersion = (await jsonFile(join(previous.runtime, 'package.json'))).version;
+      if (compareVersions(entry.version, activeVersion) < 0) throw new Error('This entry is older than the installed shared runtime; obtain the current plugin. The runtime and queued evidence were retained.');
+      if (compareVersions(entry.version, activeVersion) > 0) throw new Error('A newer shared runtime requires the explicit upgrade workflow; existing runtime retained');
+    }
     const identityValue = await optionalJson(join(state, 'identity.json'));
     let identity = identityValue ? identitySchema.parse(identityValue) : null;
     if (identity && identity.server !== server) throw new Error('Existing identity belongs to another server');
@@ -35,20 +44,21 @@ export async function install(state: string) {
       client.nativeRoot = await realpath(client.nativeRoot).catch(() => resolve(client.nativeRoot));
       client.configPath = join(await realpath(dirname(client.configPath)).catch(() => resolve(dirname(client.configPath))), basename(client.configPath));
     }
+    const allowed = (source: string) => entry.channel === 'npm' || (entry.channel === 'claude-plugin' ? source === 'claude-code-cli' : source !== 'claude-code-cli');
     const clients = detected.map(client => {
       const old = previous?.clients.find(item => item.source === client.source);
       if (old?.configured && !client.detected) return { ...old, detected: false, notice: '之前已配置，当前未检测到宿主；保留已登记来源及待确认材料，请检查宿主或 PATH。' };
       if (old?.configured && (resolve(old.nativeRoot) !== resolve(client.nativeRoot) || old.configPath !== client.configPath)) {
         throw new Error('A configured native home changed; existing hooks and capture state were retained. Explicit migration is required.');
       }
-      return client;
+      return { ...client, configured: old?.configured ?? false };
     });
-    if (!clients.some(client => client.detected || client.configured)) throw new Error('No runnable Codex CLI, Claude Code CLI, or Windows Codex Desktop was detected');
+    if (!clients.some(client => allowed(client.source) && (client.detected || client.configured))) throw new Error('No runnable Agent for this entry was detected; install the supported host and retry setup');
     const node = await realpath(process.execPath); const launcher = join(state, 'skynet-launcher.mjs');
-    const runtime = join(state, 'runtime', '0.1.0');
+    const runtime = join(state, 'runtime', entry.version);
     const configurations: Installation['configurations'] = [];
     const plans = [];
-    for (const client of clients.filter(item => item.detected || item.configured)) {
+    for (const client of clients.filter(item => item.configured || (allowed(item.source) && item.detected))) {
       await mkdir(client.nativeRoot, { recursive: true, mode: 0o700 });
       client.nativeRoot = await realpath(client.nativeRoot); client.configured = true;
       client.configPath = join(await realpath(dirname(client.configPath)), basename(client.configPath));
@@ -70,7 +80,7 @@ export async function install(state: string) {
       await cp(join(packageRoot, 'dist', 'packages'), join(runtime, 'dist', 'packages'), { recursive: true, errorOnExist: true });
       const zodRoot = dirname(createRequire(import.meta.url).resolve('zod/package.json'));
       await cp(zodRoot, join(runtime, 'node_modules', 'zod'), { recursive: true, errorOnExist: true });
-      await writeFile(join(runtime, 'package.json'), JSON.stringify({ type: 'module', version: '0.1.0' }), { flag: 'wx', mode: 0o600 });
+      await writeFile(join(runtime, 'package.json'), JSON.stringify({ type: 'module', version: entry.version }), { flag: 'wx', mode: 0o600 });
     }
     const launcherText = `#!/usr/bin/env node\n// Skynet owned stable launcher; contains no credentials.\nawait import(${JSON.stringify(pathToFileURL(join(runtime, 'dist', 'apps', 'collector', 'cli.js')).href)});\n`;
     const existingLauncher = await readFile(launcher, 'utf8').catch(error => { if (error.code === 'ENOENT') return null; throw error; });
@@ -82,7 +92,11 @@ export async function install(state: string) {
         ...(client.source === 'claude-code-cli' ? { nativeTempRoot: await realpath(process.env.CLAUDE_CODE_TMPDIR ?? tmpdir()) } : {}),
         source: client.source, sourceVersion: client.version, sourceOs: process.platform, enrolledAt: identity.enrolledAt });
     }
-    const installation = installationSchema.parse({ version: 1, deploymentId: deployment.deploymentId, node, launcher, runtime,
+    const entries = registeredEntries(previous).filter(item => item.channel !== entry.channel);
+    entries.push({ channel: entry.channel, packageVersion: entry.version,
+      registeredAt: registeredEntries(previous).find(item => item.channel === entry.channel)?.registeredAt ?? new Date().toISOString(),
+      sources: clients.filter(client => allowed(client.source) && client.configured).map(client => client.source) });
+    const installation = installationSchema.parse({ version: 1, deploymentId: deployment.deploymentId, node, launcher, runtime, entries,
       installedAt: previous?.installedAt ?? new Date().toISOString(), clients, configurations });
     // Persist ownership after each config write, so a subsequent setup can safely
     // continue after a failure on another host without duplicating prior hooks.

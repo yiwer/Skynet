@@ -16,7 +16,7 @@ export function CaptureCoverage({ initial, path, request }: { initial: Coverage;
   return <section aria-label="后续采集覆盖" className="device-delivery"><h3>后续采集覆盖</h3>
     <p>{data.receivedAt ? `最近收到：${date(data.receivedAt)}` : '尚无采集覆盖报告。'}</p>
     {data.receivedAt && Date.now() - Date.parse(data.receivedAt) > 90_000 && <p className="notice">此覆盖报告已过期；当前设备可能离线，尚不知道是否新增缺口。</p>}
-    <p>{data.report?.observation === 'host-event-observed' ? '已观察到宿主事件；不代表全部 hooks 已信任。'
+    <p>{data.report?.captureEnabled === false ? '采集入口已移除；仅补传已冻结材料，旧缺口继续保留。' : data.report?.observation === 'host-event-observed' ? '已观察到宿主事件；不代表全部 hooks 已信任。'
       : '尚无宿主事件：待宿主信任与尚无活动暂不能区分，请按安装页完成信任并检查首次事件。'}</p>
     {data.report && !data.report.locallyPersisted && <p role="alert">本次诊断未能写入本机磁盘，仅服务器收到报告；离线或进程退出时可能无法保存进一步故障。</p>}
     <p className="notice">{data.notice}</p>

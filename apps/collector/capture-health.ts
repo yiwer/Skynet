@@ -15,7 +15,7 @@ export class CaptureMonitor {
     if (!report) {
       try { report = captureHealthSchema.parse(JSON.parse(await readFile(join(state, 'capture-health.json'), 'utf8'))); }
       catch (error) {
-        report = { checkedAt: new Date().toISOString(), observation: 'no-host-event', locallyPersisted: false, faults: [] };
+        report = { checkedAt: new Date().toISOString(), observation: 'no-host-event', captureEnabled: true, locallyPersisted: false, faults: [] };
         if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
           const monitor = new CaptureMonitor(state, report); monitor.fail(error); return monitor;
         }
@@ -24,6 +24,7 @@ export class CaptureMonitor {
     return new CaptureMonitor(state, report);
   }
   observe() { this.report.observation = 'host-event-observed'; }
+  setEnabled(value: boolean) { this.report.captureEnabled = value; }
   fail(error: unknown, sessionId?: string, explicit?: CaptureFault['code']) {
     const code = (error as NodeJS.ErrnoException)?.code;
     const kind = explicit ?? (code === 'ENOSPC' || code === 'EDQUOT' ? 'storage-full'

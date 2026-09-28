@@ -10,6 +10,7 @@ import { setTimeout } from 'node:timers/promises';
 import { chromium, expect, type Browser } from '@playwright/test';
 import { command, createSandbox } from './support.js';
 import { installAgent, stopInstalled } from './installed-support.js';
+import { installNativePlugins } from './plugin-support.js';
 
 // Explicit opt-in: real CLI and ordinary user hooks, synthetic loopback model responses.
 // This is product/native integration evidence, not a paid provider or whole G0 pass.
@@ -75,8 +76,10 @@ test('ordinary Claude hooks archive two projects and a server-only package resum
     const reader = await sandbox.provision('真实 Claude 合成测试读者');
     const origin = await sandbox.startServer();
     let state = join(directory, 'collector');
-    if (process.env.SKYNET_TEST_INSTALLER) {
-      const installed = await installAgent(directory, origin, sourceEnv, employee.enrollmentCredential);
+    if (process.env.SKYNET_TEST_INSTALLER || process.env.SKYNET_TEST_PLUGINS) {
+      const installed = process.env.SKYNET_TEST_PLUGINS
+        ? await installNativePlugins(directory, origin, sourceEnv, employee.enrollmentCredential, 'claude')
+        : await installAgent(directory, origin, sourceEnv, employee.enrollmentCredential);
       installedState = installed.status.stateDirectory; state = join(installedState!, 'sources', 'claude-code-cli');
       assert.equal(installed.status.clients.find((item: any) => item.source === 'claude-code-cli').detected, true);
       // Setup's terminal has already closed. Kill only this isolated, authenticated
@@ -182,7 +185,7 @@ test('ordinary Claude hooks archive two projects and a server-only package resum
     assert.ok(blocks.some((b: any) => b.type === 'tool_result' && JSON.stringify(b.content).includes(marker)));
     const evidence = { testedAt: new Date().toISOString(), client: 'claude-code-cli', version: '2.1.281', os: process.platform, arch: process.arch,
       ordinaryHostHooks: true, twoProjects: true, serverPackageOnly: true, sourceHomeRemoved: true,
-      npmIgnoreScriptsSetup: !!installedState,
+      npmIgnoreScriptsSetup: !!process.env.SKYNET_TEST_INSTALLER, pluginMarketplaceSetup: process.env.SKYNET_TEST_PLUGINS ?? false,
       exactArchivedBytesRestored: true, nativeContextAndToolHistoryRetained: true, syntheticProvider: true, liveModel: 'unverified', G0: 'unverified' };
     await writeFile(join(directory, 'native-claude-evidence.json'), JSON.stringify(evidence, null, 2));
     console.log(`Claude native public-flow evidence: ${join(directory, 'native-claude-evidence.json')}`);

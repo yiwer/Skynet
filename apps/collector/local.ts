@@ -64,28 +64,29 @@ async function qualifiedPath(settings: Settings, transcriptPath: string) {
   return actual;
 }
 
-export async function collectOnce(state: string) {
+export async function collectOnce(state: string, options: { capture?: boolean } = {}) {
   const settings = settingsSchema.parse(await readCollectorSettings(state));
   const monitor = await CaptureMonitor.open(state);
+  monitor.setEnabled(options.capture !== false);
   try {
-    try { await readFile(join(state, 'hook-gap.json')); monitor.fail(null, undefined, 'hook-unobserved'); }
+    try { if (options.capture !== false) { await readFile(join(state, 'hook-gap.json')); monitor.fail(null, undefined, 'hook-unobserved'); } }
     catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') monitor.fail(error); }
-    const status = await collectSources(state, settings, monitor);
-    monitor.recover();
+    const status = await collectSources(state, settings, monitor, options);
+    if (options.capture !== false) monitor.recover();
     const capture = await monitor.save();
     await reportDeliveryHealth(state, settings, status.delivery, capture);
-    return { ...status, capture };
+    return { ...status, coverage: capture };
   } catch (error) {
     monitor.fail(error);
     const capture = await monitor.save();
     // Even ENOSPC can be reported while this worker and its credentials remain
     // readable. If both disk and network fail, no durable report is asserted.
     await reportDeliveryHealth(state, settings, undefined, capture);
-    return { checkedAt: new Date().toISOString(), errors: [(error as Error).message], capture, capability: 'unverified' };
+    return { checkedAt: new Date().toISOString(), errors: [(error as Error).message], coverage: capture, capability: 'unverified' };
   }
 }
 
-async function collectSources(state: string, settings: Settings, monitor: CaptureMonitor) {
+async function collectSources(state: string, settings: Settings, monitor: CaptureMonitor, options: { capture?: boolean }) {
   const delivery = await DeliveryQueue.open(state);
   try {
     await readFile(join(state, 'retry-request.json'));
@@ -98,7 +99,7 @@ async function collectSources(state: string, settings: Settings, monitor: Captur
   catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
   const errors: string[] = [];
   const queuedEvents: { file: string; event: z.infer<typeof hostEventSchema>; observedAt: string }[] = [];
-  for (const file of await readdir(join(state, 'spool'))) {
+  for (const file of options.capture === false ? [] : await readdir(join(state, 'spool'))) {
     if (!file.endsWith('.json')) continue;
     try {
       const queued = await readJson(join(state, 'spool', file));
@@ -131,7 +132,7 @@ async function collectSources(state: string, settings: Settings, monitor: Captur
       await unlink(join(state, 'spool', file));
     } catch (error) { errors.push((error as Error).message); monitor.fail(error, event.session_id); }
   }
-  for (const source of tracked) {
+  for (const source of options.capture === false ? [] : tracked) {
     monitor.observe();
     try {
       const pending = delivery.latest(settings.source, source.sessionId);
@@ -200,7 +201,7 @@ async function collectSources(state: string, settings: Settings, monitor: Captur
     await atomicJson(join(state, 'tracked.json'), tracked);
   });
   const status = { checkedAt: new Date().toISOString(), tracked: tracked.length, ...delivered, errors: [...errors, ...delivered.errors],
-    delivery: await delivery.health(), capability: 'unverified' };
+    delivery: await delivery.health(), capability: 'unverified', capture: options.capture === false ? 'disabled; frozen-delivery-only' : 'enabled' };
   await atomicJson(join(state, 'status.json'), status);
   return status;
 }
