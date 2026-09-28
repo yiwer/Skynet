@@ -7,3 +7,7 @@
  .recovery { overflow-wrap: anywhere; min-width: 0; }
  .materials li { margin-block: 1rem; overflow-wrap: anywhere; }
  .recovery pre { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 32rem; overflow: auto; }
+ .device-delivery { border: 1px solid #d4d9dc; border-radius: 8px; padding: 1rem; margin: 1rem 0; overflow-wrap: anywhere; }
+ .delivery-facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr)); gap: .75rem; }
+ .delivery-facts dt { color: #57656d; font-size: .9rem; }
+ .delivery-facts dd { margin: .25rem 0 0; }

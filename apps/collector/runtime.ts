@@ -41,7 +41,9 @@ export async function runInstalled(state: string) {
   const lock = await open(lockPath, 'wx', 0o600).catch(() => { throw new Error('Shared background lock exists; inspect status before repair'); });
   const instance = randomUUID(); await lock.writeFile(JSON.stringify({ pid: process.pid, instance })); await lock.close();
   const stop = new AbortController(); process.once('SIGINT', () => stop.abort()); process.once('SIGTERM', () => stop.abort());
-  let lastHealth = 0;
+  const previousHealth = await optionalJson(join(state, 'health.json'));
+  let nextHealth = Date.parse(previousHealth?.nextAttemptAt ?? '') || 0;
+  let healthAttempts = previousHealth?.attempts ?? 0;
   try {
     do {
       const errors: string[] = [];
@@ -52,8 +54,8 @@ export async function runInstalled(state: string) {
           try { await collectOnce(join(state, 'sources', client.source)); } catch { errors.push(`Collector unavailable: ${client.source}; state retained`); }
         }
         const request = await optionalJson(join(state, 'health-request.json'));
-        if (request || Date.now() - lastHealth > 10_000) {
-          lastHealth = Date.now(); const identity = identitySchema.parse(await jsonFile(join(state, 'identity.json')));
+        if (request || Date.now() >= nextHealth) {
+          const identity = identitySchema.parse(await jsonFile(join(state, 'identity.json')));
           const nonce = typeof request?.nonce === 'string' ? request.nonce : randomUUID();
           try {
             const response = await fetch(new URL('/api/devices/health', identity.server), { method: 'POST', redirect: 'error',
@@ -62,8 +64,13 @@ export async function runInstalled(state: string) {
             if (!response.ok) throw new Error(`Server rejected device health (${response.status})`);
             const ack = await response.json();
             if (ack.nonce !== nonce || ack.deviceId !== identity.deviceId) throw new Error('Unexpected health acknowledgement');
-            await atomicJson(join(state, 'health.json'), { nonce, deviceId: identity.deviceId, checkedAt: new Date().toISOString(), state: 'connected' });
-          } catch (error) { await atomicJson(join(state, 'health.json'), { nonce, checkedAt: new Date().toISOString(), state: 'unavailable', error: (error as Error).message }); }
+            healthAttempts = 0; nextHealth = Date.now() + 10_000;
+            await atomicJson(join(state, 'health.json'), { nonce, deviceId: identity.deviceId, checkedAt: new Date().toISOString(), state: 'connected', attempts: healthAttempts, nextAttemptAt: new Date(nextHealth).toISOString() });
+          } catch (error) {
+            healthAttempts++; nextHealth = Date.now() + Math.min(300_000, 60_000 * 2 ** Math.min(healthAttempts - 1, 8));
+            await atomicJson(join(state, 'health.json'), { nonce, checkedAt: new Date().toISOString(), state: 'unavailable', error: (error as Error).message,
+              attempts: healthAttempts, nextAttemptAt: new Date(nextHealth).toISOString() });
+          }
           if (request) await unlink(join(state, 'health-request.json')).catch(() => undefined);
         }
       } catch { errors.push('Background configuration could not be read; retained local state needs inspection'); }

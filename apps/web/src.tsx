@@ -5,6 +5,7 @@ import type { ActivityEvent, ActivitySummary, ActivityContext } from '../../pack
 import { sourceLabel } from '../../packages/contracts/archive.js';
 import { IdentityManagement } from './IdentityManagement.js';
 import { HistoryMaterials } from './HistoryMaterials.js';
+import { DeviceDelivery } from './DeviceDelivery.js';
 import './style.css';
 import { InstallationHelp } from './installation.js';
 
@@ -21,7 +22,7 @@ function App() {
   const [name, setName] = useState('');
   const [employeeId, setEmployeeId] = useState('');
   const [canManageIdentities, setCanManageIdentities] = useState(false);
-  const [view, setView] = useState<'archive' | 'identities'>('archive');
+  const [view, setView] = useState<'archive' | 'identities' | 'delivery'>('archive');
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
   const [detail, setDetail] = useState<Detail | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
@@ -103,8 +104,9 @@ function App() {
         <p id="credential-hint" className="muted">使用管理员签发的读取凭据。凭据仅在当前页面内保留。</p>
         <button className="primary" disabled={busy || !credential}>{busy ? '正在验证…' : '进入存档'}</button></form></section> : <>
       <nav className="view-nav" aria-label="平台页面"><button aria-current={view === 'archive' ? 'page' : undefined} onClick={() => setView('archive')}>会话存档</button>
+        <button aria-current={view === 'delivery' ? 'page' : undefined} onClick={() => setView('delivery')}>设备同步</button>
         {canManageIdentities && <button aria-current={view === 'identities' ? 'page' : undefined} onClick={() => setView('identities')}>接入与设备</button>}</nav>
-      {view === 'identities' && canManageIdentities ? <IdentityManagement token={token} currentEmployeeId={employeeId}
+      {view === 'delivery' ? <DeviceDelivery token={token} onUnauthorized={() => logout('身份已停用或凭据失效，请重新登录。')} /> : view === 'identities' && canManageIdentities ? <IdentityManagement token={token} currentEmployeeId={employeeId}
         onUnauthorized={() => logout('身份已停用或凭据失效，请重新登录。')} /> : <>
       <div className="heading"><div><p className="eyebrow">共享存档 · 北京时间</p><h1>会话原件</h1></div><button disabled={busy} onClick={() => setRefresh(value => value + 1)}>{busy ? '正在刷新…' : '刷新存档'}</button></div>
       <p className="notice">当前保存单副本。原件已提交与原生恢复已验证是不同状态；Desktop 原生能力待验证。</p>
