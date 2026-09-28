@@ -1,13 +1,16 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { createRoot } from 'react-dom/client';
-import type { EvidenceLine, Manifest, SessionSummary } from '../../packages/contracts/archive.js';
+import type { Manifest, SessionSummary } from '../../packages/contracts/archive.js';
+import type { ActivityEvent, ActivitySummary, ActivityContext } from '../../packages/activity.js';
 import { sourceLabel } from '../../packages/contracts/archive.js';
 import './style.css';
 
-type Detail = { snapshotId: string; employee: string; manifest: Manifest; committedAt: string; events: EvidenceLine[];
+type Detail = { snapshotId: string; employee: string; manifest: Manifest; committedAt: string; events: ActivityEvent[]; activity: ActivitySummary;
   unrecognizedLines: number; partialLine: boolean; nextOffset: number | null; total: number;
   recovery: { nativeRuntimeVersion: string | null; preparation: string; nativeBackend: string; limitation: string } };
 const date = (value: string) => new Date(value).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false });
+const contextLabel: Record<ActivityContext, string> = { historical: '历史上下文', 'after-enrollment': '接入后活动',
+  'unknown-time': '来源时间未知', 'unknown-enrollment': '接入边界未知' };
 
 function App() {
   const [credential, setCredential] = useState('');
@@ -103,6 +106,18 @@ function App() {
           <dl><div><dt>提交时间</dt><dd>{date(detail.committedAt)}</dd></div><div><dt>来源环境</dt><dd>{detail.manifest.sourceVersion} / {detail.manifest.sourceOs}</dd></div>
             <div><dt>存档范围</dt><dd>{detail.manifest.byteLength.toLocaleString()} 字节 · 当前收到的单个原件</dd></div><div><dt>SHA-256</dt><dd className="hash">{detail.manifest.hash}</dd></div></dl>
           {(detail.unrecognizedLines > 0 || detail.partialLine) && <p className="notice">{detail.unrecognizedLines} 行未解析{detail.partialLine ? '，另有未闭合的末行' : ''}。全部字节仍保存在原件中。</p>}
+          <section className="recovery" aria-label="来源日期与活动"><h3>来源日期与活动</h3>
+            <dl><div><dt>设备接入</dt><dd>{detail.activity.enrolledAt ? date(detail.activity.enrolledAt) : '未知（旧设备没有可信登记时间）'}</dd></div>
+              <div><dt>宿主登记</dt><dd>{date(detail.manifest.qualifiedAt)}</dd></div>
+              <div><dt>来源时间范围</dt><dd>{detail.activity.sourceFrom && detail.activity.sourceTo ? `${date(detail.activity.sourceFrom)} — ${date(detail.activity.sourceTo)}` : '未知'}</dd></div></dl>
+            <p>今日活动（北京时间 {detail.activity.today.date}）：{detail.activity.today.counts
+              ? `用户轮次 ${detail.activity.today.counts.userTurns} · 工具调用 ${detail.activity.today.counts.toolCalls} · 已解析条目 ${detail.activity.today.counts.records}`
+              : '未知，缺少可信设备接入时间。'}</p>
+            <p className="muted small">仅计入来源时间明确的接入后活动。历史上下文 {detail.activity.historicalRecords} 条、来源时间未知 {detail.activity.unknownTimeRecords} 条、接入边界未知 {detail.activity.unknownEnrollmentRecords} 条；上传与提交时间不作为工作发生时间。</p>
+            <details><summary>按来源日期查看</summary><ul>{detail.activity.days.map(day => <li key={day.date}>
+              <strong>{day.date}</strong>：历史上下文 {day.historicalRecords} 条；接入后用户轮次 {day.afterEnrollment.userTurns}、工具调用 {day.afterEnrollment.toolCalls}
+            </li>)}</ul>{detail.activity.days.length === 0 && <p>没有可确定归属的来源日期。</p>}</details>
+          </section>
           <section className="recovery" aria-label="导出与会话找回"><h3>导出与会话找回</h3>
             <p>{detail.recovery.limitation}</p>
             <p className="muted small">原生运行时：{detail.recovery.nativeRuntimeVersion ?? '未识别'}。{detail.recovery.nativeBackend === 'fixture-tested' ? (detail.manifest.source === 'claude-code-cli' ? '相同版本的隔离 CLI 合成续聊已有测试；完整来源材料与真实模型仍待验证。' : '相同版本的后端合成续聊已有测试；Desktop UI 仍待验证。') : '该来源版本尚无原生续聊验证记录。'}</p>
@@ -120,7 +135,7 @@ function App() {
             {exportError && <p className="error" role="alert">{exportError} 可重新点击导出重试。</p>}
           </section>
           <p className="muted">共 {detail.total} 条已解析记录。消息只代表会话中记录的内容。</p>
-          {detail.events.map(event => <section className="message" key={`${event.line}:${event.block ?? 0}`}><div className="message-meta"><strong>{event.role}</strong><span>原件第 {event.line} 行{event.timestamp ? ` · ${date(event.timestamp)}` : ''}</span></div><pre>{event.text}</pre></section>)}
+          {detail.events.map(event => <section className="message" key={`${event.line}:${event.block ?? 0}`}><div className="message-meta"><strong>{event.role}</strong><span>{contextLabel[event.context]}</span><span>原件第 {event.line} 行 · 来源时间：{event.timestamp ? date(event.timestamp) : '未知'}</span></div><pre>{event.text}</pre></section>)}
           {detail.events.length === 0 && <p>当前原件没有可解析的消息；可下载原件核查。</p>}
           <div className="pagination"><button disabled={offset === 0} onClick={() => setOffset(value => Math.max(0, value - 100))}>上一页</button><button disabled={detail.nextOffset === null} onClick={() => setOffset(detail.nextOffset ?? 0)}>下一页</button></div>
         </>}</article></div></>}
