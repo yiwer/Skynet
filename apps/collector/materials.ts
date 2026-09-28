@@ -57,7 +57,7 @@ export async function discoverMaterials(input: { source: Source; nativeRoot: str
     const id = digest(`${placement}/${name}`);
     if (artifacts.some(item => item.material.id === id)) return id;
     total += bytes.length;
-    const mediaType = name.endsWith('.jsonl') ? 'jsonl' : name.endsWith('.json') ? 'json' : /\.(?:txt|md|log|patch)$/.test(name) ? 'text' : 'binary';
+    const mediaType = name.endsWith('.jsonl') || role === 'previous-transcript' ? 'jsonl' : name.endsWith('.json') ? 'json' : role === 'checkpoint' || /\.(?:txt|md|log|patch)$/.test(name) ? 'text' : 'binary';
     artifacts.push({ material: { id, role, placement, name, sourceSessionId: sessionId, hash: digest(bytes), byteLength: bytes.length, mediaType }, bytes });
     return id;
   };
@@ -123,17 +123,21 @@ export async function discoverMaterials(input: { source: Source; nativeRoot: str
   } else {
     const metadata = records.find(record => record.type === 'session_meta')?.payload;
     const needed = new Map<string, Lineage['relation']>();
-    if (typeof metadata?.forked_from_id === 'string') needed.set(metadata.forked_from_id, 'fork-parent');
-    if (typeof metadata?.history_base?.thread_id === 'string') needed.set(metadata.history_base.thread_id, 'history-base');
+    const reference = (id: unknown, relation: Lineage['relation']) => {
+      if (typeof id !== 'string' || !/^[a-f0-9-]{36}$/i.test(id)) { gap('unknown-format', `关联会话标识 ${relation}`); return; }
+      needed.set(id, relation);
+    };
+    if (metadata?.forked_from_id !== undefined) reference(metadata.forked_from_id, 'fork-parent');
+    if (metadata?.history_base?.thread_id !== undefined) reference(metadata.history_base.thread_id, 'history-base');
     const parent = metadata?.source?.subagent?.thread_spawn?.parent_thread_id;
-    if (typeof parent === 'string') needed.set(parent, 'parent');
+    if (parent !== undefined) reference(parent, 'parent');
     const calls = new Map<string, string>();
     for (const record of records) {
       if (record.type === 'compacted') compacted = true;
       const payload = record.payload;
       if (record.type === 'response_item' && payload?.type === 'function_call') calls.set(payload.call_id, payload.name);
       if (record.type === 'response_item' && payload?.type === 'function_call_output' && calls.get(payload.call_id) === 'spawn_agent') {
-        try { const result = JSON.parse(payload.output); if (typeof result.agent_id === 'string') needed.set(result.agent_id, 'child'); } catch { gap('unknown-format', 'spawn_agent result'); }
+        try { const result = JSON.parse(payload.output); if (result.agent_id !== undefined) reference(result.agent_id, 'child'); } catch { gap('unknown-format', 'spawn_agent result'); }
       }
     }
     const nativeHome = dirname(input.nativeRoot);
@@ -160,8 +164,9 @@ export async function discoverMaterials(input: { source: Source; nativeRoot: str
           if (!bytes || parentMetadata?.id !== id) { gap('unreadable', `关联会话 ${id}`); lineage.push({ relation, sessionId: id }); continue; }
           const materialId = add(relation === 'child' ? 'child-transcript' : 'parent-transcript', 'codex-rollout', `${id}.jsonl`, bytes, id);
           lineage.push({ relation, sessionId: id, materialId });
+          if (bytes.at(-1) !== 10) gap('partial-line', `关联会话 ${id} 末行尚未闭合`);
           const ancestor = parentMetadata.history_base?.thread_id ?? parentMetadata.forked_from_id;
-          if (typeof ancestor === 'string' && !visited.has(ancestor)) queue.push([ancestor, 'history-base']);
+          if (typeof ancestor === 'string' && /^[a-f0-9-]{36}$/i.test(ancestor) && !visited.has(ancestor)) queue.push([ancestor, 'history-base']);
         }
         if (queue.length > 32) gap('size-limit', '关联会话递归超过 32 项');
         const hasAttachments = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='thread_attachments'").get();
@@ -178,6 +183,14 @@ export async function discoverMaterials(input: { source: Source; nativeRoot: str
       } catch (error) { gap((error as Error).message === 'unsafe-path' ? 'unsafe-path' : 'unreadable', 'native thread index'); }
       finally { db?.close(); }
     } else for (const [id, relation] of needed) { lineage.push({ relation, sessionId: id }); gap('missing', `关联会话 ${id}：无可用原生索引`); }
+    const base = metadata?.history_base;
+    const history = lineage.find(item => item.sessionId === base?.thread_id);
+    if (history) {
+      if (Number.isSafeInteger(base.end_ordinal_exclusive) && base.end_ordinal_exclusive >= 0) history.endOrdinalExclusive = base.end_ordinal_exclusive;
+      if (Number.isSafeInteger(base.end_byte_offset) && base.end_byte_offset >= 0) history.endByteOffset = base.end_byte_offset;
+      const original = artifacts.find(item => item.material.id === history.materialId);
+      if (original && history.endByteOffset !== undefined && original.material.byteLength < history.endByteOffset) gap('missing', `父原件不足 history_base 边界 ${history.sessionId}`);
+    }
   }
   // Inline binary payloads are already part of immutable originals; expose exact bytes too.
   const inline = (value: unknown, location: string, depth = 0) => {
@@ -205,6 +218,7 @@ export async function discoverMaterials(input: { source: Source; nativeRoot: str
     // A later deletion cannot discard already archived evidence. Keep its old hash and flag the loss.
     artifacts.push({ material: previous }); total += previous.byteLength; gap('missing', `源头已不可取得；保留已存档版本：${previous.name}`);
   }
+  for (const item of lineage) if (!item.materialId) item.materialId = artifacts.find(artifact => artifact.material.sourceSessionId === item.sessionId)?.material.id;
   artifacts.sort((a, b) => a.material.id.localeCompare(b.material.id));
   gaps.sort((a, b) => `${a.code}/${a.reference}`.localeCompare(`${b.code}/${b.reference}`));
   lineage.sort((a, b) => `${a.relation}/${a.sessionId}`.localeCompare(`${b.relation}/${b.sessionId}`));

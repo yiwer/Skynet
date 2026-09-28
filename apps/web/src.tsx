@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client';
 import type { Manifest, SessionSummary } from '../../packages/contracts/archive.js';
 import type { ActivityEvent, ActivitySummary, ActivityContext } from '../../packages/activity.js';
 import { sourceLabel } from '../../packages/contracts/archive.js';
+import { HistoryMaterials } from './HistoryMaterials.js';
 import './style.css';
 
 type Detail = { snapshotId: string; employee: string; manifest: Manifest; committedAt: string; events: ActivityEvent[]; activity: ActivitySummary;
@@ -104,8 +105,9 @@ function App() {
         </> : detail && <>
           <div className="detail-heading"><div><p className="eyebrow">{detail.employee} · {sourceLabel(detail.manifest.source)}</p><h2>{detail.manifest.project || '未归类项目'}</h2></div><button disabled={exporting} onClick={() => download('raw')}>下载原件</button></div>
           <dl><div><dt>提交时间</dt><dd>{date(detail.committedAt)}</dd></div><div><dt>来源环境</dt><dd>{detail.manifest.sourceVersion} / {detail.manifest.sourceOs}</dd></div>
-            <div><dt>存档范围</dt><dd>{detail.manifest.byteLength.toLocaleString()} 字节 · 当前收到的单个原件</dd></div><div><dt>SHA-256</dt><dd className="hash">{detail.manifest.hash}</dd></div></dl>
+            <div><dt>存档范围</dt><dd>{detail.manifest.byteLength.toLocaleString()} 字节原件 · {detail.manifest.capture?.materials.length ?? 0} 项关联材料</dd></div><div><dt>SHA-256</dt><dd className="hash">{detail.manifest.hash}</dd></div></dl>
           {(detail.unrecognizedLines > 0 || detail.partialLine) && <p className="notice">{detail.unrecognizedLines} 行未解析{detail.partialLine ? '，另有未闭合的末行' : ''}。全部字节仍保存在原件中。</p>}
+          <HistoryMaterials key={detail.snapshotId} snapshotId={detail.snapshotId} capture={detail.manifest.capture} request={(path, signal) => request(path, token, signal)} />
           <section className="recovery" aria-label="来源日期与活动"><h3>来源日期与活动</h3>
             <dl><div><dt>设备接入</dt><dd>{detail.activity.enrolledAt ? date(detail.activity.enrolledAt) : '未知（旧设备没有可信登记时间）'}</dd></div>
               <div><dt>宿主登记</dt><dd>{date(detail.manifest.qualifiedAt)}</dd></div>

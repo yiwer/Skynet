@@ -19,6 +19,7 @@ const settingsSchema = z.object({
 type Settings = z.infer<typeof settingsSchema>;
 const trackedSchema = z.object({ source: sourceSchema.optional(), sessionId: z.string(), transcriptPath: z.string(), project: z.string(), qualifiedAt: z.iso.datetime(), lastObservedAt: z.iso.datetime().optional(), acknowledgedHash: z.string().optional(),
   acknowledgedSnapshotId: z.uuid().optional(), acknowledgedByteLength: z.number().int().min(0).optional(),
+  appendRejected: z.boolean().optional(),
   capture: captureSchema.optional(), materialFingerprint: z.string().optional(), nativeVersion: z.string().optional() });
 type Tracked = z.infer<typeof trackedSchema>;
 const hash = (bytes: Buffer | string) => createHash('sha256').update(bytes).digest('hex');
@@ -137,11 +138,13 @@ export async function collectOnce(state: string) {
       const artifactHash = hash(bytes);
       // Read identity from the source artifact, never accept a hook pointing at another session.
       let sourceVersion = source.nativeVersion ?? settings.sourceVersion;
+      let identityUnavailable = false;
       if (settings.source === 'claude-code-cli') {
         try { sourceVersion = claudeIdentity(bytes, source.sessionId).version; }
         catch (error) {
           // A previously identified tracked file can be truncated during native rewrite. Preserve bytes and old generations.
           if (!source.acknowledgedSnapshotId || (error as Error).message.includes('mismatch')) throw error;
+          identityUnavailable = true;
         }
       }
       else {
@@ -149,10 +152,12 @@ export async function collectOnce(state: string) {
         try { metadata = JSON.parse(bytes.toString('utf8').split('\n')[0]!); } catch { /* Partial rewrite is preserved only after prior identification. */ }
         if (metadata?.type === 'session_meta' && metadata.payload?.id !== source.sessionId) throw new Error('Native session identity mismatch');
         if (metadata?.type !== 'session_meta' && !source.acknowledgedSnapshotId) throw new Error('Native session identity unavailable; material remains pending');
+        identityUnavailable = metadata?.type !== 'session_meta';
         if (settings.source === 'codex-cli' && metadata?.payload?.cli_version) sourceVersion = z.string().min(1).max(256).parse(metadata.payload.cli_version);
       }
       const discovered = await discoverMaterials({ source: settings.source, nativeRoot: settings.nativeRoot, nativeTempRoot: settings.nativeTempRoot,
         transcriptPath, sessionId: source.sessionId, project: source.project, bytes, previous: source.capture?.materials });
+      if (identityUnavailable) discovered.gaps.push({ code: 'unknown-format', reference: '当前原件无法重新读取完整身份；沿用此前已确认绑定，保留重写或截断字节' });
       const materials = discovered.artifacts.map(item => item.material);
       const fingerprint = hash(JSON.stringify({ materials, gaps: discovered.gaps, lineage: discovered.lineage, compacted: discovered.compacted, partialLine: discovered.partialLine }));
       if (source.acknowledgedHash === artifactHash && source.materialFingerprint === fingerprint) continue;
@@ -172,7 +177,7 @@ export async function collectOnce(state: string) {
         if (item.bytes && !source.capture?.materials.some(old => old.hash === item.material.hash)) await upload(item.bytes);
       }
       let response: Response | undefined; let usedAppend = false;
-      if (source.acknowledgedSnapshotId && source.acknowledgedHash && source.acknowledgedByteLength
+      if (!source.appendRejected && source.acknowledgedSnapshotId && source.acknowledgedHash && source.acknowledgedByteLength
         && bytes.length > source.acknowledgedByteLength
         && hash(bytes.subarray(0, source.acknowledgedByteLength)) === source.acknowledgedHash) {
         const delta = bytes.subarray(source.acknowledgedByteLength);
@@ -185,7 +190,7 @@ export async function collectOnce(state: string) {
         } catch (error) {
           if (!(error instanceof ArchiveRequestError) || error.status !== 409) throw error;
           // An unconfirmed baseline cannot justify an append. Retain the source and retry in full.
-          delete source.acknowledgedSnapshotId; delete source.acknowledgedByteLength;
+          source.appendRejected = true;
           await atomicJson(join(state, 'tracked.json'), tracked);
         }
       }
@@ -197,6 +202,7 @@ export async function collectOnce(state: string) {
       if (ack.hash !== artifactHash || ack.byteLength !== bytes.length) throw new Error('Archive acknowledgement does not match the snapshot');
       if (usedAppend) appended++;
       source.acknowledgedHash = artifactHash; source.capture = capture; source.materialFingerprint = fingerprint; source.nativeVersion = sourceVersion;
+      delete source.appendRejected;
       source.acknowledgedSnapshotId = ack.snapshotId; source.acknowledgedByteLength = ack.byteLength;
       await atomicJson(join(state, 'tracked.json'), tracked);
       committed++;

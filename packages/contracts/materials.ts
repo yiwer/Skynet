@@ -14,7 +14,8 @@ export const materialSchema = z.object({
   mediaType: z.enum(['jsonl', 'text', 'json', 'binary']),
 }).strict();
 export const gapSchema = z.object({ code: z.enum(['missing', 'unreadable', 'unsafe-path', 'size-limit', 'unknown-format', 'partial-line', 'history-unavailable', 'native-mapping-unverified']), reference: z.string().max(1024) }).strict();
-export const lineageSchema = z.object({ relation: z.enum(['parent', 'child', 'fork-parent', 'history-base']), sessionId: z.string().min(1).max(256), materialId: sha.optional() }).strict();
+export const lineageSchema = z.object({ relation: z.enum(['parent', 'child', 'fork-parent', 'history-base']), sessionId: z.string().min(1).max(256), materialId: sha.optional(),
+  endOrdinalExclusive: z.number().int().min(0).optional(), endByteOffset: z.number().int().min(0).optional() }).strict();
 export const captureSchema = z.object({
   generation: sha, revision: z.number().int().positive(), change: z.enum(['initial', 'append', 'rewrite', 'truncate', 'materials']),
   previousSnapshotId: z.uuid().optional(), materials: z.array(materialSchema).max(128), gaps: z.array(gapSchema).max(256),
