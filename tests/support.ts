@@ -36,7 +36,8 @@ export async function createSandbox() {
     const port = stdout.trim().split(':').at(-1);
     const env = { ...process.env, DATABASE_URL: `postgresql://postgres:${password}@127.0.0.1:${port}/${database}`, RAW_DIRECTORY: join(directory, 'raw') };
     for (let attempt = 0; attempt < 60; attempt++) {
-      try { await execute('docker', ['exec', name, 'pg_isready', '-U', 'postgres', '-d', database], { windowsHide: true }); break; }
+      // The image's initialization server accepts sockets before the final TCP server starts.
+      try { await execute('docker', ['exec', name, 'pg_isready', '-h', '127.0.0.1', '-U', 'postgres', '-d', database], { windowsHide: true }); break; }
       catch { if (attempt === 59) throw new Error('Isolated PostgreSQL did not start'); await setTimeout(500); }
     }
     async function startServer(portNumber = 0) {

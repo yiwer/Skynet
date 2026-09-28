@@ -13,6 +13,9 @@ function App() {
   const [name, setName] = useState('');
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
   const [detail, setDetail] = useState<Detail | null>(null);
+  const [detailLoading, setDetailLoading] = useState(false);
+  const [detailError, setDetailError] = useState('');
+  const [detailRetry, setDetailRetry] = useState(0);
   const [selected, setSelected] = useState(location.hash.slice(1));
   const [offset, setOffset] = useState(0);
   const [refresh, setRefresh] = useState(0);
@@ -48,14 +51,15 @@ function App() {
     return () => abort.abort();
   }, [token, refresh]);
   useEffect(() => {
-    setDetail(null);
+    setDetail(null); setDetailError(''); setDetailLoading(false);
     if (!token || !selected) return;
-    const abort = new AbortController(); setError('');
+    const abort = new AbortController(); setDetailLoading(true);
     request(`/api/snapshots/${encodeURIComponent(selected)}?offset=${offset}`, token, abort.signal)
       .then(response => response.json()).then(data => { if (!abort.signal.aborted) setDetail(data); })
-      .catch(failure => { if (!abort.signal.aborted) setError(failure.message); });
+      .catch(failure => { if (!abort.signal.aborted) setDetailError(failure.message); })
+      .finally(() => { if (!abort.signal.aborted) setDetailLoading(false); });
     return () => abort.abort();
-  }, [token, selected, offset]);
+  }, [token, selected, offset, refresh, detailRetry]);
   async function download() {
     if (!detail) return;
     try {
@@ -82,7 +86,9 @@ function App() {
         <nav>{sessions.map(session => <a key={session.id} href={`#${session.id}`} className={`session ${selected === session.id ? 'selected' : ''}`} aria-current={selected === session.id ? 'page' : undefined}>
           <strong>{session.employee}</strong><span className="project">{session.project || '未归类项目'}</span><small>{date(session.committed_at)}</small><span className="badge">原件已提交</span></a>)}</nav>
         <p className="muted small">最多显示最近 100 条会话。</p></aside>
-        <article aria-label="会话详情">{!selected ? <div className="empty"><h2>选择一条会话</h2><p>阅读消息、工具结果与对应原件位置。</p></div> : !detail ? <p role="status">正在读取会话…</p> : <>
+        <article aria-label="会话详情">{!selected ? <div className="empty"><h2>选择一条会话</h2><p>阅读消息、工具结果与对应原件位置。</p></div> : detailLoading ? <p role="status">正在读取会话…</p> : detailError ? <>
+          <p className="error" role="alert">{detailError}</p><button onClick={() => setDetailRetry(value => value + 1)}>重试读取会话</button>
+        </> : detail && <>
           <div className="detail-heading"><div><p className="eyebrow">{detail.employee} · Codex Desktop</p><h2>{detail.manifest.project || '未归类项目'}</h2></div><button onClick={download}>下载原件</button></div>
           <dl><div><dt>提交时间</dt><dd>{date(detail.committedAt)}</dd></div><div><dt>来源环境</dt><dd>{detail.manifest.sourceVersion} / {detail.manifest.sourceOs}</dd></div>
             <div><dt>存档范围</dt><dd>{detail.manifest.byteLength.toLocaleString()} 字节 · 当前收到的单个原件</dd></div><div><dt>SHA-256</dt><dd className="hash">{detail.manifest.hash}</dd></div></dl>
