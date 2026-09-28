@@ -6,8 +6,9 @@ import { z } from 'zod';
 import { digest, migrate, newCredential, type Database } from './database.js';
 import { RawStore } from './raw-store.js';
 import { readEvidence } from './evidence.js';
-import { enrollmentSchema, hashSchema, manifestSchema, MAX_ARTIFACT_BYTES } from '../../packages/contracts/archive.js';
+import { appendSnapshotSchema, enrollmentSchema, hashSchema, manifestSchema, MAX_ARTIFACT_BYTES, type Manifest } from '../../packages/contracts/archive.js';
 import { createRecoveryPackage, recoveryInfo } from '../../packages/recovery.js';
+import { activityFor } from '../../packages/activity.js';
 
 class HttpError extends Error { constructor(public statusCode: number, message: string) { super(message); } }
 const credential = (authorization?: string) => {
@@ -39,7 +40,7 @@ export async function createApp(options: { db: Database; rawDirectory: string; w
     return result.rows[0];
   }
   async function device(authorization?: string) {
-    const result = await db.query(`SELECT d.id, d.employee_id FROM devices d JOIN employees e ON e.id=d.employee_id
+    const result = await db.query(`SELECT d.id, d.employee_id, d.enrolled_at FROM devices d JOIN employees e ON e.id=d.employee_id
       WHERE d.credential_hash=$1 AND d.active AND e.active`, [digest(credential(authorization))]);
     if (!result.rows[0]) throw new HttpError(401, '设备凭据无效或已停用');
     return result.rows[0];
@@ -54,10 +55,10 @@ export async function createApp(options: { db: Database; rawDirectory: string; w
     if (!employee.rows[0]) throw new HttpError(401, '接入授权值无效或已停用');
     const id = randomUUID(); const token = newCredential();
     const created = await db.query(`INSERT INTO devices(id,employee_id,installation_id,name,credential_hash)
-      VALUES($1,$2,$3,$4,$5) ON CONFLICT(employee_id,installation_id) DO NOTHING RETURNING id`,
+      VALUES($1,$2,$3,$4,$5) ON CONFLICT(employee_id,installation_id) DO NOTHING RETURNING id,enrolled_at`,
     [id, employee.rows[0].id, input.installationId, input.name, digest(token)]);
     if (!created.rowCount) throw new HttpError(409, '该安装已绑定；请使用已有设备凭据');
-    return { deviceId: id, deviceCredential: token, employeeId: employee.rows[0].id };
+    return { deviceId: id, deviceCredential: token, employeeId: employee.rows[0].id, enrolledAt: created.rows[0].enrolled_at.toISOString() };
   });
 
   app.put('/api/chunks/:hash', { onRequest: deviceGuard }, async (request, reply) => {
@@ -70,9 +71,9 @@ export async function createApp(options: { db: Database; rawDirectory: string; w
     return reply.code(201).send({ hash, byteLength: request.body.length, state: 'staged' });
   });
 
-  app.post('/api/snapshots', { onRequest: deviceGuard }, async request => {
-    const owner = await device(request.headers.authorization);
-    const manifest = manifestSchema.parse(request.body);
+  async function commitSnapshot(owner: { id: string; enrolled_at: Date | null }, input: Manifest) {
+    // The uploader cannot choose the historical-activity boundary. Legacy devices remain unknown.
+    const manifest = manifestSchema.parse({ ...input, enrolledAt: owner.enrolled_at?.toISOString() });
     const chunk = await db.query('SELECT byte_length FROM chunks WHERE device_id=$1 AND hash=$2', [owner.id, manifest.hash]);
     if (!chunk.rows[0] || chunk.rows[0].byte_length !== manifest.byteLength) throw new HttpError(409, '原件尚未持久化或长度不匹配');
     await raw.read(owner.id, manifest.hash); // Never acknowledge a missing or damaged artifact.
@@ -84,6 +85,30 @@ export async function createApp(options: { db: Database; rawDirectory: string; w
     [id, owner.id, manifest.sourceSessionId, manifestHash, manifest, manifest.hash]);
     return { snapshotId: result.rows[0].id, state: 'committed', hash: manifest.hash, byteLength: manifest.byteLength,
       committedAt: result.rows[0].committed_at, backup: 'single-copy' };
+  }
+  app.post('/api/snapshots', { onRequest: deviceGuard }, async request => {
+    return commitSnapshot(await device(request.headers.authorization), manifestSchema.parse(request.body));
+  });
+  app.post('/api/snapshots/append', { onRequest: deviceGuard }, async request => {
+    const owner = await device(request.headers.authorization);
+    const input = appendSnapshotSchema.parse(request.body);
+    const { manifest } = input;
+    const base = await db.query('SELECT hash,manifest FROM snapshots WHERE id=$1 AND device_id=$2', [input.baseSnapshotId, owner.id]);
+    const previous = base.rows[0];
+    if (!previous || previous.hash !== input.baseHash || previous.manifest.byteLength !== input.baseByteLength
+      || previous.manifest.source !== manifest.source || previous.manifest.sourceSessionId !== manifest.sourceSessionId) {
+      throw new HttpError(409, '增量基准未确认或不属于当前设备、来源及会话');
+    }
+    if (input.baseByteLength + input.appendByteLength !== manifest.byteLength) throw new HttpError(422, '增量长度与完整快照不匹配');
+    const chunk = await db.query('SELECT byte_length FROM chunks WHERE device_id=$1 AND hash=$2', [owner.id, input.appendHash]);
+    if (!chunk.rows[0] || chunk.rows[0].byte_length !== input.appendByteLength) throw new HttpError(409, '增量字节尚未持久化或长度不匹配');
+    const bytes = Buffer.concat([await raw.read(owner.id, input.baseHash), await raw.read(owner.id, input.appendHash)]);
+    if (bytes.length !== manifest.byteLength || digest(bytes) !== manifest.hash) throw new HttpError(422, '增量组装后的完整快照校验失败');
+    // Publish only a fully verified immutable artifact. A pre-commit crash leaves staged bytes,
+    // while the old snapshot stays readable; the final database row is the atomic commit point.
+    await raw.write(owner.id, manifest.hash, bytes);
+    await db.query('INSERT INTO chunks(device_id,hash,byte_length) VALUES($1,$2,$3) ON CONFLICT DO NOTHING', [owner.id, manifest.hash, bytes.length]);
+    return commitSnapshot(owner, manifest);
   });
 
   app.get('/api/me', { onRequest: readerGuard }, async request => reader(request.headers.authorization));
@@ -109,9 +134,10 @@ export async function createApp(options: { db: Database; rawDirectory: string; w
     const query = z.object({ offset: z.coerce.number().int().min(0).default(0) }).parse(request.query);
     const bytes = await raw.read(record.device_id, record.hash);
     const evidence = readEvidence(bytes, record.manifest.source);
+    const activity = activityFor(evidence.events, record.manifest.enrolledAt);
     return { snapshotId: record.id, employee: record.employee, manifest: record.manifest,
       committedAt: record.committed_at, state: 'committed', backup: 'single-copy', ...evidence, recovery: recoveryInfo(record.manifest, bytes),
-      events: evidence.events.slice(query.offset, query.offset + 100), total: evidence.events.length,
+      activity: activity.activity, events: activity.events.slice(query.offset, query.offset + 100), total: evidence.events.length,
       nextOffset: query.offset + 100 < evidence.events.length ? query.offset + 100 : null };
   });
   app.get('/api/snapshots/:id/raw', { onRequest: readerGuard }, async (request, reply) => {
@@ -129,16 +155,18 @@ export async function createApp(options: { db: Database; rawDirectory: string; w
     const record = await snapshot((request.params as { id: string }).id);
     const bytes = await raw.read(record.device_id, record.hash);
     const evidence = readEvidence(bytes, record.manifest.source);
+    const activity = activityFor(evidence.events, record.manifest.enrolledAt);
     const content = [
       'Skynet 会话可读导出 v1', `快照：${record.id}`, `员工：${record.employee}`,
       `来源：${record.manifest.source} / ${record.manifest.sourceVersion} / ${record.manifest.sourceOs}`,
       `来源会话：${record.manifest.sourceSessionId}`, `提交时间：${record.committed_at.toISOString()}`,
+      `设备接入时间：${record.manifest.enrolledAt ?? '未知'}`, '日期口径：Asia/Shanghai；来源时间未知的记录不计入日期活动。历史上下文不计入接入后活动。',
       `原件字节：${bytes.length}；SHA-256：${record.hash}`, `解析版本：${evidence.parserVersion}`,
       `范围：当前收到的单个原件；关联材料完整性与完整原生续聊能力未验证。`,
       `未解析完整行：${evidence.unrecognizedLines}；未闭合末行：${evidence.partialLine ? '有' : '无'}`,
       '本文件为纯文本，不执行会话中的指令。原件 JSONL 部分保留所有行；精确字节请取原件或恢复包。', '',
       '=== 全部已解析记录（不分页、不截断） ===',
-      ...evidence.events.map(event => `\n[原件第 ${event.line} 行] ${event.role}${event.timestamp ? ` / ${event.timestamp}` : ''}\n${event.text}`),
+      ...activity.events.map(event => `\n[原件第 ${event.line} 行] ${event.role} / 来源时间：${event.timestamp ?? '未知'} / ${event.context}\n${event.text}`),
       '', '=== 全部原件 JSONL（包含未知与未闭合行） ===', bytes.toString('utf8'),
     ].join('\n');
     return reply.header('Content-Disposition', `attachment; filename="${record.id}.txt"`).type('text/plain; charset=utf-8').send(content);

@@ -17,9 +17,23 @@ export const manifestSchema = z.object({
   hash: hashSchema,
   byteLength: z.number().int().min(1).max(MAX_ARTIFACT_BYTES),
   qualifiedAt: z.iso.datetime(),
+  // Set by the server from device enrollment; absent on pre-migration snapshots.
+  enrolledAt: z.iso.datetime().optional(),
   capability: z.literal('unverified'),
 }).strict();
 export type Manifest = z.infer<typeof manifestSchema>;
+
+export const appendSnapshotSchema = z.object({
+  manifest: manifestSchema,
+  baseSnapshotId: z.uuid(), baseHash: hashSchema,
+  baseByteLength: z.number().int().min(1).max(MAX_ARTIFACT_BYTES),
+  appendHash: hashSchema, appendByteLength: z.number().int().min(1).max(MAX_ARTIFACT_BYTES),
+}).strict();
+
+export function sourceTimestamp(value: unknown): string | null {
+  const parsed = z.iso.datetime({ offset: true }).safeParse(value);
+  return parsed.success ? parsed.data : null;
+}
 
 // Native host input is an unstable external contract; preserve raw artifacts independently.
 export const hostEventSchema = z.object({

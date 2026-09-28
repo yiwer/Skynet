@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import type { EvidenceLine, Source } from '../../packages/contracts/archive.js';
+import { sourceTimestamp, type EvidenceLine, type Source } from '../../packages/contracts/archive.js';
 import { readClaudeEvidence } from '../../packages/native/claude.js';
 
 const identifier = z.string().min(1);
@@ -9,7 +9,7 @@ const recordSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('session_meta'), payload: z.object({ id: identifier }) }),
   z.object({
     type: z.literal('response_item'),
-    timestamp: z.iso.datetime({ offset: true }).optional(),
+    timestamp: z.unknown().optional(),
     payload: z.discriminatedUnion('type', [
       z.object({ type: z.literal('message'), role: z.enum(['user', 'assistant', 'system', 'developer']),
         content: z.array(textPart).min(1).refine(parts => parts.some(part => part.text.length > 0)) }),
@@ -49,7 +49,7 @@ export function readEvidence(bytes: Buffer, source: Source = 'codex-desktop') {
       } else {
         role = 'tool result'; text = typeof payload.output === 'string' ? payload.output : payload.output.map(part => part.text).join('\n');
       }
-      events.push({ line: index + 1, role, text, timestamp: item.timestamp ?? null });
+      events.push({ line: index + 1, role, text, timestamp: sourceTimestamp(item.timestamp) });
     } catch { unrecognizedLines++; }
   }
   return { parserVersion: 'codex-jsonl-3', events, unrecognizedLines, partialLine: partialLine.length > 0 };

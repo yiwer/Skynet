@@ -31,6 +31,9 @@ export async function migrate(db: Database) {
       FOREIGN KEY(device_id, hash) REFERENCES chunks(device_id, hash),
       UNIQUE(device_id, source_session_id, manifest_hash)
     );
+    -- Old devices have no trustworthy registration instant. Keep that boundary unknown.
+    ALTER TABLE devices ADD COLUMN IF NOT EXISTS enrolled_at timestamptz;
+    ALTER TABLE devices ALTER COLUMN enrolled_at SET DEFAULT now();
     ALTER TABLE snapshots ADD COLUMN IF NOT EXISTS source text GENERATED ALWAYS AS (manifest->>'source') STORED;
     CREATE UNIQUE INDEX IF NOT EXISTS snapshots_source_identity ON snapshots(device_id,source,source_session_id,manifest_hash);
     COMMIT;
