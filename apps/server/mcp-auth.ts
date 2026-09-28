@@ -53,6 +53,7 @@ export async function registerMcpAuth(app: FastifyInstance, db: Database, public
     done(null, parsed);
   });
   const rates = new Map<string, { count: number; until: number }>();
+  let cleanedAt = 0;
   const limited = async (request: FastifyRequest) => {
     const now = Date.now();
     for (const [key, rate] of rates) if (rate.until < now) rates.delete(key);
@@ -60,6 +61,17 @@ export async function registerMcpAuth(app: FastifyInstance, db: Database, public
     const rate = rates.get(key) ?? { count: 0, until: now + 60_000 };
     if (++rate.count > 60 || rates.size >= 5000) throw new HttpError(429, '授权请求过多，请稍后重试');
     rates.set(key, rate);
+    if (now - cleanedAt > 60_000) {
+      cleanedAt = now;
+      await db.query(`DELETE FROM oauth_pending WHERE expires_at < now();
+        DELETE FROM oauth_codes WHERE expires_at < now();
+        DELETE FROM oauth_tokens WHERE expires_at < now();
+        DELETE FROM oauth_grants g WHERE (g.expires_at < now() OR NOT g.active) AND NOT EXISTS (SELECT 1 FROM oauth_tokens t WHERE t.grant_id=g.id);
+        DELETE FROM oauth_clients c WHERE c.created_at < now()-interval '90 days'
+          AND NOT EXISTS (SELECT 1 FROM oauth_pending p WHERE p.client_id=c.id)
+          AND NOT EXISTS (SELECT 1 FROM oauth_codes a WHERE a.client_id=c.id)
+          AND NOT EXISTS (SELECT 1 FROM oauth_grants g WHERE g.client_id=c.id);`);
+    }
   };
   const oauth = async <T>(operation: () => Promise<T>, reply: { code: (code: number) => { send: (body: unknown) => unknown } }) => {
     try { return await operation(); }
@@ -87,7 +99,15 @@ export async function registerMcpAuth(app: FastifyInstance, db: Database, public
     try { input.redirect_uris.forEach(redirectUri); }
     catch { throw new OAuthError('invalid_redirect_uri', '仅支持已登记的 HTTPS 或本机回调地址'); }
     const clientId = newCredential();
-    await db.query('INSERT INTO oauth_clients(id,name,redirects) VALUES($1,$2,$3)', [clientId, input.client_name, JSON.stringify(input.redirect_uris)]);
+    const connection = await db.connect();
+    try {
+      await connection.query('BEGIN'); await connection.query('SELECT pg_advisory_xact_lock(7402127)');
+      const created = await connection.query(`INSERT INTO oauth_clients(id,name,redirects)
+        SELECT $1,$2,$3 WHERE (SELECT count(*) FROM oauth_clients)<10000 RETURNING id`, [clientId, input.client_name, JSON.stringify(input.redirect_uris)]);
+      if (!created.rowCount) throw new OAuthError('temporarily_unavailable', '客户端登记容量已满，请联系平台维护者', 503);
+      await connection.query('COMMIT');
+    } catch (error) { await connection.query('ROLLBACK'); throw error; }
+    finally { connection.release(); }
     return reply.code(201).send({ ...input, client_id: clientId, client_id_issued_at: Math.floor(Date.now() / 1000) });
   }, reply));
 
@@ -99,9 +119,10 @@ export async function registerMcpAuth(app: FastifyInstance, db: Database, public
     const client = (await db.query('SELECT * FROM oauth_clients WHERE id=$1', [input.client_id])).rows[0];
     if (!client || !client.redirects.includes(input.redirect_uri)) throw new OAuthError('invalid_request', '客户端或回调地址未登记');
     const id = newCredential(); const cookie = newCredential();
-    await db.query('DELETE FROM oauth_pending WHERE expires_at < now()');
-    await db.query("INSERT INTO oauth_pending(id,client_id,request,cookie_hash,expires_at) VALUES($1,$2,$3,$4,now()+interval '10 minutes')",
+    const pending = await db.query(`INSERT INTO oauth_pending(id,client_id,request,cookie_hash,expires_at)
+      SELECT $1,$2,$3,$4,now()+interval '10 minutes' WHERE (SELECT count(*) FROM oauth_pending)<5000 RETURNING id`,
       [id, input.client_id, input, digest(cookie)]);
+    if (!pending.rowCount) throw new OAuthError('temporarily_unavailable', '待授权请求过多，请稍后重试', 503);
     reply.header('Set-Cookie', `skynet_consent=${cookie}; Path=/oauth/authorize; HttpOnly; Secure; SameSite=Lax; Max-Age=600`);
     return reply.type('text/html; charset=utf-8').send(`<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Skynet MCP 授权</title><body>
       <main><h1>授权读取会话存档</h1><p>客户端：<strong>${html(client.name)}</strong>（客户端自行声明的名称）</p>

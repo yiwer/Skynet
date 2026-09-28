@@ -26,11 +26,14 @@ export async function registerMcp(app: FastifyInstance, db: Database, archive: A
       }
     }
     mcp.registerTool('list_sessions', { description: '分页列出全体员工的会话快照。nextCursor 保持同一查询时间范围。',
-      annotations, inputSchema: { cursor: z.string().max(1024).optional(), limit: z.number().int().min(1).max(50).default(25) } },
+      annotations, inputSchema: { cursor: z.string().max(1024).optional(), limit: z.number().int().min(1).max(10).default(10) } },
     input => result(() => archive.sessions(input.cursor, input.limit)));
     mcp.registerTool('read_snapshot', { description: '分页读取快照原文及证据行、来源时间、完整性和恢复能力。大工具输出通过 next.textOffset 继续，零丢字。',
       annotations, inputSchema: { snapshotId, offset, textOffset: offset } },
     input => result(() => archive.evidencePage(input.snapshotId, input.offset, input.textOffset)));
+    mcp.registerTool('read_manifest', { description: '分页读取不可变快照的完整清单 JSON，包括全部材料 ID、缺口和父子谱系。拼接 text 后解析，不把关联上下文算新增活动。',
+      annotations, inputSchema: { snapshotId, textOffset: offset } },
+    input => result(() => archive.manifestPage(input.snapshotId, input.textOffset)));
     mcp.registerTool('prepare_export', { description: '准备不可变快照的完整原件、可读全文或原生恢复包；返回校验哈希、大小和需 MCP 授权的下载地址。',
       annotations, inputSchema: { snapshotId, format: exportFormat } },
     input => result(() => archive.prepareExport(input.snapshotId, input.format)));
@@ -39,7 +42,7 @@ export async function registerMcp(app: FastifyInstance, db: Database, archive: A
     input => result(() => archive.exportPage(input.snapshotId, input.format, input.offset)));
     mcp.registerTool('read_material', { description: '分页读取该不可变快照包含的关联材料。材料是历史上下文，不计新增活动；binary 使用 base64。',
       annotations, inputSchema: { snapshotId, materialId: z.string().max(256), offset } },
-    input => result(() => archive.materialPage(input.snapshotId, input.materialId, input.offset)));
+    input => result(() => archive.materialPage(input.snapshotId, input.materialId, input.offset, 2048)));
     return mcp;
   }
   app.post('/mcp', { bodyLimit: 64 * 1024, onRequest: guard }, async (request, reply) => {

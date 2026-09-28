@@ -151,14 +151,18 @@ export async function createApp(options: { db: Database; rawDirectory: string; w
     const query = z.object({ offset: z.coerce.number().int().min(0).default(0), textOffset: z.coerce.number().int().min(0).default(0) }).parse(request.query);
     return archive.evidencePage((request.params as { id: string }).id, query.offset, query.textOffset);
   });
+  app.get('/api/snapshots/:id/manifest', { onRequest: readerGuard }, async request => {
+    const { textOffset } = z.object({ textOffset: z.coerce.number().int().min(0).default(0) }).parse(request.query);
+    return archive.manifestPage((request.params as { id: string }).id, textOffset);
+  });
   app.get('/api/snapshots/:id/history', { onRequest: readerGuard }, async request => {
     const { offset } = z.object({ offset: z.coerce.number().int().min(0).default(0) }).parse(request.query);
     return archive.history((request.params as { id: string }).id, offset);
   });
   app.get('/api/snapshots/:id/materials/:materialId/view', { onRequest: readerGuard }, async request => {
     const { id, materialId } = request.params as { id: string; materialId: string };
-    const { offset } = z.object({ offset: z.coerce.number().int().min(0).default(0) }).parse(request.query);
-    return archive.materialPage(id, materialId, offset);
+    const { offset, limit } = z.object({ offset: z.coerce.number().int().min(0).default(0), limit: z.coerce.number().int().min(1).max(32_768).default(32_768) }).parse(request.query);
+    return archive.materialPage(id, materialId, offset, limit);
   });
   app.get('/api/snapshots/:id/materials/:materialId', { onRequest: readerGuard }, async (request, reply) => {
     const { id, materialId } = request.params as { id: string; materialId: string };

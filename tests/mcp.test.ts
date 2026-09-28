@@ -12,6 +12,7 @@ const hash = (bytes: Buffer | string) => createHash('sha256').update(bytes).dige
 test('HTTPS OAuth consent, per-request revocation, MCP/Web evidence and complete paged exports', { timeout: 180_000 }, async () => {
   const sandbox = await mcpSandbox(); let client: Client | undefined;
   try {
+    await assert.rejects(fetch(`${sandbox.origin}/health`), 'the private test CA is not in global trust');
     const employee = await sandbox.provision('合成 MCP 存档员工'); const reader = await sandbox.provision('合成 MCP 读者');
     const manager = await sandbox.provision('合成 MCP 维护者', true);
     const enrollment = await (await sandbox.api('/api/devices/enroll', employee.enrollmentCredential, json({ installationId: randomUUID(), name: 'MCP fixture' }))).json();
@@ -22,8 +23,13 @@ test('HTTPS OAuth consent, per-request revocation, MCP/Web evidence and complete
       ...Array.from({ length: 123 }, (_, index) => ({ type: 'response_item', payload: { type: 'message', role: 'user', content: [{ type: 'input_text', text: `证据 ${index}` }] } })),
       { type: 'future_material', unknown: 'preserve verbatim' },
     ].map(line => JSON.stringify(line)).join('\n') + '\n');
+    const materialBytes = Buffer.from(Array.from({ length: 6400 }, (_, index) => index % 256));
+    const material = { id: hash('synthetic-attachment'), hash: hash(materialBytes), byteLength: materialBytes.length, mediaType: 'binary', role: 'attachment', name: 'files/synthetic.bin', placement: 'portable' };
+    assert.equal((await sandbox.api(`/api/chunks/${material.hash}`, enrollment.deviceCredential, { method: 'PUT', headers: { 'Content-Type': 'application/octet-stream' }, body: materialBytes })).status, 201);
     const manifest = { protocolVersion: 1, sourceSessionId: sessionId, source: 'codex-desktop', sourceVersion: '26.924.2738.0', sourceOs: 'win32',
-      project: '/synthetic/mcp', hash: hash(bytes), byteLength: bytes.length, qualifiedAt: new Date().toISOString(), capability: 'unverified' };
+      project: '/synthetic/mcp', hash: hash(bytes), byteLength: bytes.length, qualifiedAt: new Date().toISOString(), capability: 'unverified',
+      capture: { generation: hash('generation'), revision: 1, change: 'initial', materials: [material], lineage: [], compacted: false, partialLine: false,
+        gaps: Array.from({ length: 100 }, (_, index) => ({ code: 'missing', reference: `synthetic missing material ${index}: ${'unknown'.repeat(15)}` })) } };
     assert.equal((await sandbox.api(`/api/chunks/${manifest.hash}`, enrollment.deviceCredential, { method: 'PUT', headers: { 'Content-Type': 'application/octet-stream' }, body: bytes })).status, 201);
     const commit = await (await sandbox.api('/api/snapshots', enrollment.deviceCredential, json(manifest))).json();
     assert.ok(commit.snapshotId);
@@ -51,6 +57,14 @@ test('HTTPS OAuth consent, per-request revocation, MCP/Web evidence and complete
     }
     const denial = new URL(await sandbox.authorizationPage(authorize(), reader.readerCredential, 'deny'));
     assert.equal(denial.searchParams.get('error'), 'access_denied');
+    const consent = await sandbox.fetchTls(authorize()); const cookie = consent.headers.get('set-cookie')!.split(';')[0]!;
+    const requestId = /name="request" value="([^"]+)"/.exec(await consent.text())![1]!;
+    const approval = form({ request: requestId, credential: reader.readerCredential, decision: 'approve' });
+    assert.equal((await sandbox.api('/oauth/authorize', undefined, approval)).status, 400, 'a cross-site form cannot approve');
+    assert.equal((await sandbox.api('/oauth/authorize', undefined, { ...approval, headers: { ...approval.headers, Origin: sandbox.origin } })).status, 400, 'consent cookie required');
+    assert.equal((await sandbox.api('/oauth/authorize', undefined, { ...approval, headers: { ...approval.headers, Origin: 'https://attacker.invalid', Cookie: cookie } })).status, 400);
+    const forged = form({ request: requestId, credential: enrollment.deviceCredential, decision: 'approve' });
+    assert.equal((await sandbox.api('/oauth/authorize', undefined, { ...forged, headers: { ...forged.headers, Origin: sandbox.origin, Cookie: cookie } })).status, 401, 'device credential cannot approve a query grant');
     const callback = new URL(await sandbox.authorizationPage(authorize(), reader.readerCredential));
     assert.equal(callback.searchParams.get('state'), parameters.state);
     const exchange = { grant_type: 'authorization_code', client_id: registration.client_id, code: callback.searchParams.get('code')!,
@@ -68,7 +82,7 @@ test('HTTPS OAuth consent, per-request revocation, MCP/Web evidence and complete
     client = new Client({ name: 'public-product-test', version: '1' });
     await client.connect(new StreamableHTTPClientTransport(new URL(resource), { fetch: sandbox.fetchTls,
       requestInit: { headers: { Authorization: `Bearer ${tokens.access_token}` } } }));
-    assert.equal((await client.listTools()).tools.length, 5);
+    assert.equal((await client.listTools()).tools.length, 6);
     async function tool(name: string, args: Record<string, unknown>) {
       const result = await client!.callTool({ name, arguments: args });
       assert.notEqual(result.isError, true, JSON.stringify(result)); assert.ok(Buffer.byteLength(JSON.stringify(result)) <= 96 * 1024);
@@ -85,6 +99,20 @@ test('HTTPS OAuth consent, per-request revocation, MCP/Web evidence and complete
     }
     assert.ok(pages > 10); assert.equal(fragments.filter(event => event.line === 2).map(event => event.text).join(''), largeText);
     assert.equal(fragments.at(-1).text, '证据 122');
+    let manifestText = ''; let manifestOffset = 0;
+    do {
+      const result = await tool('read_manifest', { snapshotId: commit.snapshotId, textOffset: manifestOffset });
+      assert.deepEqual(result, await (await sandbox.api(`/api/snapshots/${commit.snapshotId}/manifest?textOffset=${manifestOffset}`, reader.readerCredential)).json());
+      manifestText += result.text; manifestOffset = result.nextOffset;
+    } while (manifestOffset !== null);
+    assert.deepEqual(JSON.parse(manifestText).capture, manifest.capture);
+    let materialText = ''; let materialOffset = 0;
+    do {
+      const result = await tool('read_material', { snapshotId: commit.snapshotId, materialId: material.id, offset: materialOffset });
+      assert.deepEqual(result, await (await sandbox.api(`/api/snapshots/${commit.snapshotId}/materials/${material.id}/view?offset=${materialOffset}&limit=2048`, reader.readerCredential)).json());
+      assert.equal(result.context, 'associated-context-only'); materialText += result.text; materialOffset = result.nextOffset;
+    } while (materialOffset !== null);
+    assert.equal(hash(Buffer.from(materialText, 'base64')), material.hash);
     for (const format of ['raw', 'readable', 'recovery']) {
       const prepared = await tool('prepare_export', { snapshotId: commit.snapshotId, format });
       assert.equal((await sandbox.api(prepared.downloadPath)).status, 401);

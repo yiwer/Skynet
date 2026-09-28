@@ -76,7 +76,12 @@ export async function mcpSandbox() {
       await route.fulfill({ status: response.status, headers: headersObject(response.headers), body: Buffer.from(await response.arrayBuffer()) });
     });
     try {
-      await page.goto(url); await page.getByLabel('个人读取凭据').fill(reader);
+      const navigation = await page.goto(url);
+      if (navigation?.status() !== 200) {
+        const query = new URL(url).searchParams;
+        throw new Error(`Consent request rejected: ${await page.locator('body').innerText()}; ${JSON.stringify(Object.fromEntries(['resource', 'scope', 'response_type', 'code_challenge_method', 'redirect_uri'].map(key => [key, query.get(key)])))}`);
+      }
+      await page.getByLabel('个人读取凭据').fill(reader);
       await page.getByRole('button', { name: decision === 'approve' ? '授权读取' : '取消', exact: true }).click();
       try { await page.getByText('MCP 授权回调已捕获', { exact: true }).waitFor({ timeout: 10_000 }); }
       catch { throw new Error(`Consent page failed: ${await page.locator('body').innerText()}`); }

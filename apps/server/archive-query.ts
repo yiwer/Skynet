@@ -3,36 +3,55 @@ import { type Database, digest } from './database.js';
 import { RawStore } from './raw-store.js';
 import { HttpError } from './identities.js';
 import { readEvidence } from './evidence.js';
-import { activityFor } from '../../packages/activity.js';
+import { activityFor, beijingDate } from '../../packages/activity.js';
 import { manifestSchema } from '../../packages/contracts/archive.js';
 import { createRecoveryPackage, recoveryInfo } from '../../packages/recovery.js';
+import { QueryCache } from './query-cache.js';
 
 export const exportFormat = z.enum(['raw', 'readable', 'recovery']);
 export type ExportFormat = z.infer<typeof exportFormat>;
 const listCursor = z.object({ at: z.iso.datetime(), id: z.uuid(), ceiling: z.iso.datetime() });
 const encode = (value: unknown) => Buffer.from(JSON.stringify(value)).toString('base64url');
+const textEnd = (text: string, start: number, length: number) => {
+  let end = Math.min(start + length, text.length);
+  if (end < text.length && /[\uD800-\uDBFF]/.test(text[end - 1]!) && /[\uDC00-\uDFFF]/.test(text[end]!)) end--;
+  return end;
+};
 
 // Authentication belongs to each transport. Facts, evidence locations and exports belong here.
 export function archiveQuery(db: Database, raw: RawStore) {
+  // Sizes are charged conservatively for UTF-16 text and native JSON parse structures.
+  const evidenceCache = new QueryCache<Awaited<ReturnType<typeof parsed>>>(192 * 1024 * 1024, value => value.estimatedBytes);
+  const exportCache = new QueryCache<{ bytes: Buffer; contentType: string; filename: string; text?: string }>(256 * 1024 * 1024,
+    value => value.bytes.length + (value.text?.length ?? 0) * 2);
   async function sessions(cursor?: string, limit = 50) {
     let page: z.infer<typeof listCursor> | undefined;
     if (cursor) {
       try { page = listCursor.parse(JSON.parse(Buffer.from(cursor, 'base64url').toString())); }
       catch { throw new HttpError(400, '会话分页位置无效'); }
     }
-    const ceiling = page?.ceiling ?? new Date().toISOString();
-    const result = await db.query(`SELECT * FROM (
+    const ceiling = page?.ceiling ?? null;
+    const result = await db.query(`WITH boundary AS (SELECT COALESCE($1::timestamptz,statement_timestamp()) AS ceiling)
+      SELECT *,to_char(committed_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS cursor_time,
+      (SELECT to_char(ceiling AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"') FROM boundary) AS query_ceiling FROM (
       SELECT DISTINCT ON (s.device_id,s.source,s.source_session_id) s.id,e.name AS employee,s.source_session_id,
         s.manifest->>'project' AS project,s.committed_at,s.hash,(s.manifest->>'byteLength')::integer AS byte_length,
         s.manifest->>'sourceVersion' AS source_version,s.manifest->>'sourceOs' AS source_os,s.source
       FROM snapshots s JOIN devices d ON d.id=s.device_id JOIN employees e ON e.id=d.employee_id
-      WHERE s.committed_at <= $1
+      WHERE s.committed_at <= (SELECT ceiling FROM boundary)
       ORDER BY s.device_id,s.source,s.source_session_id,s.committed_at DESC,s.id DESC
     ) latest WHERE ($2::timestamptz IS NULL OR (committed_at,id) < ($2::timestamptz,$3::uuid))
     ORDER BY committed_at DESC,id DESC LIMIT $4`, [ceiling, page?.at ?? null, page?.id ?? null, limit + 1]);
-    const rows = result.rows.slice(0, limit); const last = rows.at(-1);
+    const selected = []; let pageBytes = 512;
+    for (const row of result.rows.slice(0, limit)) {
+      const size = Buffer.byteLength(JSON.stringify(row));
+      if (selected.length && pageBytes + size > 8192) break;
+      selected.push(row); pageBytes += size;
+    }
+    const last = selected.at(-1);
+    const rows = selected.map(({ cursor_time: _cursor, query_ceiling: _ceiling, ...row }) => row);
     return { sessions: rows, limit, capability: 'unverified', backup: 'single-copy',
-      nextCursor: result.rows.length > limit ? encode({ at: last.committed_at.toISOString(), id: last.id, ceiling }) : null };
+      nextCursor: result.rows.length > selected.length ? encode({ at: last.cursor_time, id: last.id, ceiling: last.query_ceiling }) : null };
   }
   async function snapshot(id: string) {
     if (!z.uuid().safeParse(id).success) throw new HttpError(404, '未找到存档');
@@ -41,33 +60,57 @@ export function archiveQuery(db: Database, raw: RawStore) {
     if (!result.rows[0]) throw new HttpError(404, '未找到已提交存档');
     return result.rows[0];
   }
-  async function detail(id: string, offset = 0) {
+  async function parsed(id: string) {
     const record = await snapshot(id); const bytes = await raw.read(record.device_id, record.hash);
     const evidence = readEvidence(bytes, record.manifest.source);
     const activity = activityFor(evidence.events, record.manifest.enrolledAt);
+    return { record, evidence, activity, recovery: recoveryInfo(record.manifest, bytes), estimatedBytes: bytes.length * 3 };
+  }
+  async function detail(id: string, offset = 0) {
+    const { record, evidence, activity, recovery } = await evidenceCache.get(`${id}:${beijingDate(new Date())}`, () => parsed(id));
     return { snapshotId: record.id, employee: record.employee, manifest: record.manifest,
-      committedAt: record.committed_at, state: 'committed', backup: 'single-copy', ...evidence, recovery: recoveryInfo(record.manifest, bytes),
+      committedAt: record.committed_at, state: 'committed', backup: 'single-copy', ...evidence, recovery,
       activity: activity.activity, events: activity.events.slice(offset, offset + 100), total: evidence.events.length,
       nextOffset: offset + 100 < evidence.events.length ? offset + 100 : null };
   }
   async function evidencePage(id: string, offset = 0, textOffset = 0) {
     const result = await detail(id, offset);
     if (offset > result.total || (!result.events.length && textOffset !== 0)) throw new HttpError(400, '证据分页位置无效');
-    const events = []; let remaining = 8192; let index = offset; let nextText = textOffset;
+    const events = []; let remaining = 2048; let index = offset; let nextText = textOffset;
     for (const event of result.events) {
       if (nextText > event.text.length) throw new HttpError(400, '证据文字位置无效');
       // Offsets count UTF-16 code units, exactly as JavaScript strings do. The original is never truncated.
-      const text = event.text.slice(nextText, nextText + remaining);
+      const text = event.text.slice(nextText, textEnd(event.text, nextText, remaining));
       events.push({ ...event, text, textOffset: nextText, textLength: event.text.length });
       remaining -= text.length; nextText += text.length;
       if (nextText === event.text.length) { index++; nextText = 0; }
       if (!remaining || events.length === 25 || nextText !== 0) break;
     }
-    const { events: _events, nextOffset: _next, ...metadata } = result;
-    return { ...metadata, events, next: index < result.total ? { offset: index, textOffset: nextText } : null,
+    const { events: _events, nextOffset: _next, manifest, recovery, activity, ...metadata } = result;
+    const { capture, ...manifestHeader } = manifestSchema.parse(manifest);
+    const { artifacts, gaps, lineage, ...recoveryHeader } = recovery;
+    const { days, ...activityHeader } = activity;
+    return { ...metadata, manifest: manifestHeader,
+      recovery: { ...recoveryHeader, artifactCount: artifacts.length, gapCount: gaps.length, lineageCount: lineage.length, detailsTool: 'read_manifest' },
+      activity: { ...activityHeader, sourceDayCount: days.length, sourceDaysLocation: 'each evidence event sourceDate; full Web snapshot detail' },
+      capture: capture ? {
+      generation: capture.generation, revision: capture.revision, change: capture.change, previousSnapshotId: capture.previousSnapshotId,
+      compacted: capture.compacted, partialLine: capture.partialLine, materialCount: capture.materials.length, gapCount: capture.gaps.length, lineageCount: capture.lineage.length,
+    } : null, manifestPaging: { tool: 'read_manifest', snapshotId: id, textOffset: 0 },
+    events, next: index < result.total ? { offset: index, textOffset: nextText } : null,
       evidenceLocation: 'immutable snapshotId + original line; textOffset uses UTF-16 code units' };
   }
+  async function manifestPage(id: string, textOffset = 0) {
+    const record = await snapshot(id); const text = JSON.stringify(record.manifest);
+    if (textOffset > text.length) throw new HttpError(400, '清单文字位置无效');
+    const end = textEnd(text, textOffset, 2048);
+    return { snapshotId: id, textOffset, text: text.slice(textOffset, end), totalChars: text.length, sha256: digest(text),
+      nextOffset: end < text.length ? end : null, encoding: 'JSON text; offsets count UTF-16 code units' };
+  }
   async function exported(id: string, format: ExportFormat) {
+    return exportCache.get(`${id}:${format}`, () => buildExport(id, format));
+  }
+  async function buildExport(id: string, format: ExportFormat) {
     const record = await snapshot(id); const bytes = await raw.read(record.device_id, record.hash);
     if (format === 'raw') return { bytes, contentType: 'application/octet-stream', filename: `${record.id}.jsonl` };
     const manifest = manifestSchema.parse(record.manifest);
@@ -104,12 +147,12 @@ export function archiveQuery(db: Database, raw: RawStore) {
     const file = await exported(id, format);
     return { snapshotId: id, format, filename: file.filename, contentType: file.contentType,
       byteLength: file.bytes.length, sha256: digest(file.bytes), authentication: 'MCP access token required on every download',
-      downloadPath: `/mcp/exports/${id}/${format}`, chunkBytes: 24_576 };
+      downloadPath: `/mcp/exports/${id}/${format}`, chunkBytes: 4096 };
   }
   async function exportPage(id: string, format: ExportFormat, offset = 0) {
     const file = await exported(id, format);
     if (offset > file.bytes.length) throw new HttpError(400, '导出字节位置无效');
-    const end = Math.min(offset + 24_576, file.bytes.length);
+    const end = Math.min(offset + 4096, file.bytes.length);
     return { snapshotId: id, format, offset, byteLength: file.bytes.length, sha256: digest(file.bytes),
       encoding: 'base64', data: file.bytes.subarray(offset, end).toString('base64'), nextOffset: end < file.bytes.length ? end : null };
   }
@@ -124,15 +167,21 @@ export function archiveQuery(db: Database, raw: RawStore) {
     const record = await snapshot(id);
     const material = manifestSchema.parse(record.manifest).capture?.materials.find(item => item.id === materialId);
     if (!material) throw new HttpError(404, '此快照没有该关联材料');
-    return { material, bytes: await raw.read(record.device_id, material.hash) };
+    const file = await exportCache.get(`material:${id}:${materialId}`, async () => {
+      const bytes = await raw.read(record.device_id, material.hash);
+      return { bytes, filename: `${material.id}.bin`, contentType: 'application/octet-stream',
+        text: material.mediaType === 'binary' ? bytes.toString('base64') : bytes.toString('utf8') };
+    });
+    return { material, bytes: file.bytes, text: file.text! };
   }
-  async function materialPage(id: string, materialId: string, offset = 0) {
+  async function materialPage(id: string, materialId: string, offset = 0, limit = 32_768) {
     const file = await material(id, materialId);
-    const text = file.material.mediaType === 'binary' ? file.bytes.toString('base64') : file.bytes.toString('utf8');
+    const text = file.text;
     if (offset > text.length) throw new HttpError(400, '关联材料文字位置无效');
+    const end = textEnd(text, offset, limit);
     return { material: file.material, context: 'associated-context-only', encoding: file.material.mediaType === 'binary' ? 'base64' : 'utf8',
-      text: text.slice(offset, offset + 8192), nextOffset: offset + 8192 < text.length ? offset + 8192 : null };
+      text: text.slice(offset, end), nextOffset: end < text.length ? end : null };
   }
-  return { sessions, snapshot, detail, evidencePage, exported, prepareExport, exportPage, history, material, materialPage };
+  return { sessions, snapshot, detail, evidencePage, manifestPage, exported, prepareExport, exportPage, history, material, materialPage };
 }
 export type ArchiveQuery = ReturnType<typeof archiveQuery>;
