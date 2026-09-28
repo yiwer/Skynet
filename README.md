@@ -13,6 +13,7 @@
 | [旧会话续用与来源日期](docs/implementation/issue-8.md) | 仅同步宿主登记的旧会话、校验增量上传、历史上下文及来源日期；三来源公开流程与真实验收边界 |
 | [账号与设备停用](docs/implementation/issue-20.md) | 显式维护权限、Web 停用、逐请求撤销校验及审计；保留共享历史读取，真实安装前置验收仍待通过 |
 | [npm 单授权值接入](docs/implementation/issue-11.md) | 内部离线 npm 包、自动检测与配置、私有共享身份/后台、真实 CLI 安装链；完整 G1 与 Desktop 仍待验收 |
+| [离线持久队列与补传](docs/implementation/issue-16.md) | 原件与关联材料先落盘再交付、跨进程退避、ACK 后清理、设备同步页面；完整 G2 仍待验收 |
 | [PRD v1.0](docs/requirements/PRD.md) | 首版实施与验收依据：71 条用户故事、实施决策、22 组验收场景与发布门槛 |
 | [V1 验收标准](docs/requirements/v1-acceptance.md) | 把 PRD v1.0 的 AC-01…AC-22 与 G0—G4 整理成可执行的验收步骤、证据与判定规则 |
 | [PRD v2.0](docs/requirements/PRD-v2.md) | V2：数据报表、对话视图、活动记录、会话组装审计与员工使用能力评估；用户故事 72—176，验收场景 AC-23…AC-38 |

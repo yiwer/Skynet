@@ -39,9 +39,9 @@ node --import tsx --test tests/delivery.test.ts tests/delivery-queue.test.ts
 
 `delivery-queue.test.ts` 达到真实 1024 份上限，确认第 1025 份被拒绝、前 1024 份及共享 blob 跨重新打开保留。512 MiB 字节上限实现了同样的引用合计检查，未在本票单独做满额磁盘压力实验。
 
-首次全量回归曾发现关联原件重复网络传输，导致既有 #9 字节计数断言失败；修复为只跳过已确认 hash 的网络上传，没有修改既有断言。后续材料及离线专项通过。具体最终集成检查记录随本票提交；G0–G4 仍未通过。
+首次全量回归曾发现关联原件重复网络传输，导致既有 #9 字节计数断言失败；修复为只跳过已确认 hash 的网络上传，没有修改既有断言。合入 #11 final `9ecf4ed` 后，typecheck、build、10 个公开/队列测试全部通过，另 3 个原生集成测试全部通过。Codex CLI 和 Claude 测试启用真实安装模式 `SKYNET_TEST_INSTALLER=1`，使用隔离目录和本地合成模型；Desktop 仅原生后端，不是正常界面验收。G0–G4 仍未通过。
 
-证据目录（合成数据）：`%TEMP%/skynet-test-EuOWyQ` 的 `delivery-backlog.png`、`delivery-recovered-mobile.png`、本地 pending/tracked/status 以及隔离原件；三来源复杂材料回归为 `%TEMP%/skynet-test-wrhI9r`。持久原件、队列文件包含合成会话内容；不会写入认证值到报告或日志。
+最终证据目录（合成数据）：`%TEMP%/skynet-test-NRIjwH` 的 `delivery-backlog.png`、`delivery-recovered-mobile.png`、本地 pending/tracked/status 以及隔离原件；两张截图已视觉检查。三来源复杂材料回归为 `%TEMP%/skynet-test-IIh7HG`，安装为 `%TEMP%/skynet-test-tnmJwU`。原生证据分别为 `%TEMP%/skynet-test-rBN5DX/native-claude-evidence.json`、`%TEMP%/skynet-test-M2TFKl/codex-cli-native-evidence.json`、`%TEMP%/skynet-test-K0lXmZ/native-recovery-evidence.json`。持久原件、队列文件包含合成会话内容；不会写入认证值到报告或日志。
 
 ## 后续边界
 
