@@ -9,7 +9,13 @@ const digest = (bytes: Buffer | string) => createHash('sha256').update(bytes).di
 const forbidden = (name: string) => /^\.?(?:auth|credentials?|settings|config)(?:\.|$)|^\.env(?:\.|$)|^(?:session-env|shell-snapshots|\.npmrc|\.netrc|\.git-credentials)$/i.test(name);
 export async function safeNativePath(root: string, candidate: string) {
   const base = await realpath(root);
-  const path = resolve(candidate);
+  const requested = resolve(candidate);
+  // Resolve Windows short names only after rejecting symlinks/junctions in the supplied path.
+  for (let part = requested; ; part = dirname(part)) {
+    if ((await lstat(part)).isSymbolicLink()) throw new Error('unsafe-path');
+    if (dirname(part) === part) break;
+  }
+  const path = await realpath(requested);
   const suffix = relative(base, path);
   if (!suffix || suffix === '..' || suffix.startsWith(`..${sep}`) || isAbsolute(suffix)) throw new Error('unsafe-path');
   let part = base;
@@ -101,6 +107,7 @@ export async function discoverMaterials(input: { source: Source; nativeRoot: str
       for (const record of records) {
         if (record.type === 'system' && record.subtype === 'compact_boundary') compacted = true;
         if (record.type === 'file-history-snapshot') {
+          if (basename(input.nativeRoot) !== 'projects') { gap('unknown-format', 'file-history requires the configured native projects root'); continue; }
           const backups = record.snapshot?.trackedFileBackups;
           if (!backups || typeof backups !== 'object') { gap('unknown-format', 'file-history-snapshot'); continue; }
           for (const [originalPath, backup] of Object.entries(backups)) {
@@ -173,9 +180,10 @@ export async function discoverMaterials(input: { source: Source; nativeRoot: str
     } else for (const [id, relation] of needed) { lineage.push({ relation, sessionId: id }); gap('missing', `关联会话 ${id}：无可用原生索引`); }
   }
   // Inline binary payloads are already part of immutable originals; expose exact bytes too.
-  const inline = (value: unknown, location: string) => {
+  const inline = (value: unknown, location: string, depth = 0) => {
+    if (depth > 64) { gap('unknown-format', `嵌套记录超过解析范围 ${location}`); return; }
     if (!value || typeof value !== 'object') return;
-    if (Array.isArray(value)) { value.forEach((item, i) => inline(item, `${location}-${i}`)); return; }
+    if (Array.isArray(value)) { value.forEach((item, i) => inline(item, `${location}-${i}`, depth + 1)); return; }
     const item = value as any;
     if (item.type === 'input_image' && typeof item.image_url === 'string' && item.image_url.startsWith('data:')) {
       const match = /^data:image\/(?:png|jpeg|webp|gif);base64,([A-Za-z0-9+/]*={0,2})$/.exec(item.image_url);
@@ -186,7 +194,9 @@ export async function discoverMaterials(input: { source: Source; nativeRoot: str
       const bytes = Buffer.from(item.source.data, 'base64');
       if (bytes.toString('base64') === item.source.data) add('attachment', 'portable', `inline-${location}.bin`, bytes); else gap('unknown-format', `inline image ${location}`);
     }
-    for (const [key, child] of Object.entries(item)) if (child && typeof child === 'object') inline(child, `${location}-${key}`.slice(-200));
+    if (item.type === 'input_image' && typeof item.image_url === 'string' && !item.image_url.startsWith('data:')) gap('native-mapping-unverified', `远程图像仅保留原始引用 ${location}`);
+    if (JSON.stringify(item.content_item_kinds ?? '').includes('preparation_error')) gap('missing', `来源未能读取图像 ${location}`);
+    for (const [key, child] of Object.entries(item)) if (child && typeof child === 'object') inline(child, `${location}-${key}`.slice(-200), depth + 1);
   };
   records.forEach((record, index) => inline(record, String(index + 1)));
   for (const previous of input.previous ?? []) {
