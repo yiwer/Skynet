@@ -11,8 +11,13 @@ import { command, createSandbox } from './support.js';
 import { installAgent, stopInstalled } from './installed-support.js';
 
 test('repair → interrupted upgrade rollback → upgrade → uninstall → frozen drain retains identity, user settings and exact archives', { timeout: 240_000 }, async () => {
-  const sandbox = await createSandbox(); let state: string | undefined; let browser: Browser | undefined;
+  const started = Date.now(); const sandbox = await createSandbox(); let state: string | undefined; let browser: Browser | undefined;
   let stage = 'prepare'; let failed = false;
+  const stages: { stage: string; at: string; elapsedMs: number }[] = [];
+  const progress = async (next: string) => {
+    stage = next; stages.push({ stage, at: new Date().toISOString(), elapsedMs: Date.now() - started });
+    await writeFile(join(sandbox.directory, 'maintenance-progress.json'), JSON.stringify(stages, null, 2));
+  };
   try {
     const home = join(sandbox.directory, 'maintenance user with spaces'); const bin = join(home, 'bin');
     for (const path of [bin, join(home, '.codex'), join(home, '.claude'), join(home, 'local'), join(home, 'roaming'), join(home, 'tmp')]) await mkdir(path, { recursive: true });
@@ -31,7 +36,7 @@ test('repair → interrupted upgrade rollback → upgrade → uninstall → froz
     const claudeConfig = join(home, '.claude', 'settings.json'); const codexConfig = join(home, '.codex', 'hooks.json');
     for (const path of [claudeConfig, codexConfig]) await writeFile(path, JSON.stringify(other));
     const employee = await sandbox.provision('维护合成员工'); const reader = await sandbox.provision('维护读者'); const origin = await sandbox.startServer();
-    stage = 'initial-install';
+    await progress('initial-install');
     const installed = await installAgent(sandbox.directory, origin, env, employee.enrollmentCredential, { packCli: process.env.SKYNET_TEST_BASE_PACK_CLI }); state = installed.status.stateDirectory;
     const launcher = join(state!, 'skynet-launcher.mjs');
     const run = (action: string, cli = 'dist/apps/collector/cli.js') => command(process.execPath, [cli, action], { ...env, SKYNET_KEY: undefined });
@@ -39,7 +44,7 @@ test('repair → interrupted upgrade rollback → upgrade → uninstall → froz
     const originalConfig = JSON.parse(await readFile(claudeConfig, 'utf8'));
     const editedConfig = structuredClone(originalConfig); editedConfig.userTheme = 'changed-since-install';
     editedConfig.hooks.UserPromptSubmit = [other.hooks.UserPromptSubmit[0]]; await writeFile(claudeConfig, JSON.stringify(editedConfig));
-    stage = 'repair'; await run('stop'); await unlink(launcher);
+    await progress('repair'); await run('stop'); await unlink(launcher);
     const repaired = JSON.parse(await run('repair')); assert.equal(repaired.background, 'running');
     await run('repair');
     const afterRepair = JSON.parse(await readFile(claudeConfig, 'utf8'));
@@ -47,7 +52,7 @@ test('repair → interrupted upgrade rollback → upgrade → uninstall → froz
     assert.equal(afterRepair.hooks.UserPromptSubmit.length, 2, 'repeated repair installs exactly one owned definition');
     assert.equal(await readFile(join(state!, 'identity.json'), 'utf8'), identity);
     // A third-party listener stays running and never receives a stop request.
-    stage = 'repair-occupied'; await run('stop'); const control = JSON.parse(await readFile(join(state!, 'runtime-control.json'), 'utf8'));
+    await progress('repair-occupied'); await run('stop'); const control = JSON.parse(await readFile(join(state!, 'runtime-control.json'), 'utf8'));
     let foreignStops = 0; const foreign = createServer((req, res) => { if (req.url === '/stop') foreignStops++; res.writeHead(401); res.end('unrelated'); });
     await new Promise<void>(resolve => foreign.listen(control.supervisorPort, '127.0.0.1', resolve));
     try {
@@ -77,7 +82,7 @@ test('repair → interrupted upgrade rollback → upgrade → uninstall → froz
     const upgradeCli = join(dirname(packed.package), 'dist', 'apps', 'collector', 'cli.js');
     const interruption: string[] = [];
     for (const phase of ['prepared', 'switched']) {
-      stage = `interrupt-${phase}`;
+      await progress(`interrupt-${phase}`);
       const upgrade = spawn(process.execPath, [upgradeCli, 'upgrade'], { env, windowsHide: true, stdio: 'ignore' });
       const exited = new Promise<void>(resolve => upgrade.once('exit', () => resolve()));
       let observed = false;
@@ -87,19 +92,19 @@ test('repair → interrupted upgrade rollback → upgrade → uninstall → froz
         await setTimeout(2);
       }
       await exited; assert.equal(observed, true, `terminated actual public upgrade at durable ${phase} boundary`);
-      stage = `recover-${phase}`; const recovered = JSON.parse(await run('repair')); assert.equal(recovered.runtimeVersion, '0.1.0'); assert.equal(recovered.background, 'running');
+      await progress(`recover-${phase}`); const recovered = JSON.parse(await run('repair')); assert.equal(recovered.runtimeVersion, '0.1.0'); assert.equal(recovered.background, 'running');
       assert.equal(recovered.upgrade.phase, 'rolled-back'); assert.equal(await readFile(join(state!, 'identity.json'), 'utf8'), identity);
       assert.deepEqual(await readFile(join(pendingDirectory, pendingFiles[0]!)), pendingBytes); interruption.push(phase);
     }
-    stage = 'successful-upgrade'; const upgraded = JSON.parse(await run('upgrade', upgradeCli)); assert.equal(upgraded.runtimeVersion, '0.2.0'); assert.equal(upgraded.background, 'running');
+    await progress('successful-upgrade'); const upgraded = JSON.parse(await run('upgrade', upgradeCli)); assert.equal(upgraded.runtimeVersion, '0.2.0'); assert.equal(upgraded.background, 'running');
     assert.equal(upgraded.upgrade.phase, 'complete'); await assert.rejects(run('setup', installed.cli), /older than the installed/);
     const plugins = JSON.parse(await command(process.execPath, ['dist/apps/collector/cli.js', 'pack-plugins', '--output', join(sandbox.directory, 'upgraded plugin release'),
       '--origin', origin, '--deployment', 'isolated-acceptance', '--version', '0.2.0'], process.env));
     const pluginScript = join(plugins.directory, 'plugins', 'skynet-claude', 'scripts', 'skynet.cjs');
-    stage = 'post-upgrade-plugin'; await command(process.execPath, [pluginScript, 'setup'], env).catch(error => { if (!/device health failed/.test(error.message)) throw error; });
+    await progress('post-upgrade-plugin'); await command(process.execPath, [pluginScript, 'setup'], env).catch(error => { if (!/device health failed/.test(error.message)) throw error; });
     // setup's server health is intentionally unavailable during this offline
     // proof, but its durable new entry must not disappear on code rollback.
-    stage = 'codex-fence-before-rollback';
+    await progress('codex-fence-before-rollback');
     if (process.env.SKYNET_TEST_BASE_PACK_CLI) {
       // Fault-inject one persisted source fence while the other remains active.
       // This is compatibility registration evidence, not Desktop support proof.
@@ -131,9 +136,12 @@ test('repair → interrupted upgrade rollback → upgrade → uninstall → froz
     assert.ok(afterFence.runtime.checkedAt > fenced.runtime.checkedAt);
     assert.equal(afterFence.codexUnclassifiedEvents, 1); assert.deepEqual(afterFence.runtime.errors, [], 'disabled Codex metadata is not opened or parsed after normal background start');
     // Explicit reconnect is a separate authorization to resume reading sources.
-    if (!process.env.SKYNET_TEST_BASE_PACK_CLI) await run('upgrade', upgradeCli);
-    await run('setup', upgradeCli).catch(error => { if (!/device health failed/.test(error.message)) throw error; });
-    stage = 'explicit-rollback'; const rolledBack = JSON.parse(await command(process.execPath, [launcher, 'rollback'], env)); assert.equal(rolledBack.runtimeVersion, '0.1.0');
+    // Reconnect with the selected version. The compatible current-code fixture
+    // already rolled back; repeat setup must preserve its newer maintenance
+    // launcher without doing a redundant second successful upgrade.
+    await progress('explicit-reconnect'); const reconnectCli = process.env.SKYNET_TEST_BASE_PACK_CLI ? upgradeCli : installed.cli;
+    await run('setup', reconnectCli).catch(error => { if (!/device health failed/.test(error.message)) throw error; });
+    await progress('explicit-rollback'); const rolledBack = JSON.parse(await command(process.execPath, [launcher, 'rollback'], env)); assert.equal(rolledBack.runtimeVersion, '0.1.0');
     assert.deepEqual(rolledBack.entries.map((entry: any) => entry.channel).sort(), ['claude-plugin', 'npm']);
     if (process.env.SKYNET_TEST_BASE_PACK_CLI) {
       await assert.rejects(command(process.execPath, [launcher, 'entry-remove', '--entry', 'npm'], env), /older runtime cannot enforce/);
@@ -156,11 +164,12 @@ test('repair → interrupted upgrade rollback → upgrade → uninstall → froz
     const modifiedOwned = JSON.parse(current); modifiedOwned.hooks.UserPromptSubmit.at(-1).hooks[0].timeout = 9;
     await writeFile(claudeConfig, JSON.stringify(modifiedOwned)); await assert.rejects(command(process.execPath, [launcher, 'uninstall'], env), /ownership conflict/);
     assert.deepEqual(JSON.parse(await readFile(claudeConfig, 'utf8')), modifiedOwned); await writeFile(claudeConfig, current);
-    stage = 'uninstall'; const uninstalled = JSON.parse(await command(process.execPath, [launcher, 'uninstall'], env)); assert.equal(uninstalled.lifecycle, 'uninstalled');
+    await progress('uninstall'); const uninstalled = JSON.parse(await command(process.execPath, [launcher, 'uninstall'], env)); assert.equal(uninstalled.lifecycle, 'uninstalled');
     assert.equal(uninstalled.background, 'unavailable'); assert.equal(uninstalled.autostart.state, 'removed'); assert.equal(uninstalled.entries.length, 0);
     await command(process.execPath, [launcher, 'uninstall'], env);
     await assert.rejects(command(process.execPath, [launcher, 'start'], env), /Capture is uninstalled/);
     await assert.rejects(command(process.execPath, [launcher, 'background', '--state', state!], env), /Capture is uninstalled/);
+    await assert.rejects(command(process.execPath, [launcher, 'background-guardian', '--state', state!], env), /Capture is uninstalled/);
     await assert.rejects(command(process.execPath, [launcher, 'background-worker', '--state', state!], env), /owning supervisor/);
     for (const path of [claudeConfig, codexConfig]) {
       const config = JSON.parse(await readFile(path, 'utf8')); assert.deepEqual(config.hooks.UserPromptSubmit, other.hooks.UserPromptSubmit);
@@ -171,7 +180,7 @@ test('repair → interrupted upgrade rollback → upgrade → uninstall → froz
     await command(process.execPath, [launcher, 'hook', '--state', join(state!, 'inbox', 'codex')], env,
       JSON.stringify({ hook_event_name: 'Stop', session_id: randomUUID(), transcript_path: join(home, '.codex', 'sessions', 'unread-after-uninstall.jsonl'), cwd: '/synthetic/maintenance' }));
     await sandbox.startServer(Number(new URL(origin).port));
-    stage = 'frozen-drain'; const drained = JSON.parse(await command(process.execPath, [launcher, 'drain'], env)); assert.equal(drained.background, 'unavailable');
+    await progress('frozen-drain'); const drained = JSON.parse(await command(process.execPath, [launcher, 'drain'], env)); assert.equal(drained.background, 'unavailable');
     assert.equal(drained.retainedUnfrozenEvents, 3, 'stale/unparsed hooks remain visible and are never confused with frozen delivery');
     assert.equal((await readdir(pendingDirectory)).filter(file => file.endsWith('.json')).length, 0);
     const sessions = await list(); assert.equal(sessions.length, 1);
@@ -179,12 +188,12 @@ test('repair → interrupted upgrade rollback → upgrade → uninstall → froz
     const history = await (await fetch(`${origin}/api/snapshots/${sessions[0].id}/history`, { headers })).json(); assert.equal(history.snapshots.length, 2);
     assert.equal(await readFile(join(state!, 'identity.json'), 'utf8'), identity);
     const finalRepair = JSON.parse(await command(process.execPath, [launcher, 'repair'], env)); assert.equal(finalRepair.background, 'unavailable'); assert.equal(finalRepair.lifecycle, 'uninstalled');
-    browser = await chromium.launch(); const page = await browser.newPage(); await page.goto(origin);
+    await progress('web-archive'); browser = await chromium.launch(); const page = await browser.newPage(); await page.goto(origin);
     await page.getByLabel('个人读取凭据').fill(reader.readerCredential); await page.getByRole('button', { name: '进入存档' }).click();
     await page.getByRole('link', { name: /维护合成员工 Claude Code CLI/ }).click(); await expect(page.getByText('升级中断仍须保留的离线材料', { exact: false })).toBeVisible();
     await page.getByText('接入设备 · npm / 插件安装说明', { exact: true }).click(); await expect(page.getByText('完整停用先执行', { exact: false })).toBeVisible();
     await page.screenshot({ path: join(sandbox.directory, 'maintenance-archive.png'), fullPage: true });
-    await writeFile(join(sandbox.directory, 'maintenance-evidence.json'), JSON.stringify({ interruption, identityRetained: true, exactFrozenBytes: true,
+    await progress('complete'); await writeFile(join(sandbox.directory, 'maintenance-evidence.json'), JSON.stringify({ interruption, identityRetained: true, exactFrozenBytes: true,
       repeatRepairOneDefinition: true, occupiedListenerPreserved: true, userSettingsPreserved: true, rollbackAfterSuccess: true, uninstallStopsCapture: true,
       pendingDrainAfterUninstall: true, codexFenceAcrossRollback: true, legacyPerSourceFence: Boolean(process.env.SKYNET_TEST_BASE_PACK_CLI), retainedUnfrozenEvents: 3, snapshots: history.snapshots.length, nativeHost: false, basePackCli: process.env.SKYNET_TEST_BASE_PACK_CLI ?? 'current build' }, null, 2));
     console.log(`Maintenance evidence: ${sandbox.directory}`);

@@ -1,7 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash, randomUUID } from 'node:crypto';
-import { access, mkdir, writeFile, rename } from 'node:fs/promises';
+import { access, mkdir, readFile, readdir, writeFile, rename } from 'node:fs/promises';
+import { spawn } from 'node:child_process';
+import { setTimeout } from 'node:timers/promises';
 import { join } from 'node:path';
 import { chromium, expect, type Browser } from '@playwright/test';
 import { command, createSandbox } from './support.js';
@@ -14,7 +16,7 @@ test('Claude CLI native-shaped messages cross the public collector, API and brow
     const reader = await sandbox.provision('Claude 合成读者');
     const origin = await sandbox.startServer();
     const state = join(sandbox.directory, 'collector');
-    const nativeRoot = join(sandbox.directory, 'claude', 'projects');
+    const nativeRoot = join(sandbox.directory, 'claude 中文路径', 'projects');
     await mkdir(nativeRoot, { recursive: true });
     await sandbox.collectorCommand('setup', state, { server: origin, enrollmentCredential: employee.enrollmentCredential,
       nativeRoot, source: 'claude-code-cli', sourceVersion: '2.1.281', sourceOs: process.platform });
@@ -42,7 +44,21 @@ test('Claude CLI native-shaped messages cross the public collector, API and brow
     await writeFile(join(nativeRoot, `${randomUUID()}.jsonl`), bytes);
     const event = { session_id: sessionId, transcript_path: transcriptPath, cwd: '/synthetic/project-a' };
     await sandbox.collectorCommand('hook', state, { ...event, hook_event_name: 'SessionStart', transcript_path: join(nativeRoot, 'not-created.jsonl') });
-    await sandbox.collectorCommand('hook', state, { ...event, hook_event_name: 'UserPromptSubmit' });
+    // Real pipes can split a UTF-8 path inside a code point. Deliberately send
+    // the three bytes of 中 separately through the public hook process.
+    const hookInput = Buffer.from(JSON.stringify({ ...event, hook_event_name: 'UserPromptSubmit' }));
+    const split = hookInput.indexOf(Buffer.from('中')); assert.ok(split > 0);
+    const hookChild = spawn(process.execPath, ['dist/apps/collector/cli.js', 'hook', '--state', state], { env: process.env, windowsHide: true, stdio: ['pipe', 'ignore', 'pipe'] });
+    let hookError = ''; hookChild.stderr.on('data', part => { hookError += part; });
+    const hookDone = new Promise<void>((resolve, reject) => {
+      hookChild.once('error', reject); hookChild.once('exit', code => code === 0 ? resolve() : reject(new Error(hookError)));
+    });
+    hookChild.stdin.write(hookInput.subarray(0, split)); await setTimeout(300);
+    hookChild.stdin.write(hookInput.subarray(split, split + 1)); await setTimeout(150);
+    hookChild.stdin.write(hookInput.subarray(split + 1, split + 2)); await setTimeout(100);
+    hookChild.stdin.end(hookInput.subarray(split + 2)); await hookDone;
+    const queuedHooks = await Promise.all((await readdir(join(state, 'spool'))).map(async file => JSON.parse(await readFile(join(state, 'spool', file), 'utf8'))));
+    assert.equal(queuedHooks.find(item => item.event.hook_event_name === 'UserPromptSubmit').event.transcript_path, transcriptPath);
     await sandbox.collectorCommand('hook', state, { ...event, hook_event_name: 'PostToolUse' });
     const status = JSON.parse(await sandbox.collectorCommand('run', state));
     assert.deepEqual(status.errors, [], 'later host path corrects the initial nonexistent resume hint');

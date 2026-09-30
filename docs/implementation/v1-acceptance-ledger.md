@@ -8,7 +8,7 @@
 | --- | --- | --- |
 | AC-01 单 Key npm 接入 | [#11](issue-11.md)：离线包、禁用安装脚本、一次 setup、两个 CLI 安装模式 | 完整 G1 环境登记与耗时复验 |
 | AC-02 市场入口与共存 | [#13](issue-13.md)：真实双 CLI 市场、单身份后台、入口所有权、缓存不可用 | Desktop 正常入口与完整支持矩阵 |
-| AC-03 修复升级卸载 | [#12](issue-12.md)、[#13](issue-13.md)、[#14](issue-14.md)：公开修复、中断升级、真实旧载荷回退、卸载及冻结 drain，14e29a8 已集成 | Windows fallback 崩溃恢复修复待合；最新完整套件、其他 OS 与第二人复现 |
+| AC-03 修复升级卸载 | [#12](issue-12.md)、[#13](issue-13.md)、[#14](issue-14.md)：公开修复、中断升级、真实旧载荷回退、卸载及冻结 drain；guardian 崩溃恢复与中文path分块输入修订已合入 | recovery Windows 全量23/24：initial-install control无响应仍红；其他 OS、完整支持组合与第二人复现 |
 | AC-04 图标启动与登录恢复 | [#12](issue-12.md)：受认证后台、监督器、隐藏用户任务、崩溃恢复 | Desktop UI、正常登录/重启/休眠及无安装终端环境 |
 | AC-05 自动采集多项目 | [#6](issue-6.md)、[#7](issue-7.md)、[#11](issue-11.md)：真实 CLI 正常 hooks | Desktop UI 自动采集；三来源完整样例 |
 | AC-06 仅接管被继续的旧会话 | [#8](issue-8.md)、[#10](issue-10.md)：两个真实 CLI 旧会话已纳入持续回归，目录 mtime 不触发上传、仅继续一条、来源日期保留 | Desktop 实测 |
@@ -34,7 +34,7 @@
 | 门槛 | 状态 | 决定性未完成项 |
 | --- | --- | --- |
 | G0 / #10 | 未通过 | Desktop 实际 UI 自动采集和服务器独立续聊；当前环境 Codex workspace-write 被宿主退化为 read-only；全部材料/历史/工具样例支持矩阵 |
-| G1 / #15 | 未通过 | #14 Windows fallback 崩溃恢复修复及最新全量复验；Desktop 图标与登录/重启/休眠；完整安装演练和第二人复现 |
+| G1 / #15 | 未通过 | fallback确定性崩溃恢复已修；Windows初次安装控制端点无响应仍需tight-loop诊断；Desktop图标与登录/重启/休眠、完整安装演练和第二人复现 |
 | G2 / #21 | 未通过 | 可独立资格材料来源已集成但不替代门槛；在已通过安装的三来源上复跑完整故障矩阵、覆盖未知关系和支持组合 |
 | G3 / #25 | 未通过 | #22 已为 loopback 准备；#23/#24，真实 Claude Code + 指定千问 PAYG 模型、核实价格与预算 |
 | G4 / #33 | 未通过 | #28–#32、页面/性能检查、第二人运维复现、门槛通过后的五个工作日试点与负责人签收 |
@@ -44,6 +44,8 @@
 ## 复现与外部条件
 
 - 基线 [Linux CI](https://github.com/yiwer/Skynet/actions/runs/36400612859/job/108857308920)：类型检查、构建、17/17 普通测试通过。
+- #19 主会话集成 `1665d08` 的 [Linux CI](https://github.com/yiwer/Skynet/actions/runs/36670850420/job/109745319778)：类型检查、构建、19/19 普通测试通过；该轮早于 #14 集成。
+- 分析及材料资格集成 `f6ccbca` 的 [Linux CI](https://github.com/yiwer/Skynet/actions/runs/36675975531/job/109760915991)：28/28、0fail/0cancelled，100.38秒；早于 recovery 修订，与其 Windows24项是不同环境/源码/总数。
 - 原生测试须显式选择本机安装的实测版本，使用隔离配置和合成材料；命令及证据见各票文档。loopback 模型应标记为替身，不作真实千问计费或质量证明。
 - 外部研究与诊断在执行机 `%TEMP%/skynet-v1-implementation/`；进入最终验收的关键脚本与证据索引需成为仓库内可复跑材料，不能仅依赖临时目录。
 - 需专用 Desktop 测试环境，以及包含千问 PAYG 模型/专用凭据的配置路径和测试预算。不得猜测现有环境 Key，也不得将真实用户的会话或登录凭据复制到测试目录。
@@ -65,6 +67,8 @@
 
 ## 2026-09-30 #14 全量故障记录保留
 
+本节记录 recovery 合入前的 `f6ccbca` 状态，后续修订与仍红的 Windows control 回归见下节。
+
 `d725e48` 通过 `14e29a8` 合入维护实现；旧载荷、普通安装、插件与真实 Claude 各自定向证据见 [#14](issue-14.md)。Windows 完整批次分别为 **23 pass / 1 cancelled**，以及 **22 pass / 1 installation fail / 1 cancelled**；后者暴露 fallback 后台崩溃恢复的真实问题。取消的 maintenance tracer 不视为通过，即使测试 body 后续保存了行为证据。并行负载与未提交诊断尝试均不能据此变成此主线源码的成功证明。
 
 #14 后续九个自有差异已按完整 SHA 核对移至独立 `Skynet-wt-issue14-recovery`，本次主线合并前是干净的 `14e29a8`。fallback 启动 ownership 失败仍在诊断，stdin UTF-8 修订未合入。当前合并只从自身源码重新构建，不使用先前 ignored dist 的未提交修订，不重复整套绕过上述失败；待 #14 修复集成后再跑最新完整套件。G1/G2 与其他门槛均保持开放。
@@ -76,3 +80,11 @@
 主线自身源码的 typecheck/build/diffcheck 通过，分析 / MCP / 历史 / 材料 / 跨设备 / 材料独立资格 / 搜索定向 **10/10**（72.18 秒）。证据：主件链 `rOCNli`、occurrence 重写 `DR4rpF`、历史 `8hVnGg`、材料公开整链 `us6Ouo`、已有 primary / 材料增长 / 拒绝 `cYsTRx`、材料保存阅读 `RpQYSX`、HTTPS OAuth MCP `hl8Ew2`、全分页搜索 `ckFHNx`；analysis 两项为原句/原锚点契约及未配置公开 API 回归。
 
 此合并没有源码冲突，未重复跑相邻原生场景。实际原生证据明确来自各自实现分支：#22 `2af8421` 的 Windows `B3TxgX`、Linux `oc2IFY` 实际 Claude Code 公开 worker 整链；#19 `73c745e` 的 `Ba7caC` 实际 Codex CLI 0.157.1 服务器独立材料恢复→正常审核 UserPromptSubmit→历史/新增员工归属。均为明确 loopback 合成 provider，没有付费模型或 Desktop UI 验收。完整发布门槛 G0–G4、#22 的 PAYG 条件及 G2 完整故障矩阵继续开放。
+
+## 2026-09-30 #14 recovery 集成
+
+`1a8eb53` 合入最新分析/材料主线，只有文档进度冲突，保留双方证据；源码无冲突。支线 typecheck/build/diffcheck 通过；强制 Disabled task fallback 的 worker/监督器崩溃恢复与 UTF8 三字节分割中文path公开采集2/2通过（88.24秒）。该支线完整24项仍为23 pass /1 fail /0 cancelled（143.18秒），安装含确定性 fallback crash通过，maintenance初次安装出现1500ms控制无响应。定向新维护路径1/1通过（171.24秒）不能覆盖该全量红结果；此前23pass/1cancel与22pass/1fail/1cancel记录同样保留。
+
+后续诊断指针 `%TEMP%/skynet-v1-implementation/runtime-control-diagnosis-readiness.md` 准备 role/action、connect/response/server event-loop 脱敏时序与最小化压力条件，tight red-capable loop 尚未完成，不能先假定CPU负载或调大timeout。G1/G2与全部V1门槛仍开放。
+
+recovery 合并后主线自身 typecheck/build/diffcheck 与 control保护5/5通过（2.04秒）；只有文档冲突，不重复heavy/native。完整Windows24项红结果来自该recovery支线，源码无冲突不能将它改写为主线完整通过；此前f6ccbca Linux28/28同样是另一环境/提交的证据。
