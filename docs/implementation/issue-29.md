@@ -51,3 +51,9 @@ node --import tsx --test tests/native-work-views.test.ts
 ## 接续与门槛
 
 #19 后资格 material 的有效分类已由 `1c41d21` 组合，项目候选和日报投影使用同一分类，资格变化传播至既有周/项目；旧日报/周/项目版本仍冻结。#30 负责自动迟到/更正，#31 完整统计与覆盖，#32 灾备。真实千问模型/配置/价格/预算、Desktop UI、负载与运营09:00、第二人复现、五日试点和负责人签收保持开放；#29 准备不关闭 G0–G4。
+
+## 主线组合检查
+
+`d89c5c6` 无冲突合入主线 `bc00a97`，原后台线程/静默启动/控制诊断无差异。主线自身typecheck/build/diffcheck通过；材料资格、周/项目、日报、OAuth MCP **8/8 PASS（31.94s）**，`zSGfJk` / `5unazv` / `Wq1MBU` / `gUPwf4`，日志 `F:/GenCode/Skynet-evidence/v1-2026-09-30/main-29-qualification-integration.log`。实际Claude公开结果仍明确来自上述支线 `1hfWI0`，未重复主线原生或完整Windows；历史失败/取消及全部门槛保留。
+
+本次材料、大型旧件、周/项目三份安全JSON已按来源SHA256核对复制到持久目录 `F:/GenCode/Skynet-evidence/v1-2026-09-30/main-29-qualification/`，不含凭据/私钥/环境配置。

@@ -320,6 +320,6 @@ export function reportService(db: Database, analysis: AnalysisService, clock: ()
     const rows = (await db.query(`SELECT id,name FROM employees ORDER BY name,id LIMIT 101 OFFSET $1`, [offset])).rows;
     return { employees: rows.slice(0, 100), nextOffset: rows.length > 100 ? offset + 100 : null };
   }
-  return { read, request, list, tick, employees,correct,correctionHistory };
+  return { read, request, list, tick, employees,correct,correctionHistory,inputRevision:sourceRevision };
 }
 export type ReportService = ReturnType<typeof reportService>;

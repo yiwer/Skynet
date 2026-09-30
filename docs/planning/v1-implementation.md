@@ -48,10 +48,12 @@ AC-01…AC-22 的已有证据和缺口集中列于 [V1 验收证据台账](../im
 - #24：`f2b9cf9` 经 `c281d7c` 合入持久队列准备：有限总尝试、全局并发与预算预留、租约/转发 fencing、晚结果与当前适用版本分离、parser/配置升级和旧协议保护、独立自动增量去抖、Web/MCP 同队列与资源状态。system 调度不冒充源员工，日报可自动创建目标；worker 不挂载原件。主线自身 typecheck/build/diffcheck 与队列/分析/MCP/旧会话（含自动增量与已确认 append）5/5通过（18.7秒）；实际 Windows/Linux CLI 双平台故障证据来自实现分支，均显式 loopback 合成 provider。真实发现并修复迁移与领取锁顺序死锁，保留 red/green 回归，不放宽超时。#21/G2 与真实 PAYG/G3仍开放，见 [#24 记录](../implementation/issue-24.md)。
 - #23：803f89b 已集成长会话有界原范围提取/汇总准备，UTF-16原句与 inputLocation 分离，失败/跳过/省略及聚合状态显式返回；日报保留该 processing 范围并标 partial。支线真实 Windows Claude CLI loopback 完整/坏段/超限17请求通过；支线普通33项31 pass /2 runtime-control fail保留，不代替主线完整验收。见 [#23](../implementation/issue-23.md)。
 - #28 日报准备已集成：北京时间09:00持久入队、自动 system 分析、来源员工/项目/日期的日报与原句、Web/MCP固定分页版本已实现；真实 Claude CLI loopback 的8会话/2项目/24事项整链通过，历史背景不计当天工作，未知及未完整处理标 partial。统计共用原事件账本；原生 token/文件/区间与按日覆盖待 #31，真实 G3 和所有门槛保持开放。见 [#28](../implementation/issue-28.md)，独立实现提交5399481已合入，正式验收仍开放。
-- #29 独立周工作/项目准备：周一09:00、跨周固定日报版本、多员工原项目及空项目、逐日已确认计数与原句、Web/MCP分页持久一致已实现；组合 `1c41d21` 有效资格后定向6/6、真实Claude loopback1/1通过，资格变化自动刷新既有周/项目，固定旧响应逐字不变另1/1通过。详见 [#29](../implementation/issue-29.md)。迟到/更正与完整统计接续；真实G3、运营与全部验收门槛仍开放。
+- #29 周工作/项目准备与材料资格修订已集成：周一09:00、跨周固定日报版本、多员工原项目及空项目、逐日已确认计数与原句、Web/MCP分页持久一致已实现；组合支线 `d89c5c6` 有效资格后定向6/6、真实Claude loopback1/1通过，资格变化自动刷新既有周/项目，固定旧响应逐字不变另1/1通过。主线本次定向8/8，未重复原生测试。详见 [#29](../implementation/issue-29.md)。迟到/更正与完整统计接续；真实G3、运营与全部验收门槛仍开放。
+- #31 覆盖矩阵与来源统计准备已集成：员工×日期、按小时保留收到的故障观测、安装/宿主确认/连接/采集/报告分别显示，来源Token、结构化文件与时间点区间保持定义和未知；固定统计版本及日报方向/主题/阻塞，经Web/OAuth MCP下钻员工、项目与原件。clean `519d59f` 主线定向12/12通过，见 [#31](../implementation/issue-31.md)。历史部署前覆盖、真实支持组合、G2/G3/G4不因合成路径通过而关闭。
+- #30 独立更正/迟到准备：追加说明、主题与未归类项目的人工显示归类、认证审计和幂等重算、已有日周项目来源日刷新及固定旧版不变已实现。与主线 `6d828bf` 的覆盖/统计接口组合定向通过；实际Claude loopback6请求通过，受控旧结果晚完成不适用，见 [#30](../implementation/issue-30.md)。仍待主线集成及正式运营验收，G0–G4不关闭。
 - #10、#14–#15、#19、#21、#23–#25、#28–#33：尚未完成；依赖与门槛继续按 ticket 图核查。
 
-#23 独立实现准备已基于 #24 最终 `f2b9cf9` 完成有界长会话 public trace：实际 Windows Claude Code 2.1.281 对本地合成服务分段提取/汇总，原 UTF-16 引用、跨段头尾事实、坏段与 skipped 范围、Web/MCP/原件导出定向通过，见 [#23 记录](../implementation/issue-23.md)。全尝试共享请求/租约/deadline/预算，不按段追加额度。支线完整 Windows 33 项为 **31 pass / 2 runtime-control fail / 0 cancel**，237.08s；新长会话/队列通过，维护 236.15s 通过，安装与插件 1500ms 无响应仍红并交接独立诊断。真实千问、质量和 G3 仍开放，等待集成复核。
+#23 独立实现准备已基于 #24 最终 `f2b9cf9` 完成有界长会话 public trace，并通过组合主线 `0743d4d` 集成复核：实际 Windows Claude Code 2.1.281 对本地合成服务分段提取/汇总，原 UTF-16 引用、跨段头尾事实、坏段与 skipped 范围、Web/MCP/原件导出定向通过，见 [#23 记录](../implementation/issue-23.md)。全尝试共享请求/租约/deadline/预算，不按段追加额度。支线完整 Windows 33 项为 **31 pass / 2 runtime-control fail / 0 cancel**，237.08s；新长会话/队列通过，维护 236.15s 通过，安装与插件 1500ms 无响应仍红并交接独立诊断。真实千问、质量和 G3 仍开放。
 - G0–G4：未通过。原生恢复、真实分析、客户端 MCP 授权与五个工作日试点必须保留实测证据。
 - [草稿 PR #55](https://github.com/yiwer/Skynet/pull/55) 已保存实现与规格关闭引用；保持草稿，尚无 ticket 通过验收或被关闭。
 - 本地类型检查、构建、公开入口 E2E、Linux 容器持久卷重启验证及初次 GitHub CI 通过；[两路评审](../implementation/review-issue-4.md) 的可修复代码问题已在 `9ad3277` 修复，并通过 `920b92f` 合并，回归检查通过。
@@ -73,4 +75,34 @@ AC-01…AC-22 的已有证据和缺口集中列于 [V1 验收证据台账](../im
 
 先 cherry-pick 独立安装状态观测6324d0a至9f06a49，再合日报5399481至185f6af，随后合长会话803f89b。仅 README / 台账 / 规划文档冲突，按 resolving-merge-conflicts 保留14失败、24队列、28日报与23长范围；源码无冲突，日报类型接入正式 AnalysisProcessing。主线自身 typecheck/build/diffcheck通过；日报/统计/归属/历史/材料/队列/MCP12/12（18.45秒），组合日报/长范围/队列/分析/MCP11/11（17.86秒）。实际Claude2.1.281日报公开8会话24事项/分页/调度/归属/restart/Web/MCP1/1（19.92秒）来自本次组合主线，eJcXIF；返回 original-utf16-1处理范围，原件有未解析行仍partial。长会话17请求实测来自23支线6PLN80，未冒充本次复跑。
 
-没有重跑heavy完整Windows；23支线31/33（237.08秒）、安装/插件1500ms控制故障及旧23/24/取消批次均保留，focused状态观测待新LinuxCI，旧27/28尚不被替代。原设备后资格材料的历史/活动分类另由19后续版本化修订，未在日报中改写既有origin/raw/report。G0–G4、PAYG质量/预算、DesktopUI与五个工作日均开放。
+没有重跑heavy完整Windows；23支线31/33（237.08秒）、安装/插件1500ms控制故障及旧23/24/取消批次均保留。focused状态观测修订 `9f06a49` 的 [Linux CI](https://github.com/yiwer/Skynet/actions/runs/36680977269/job/109776132842) 已通过类型检查、构建及29/29（111.12秒），该节点含最终24与状态观测修订、尚未含23/28；旧27/28失败保留。组合主线 `0743d4d` 的 [CI](https://github.com/yiwer/Skynet/actions/runs/36681601424/job/109778040443) 已通过类型检查、构建及36/36（119.91秒），包含新增长会话/日报。原设备后资格材料的历史/活动分类另由19后续版本化修订，未在日报中改写既有origin/raw/report。G0–G4、PAYG质量/预算、DesktopUI与五个工作日均开放。
+
+## 后台控制与静默启动定向集成（2026-09-30）
+
+独立 clean `b93ffeb` 经 `92e3711` 无冲突合入，保留组合23/24/28源码。实际创建 background-worker 的同步 spawn 移到 Worker 线程，认证 status/stop 不受该阻塞拖住；异常线程退出后等待原生 worker 的认证租约释放才替换或最终停止。隐藏 Windows 动作与已登记旧任务的精确所有权迁移保持兼容，没有 DEBUG 或测试生产开关。
+
+主线自身 `npm run typecheck`、`npm run build`、`git diff --check` 通过；`node --test dist/tests/control-spawn.test.js dist/tests/runtime-control.test.js dist/tests/autostart-registration.test.js` **14/14 PASS（39.63秒）**。本次隔离 fixture `rw1nib` 实际同步 spawn 阻塞2200ms，status8.04ms、stop2.19ms均在spawn返回前确认，真实pending-stop child退出0、原登记不变；`2DhhCy` 实际退出17后选定载荷恢复、正常停下；`zEh7J6` 的2500ms原生关闭等待在租约释放后才替换，`XwQOiK` 等待关闭期间stop可用且未启动替换。较慢本次总时间保留，不作性能验收。
+
+正确调用点 shim 的旧实现 RED 与修订 GREEN 证据见 [控制诊断](../implementation/runtime-control-diagnosis.md)；纯旧Task元数据迁移用替身，不代表实际OS任务演练。集成节点 `6089062` 的 [Linux CI](https://github.com/yiwer/Skynet/actions/runs/36687101484/job/109795360132) 已通过类型检查、构建及 **45/45 测试（107.94秒，0 fail / 0 cancelled）**，包含控制线程和旧Task登记编排回归。本次没有真实Task安装、maintenance、压力循环或完整Windows套件；先前31/33、23/24、1500ms故障及取消批次全部保留。真实隐藏Task观察、完整Windows与G0–G4仍待复核。
+
+## 周/项目与后资格材料组合集成（2026-09-30）
+
+集成节点 `0dc863a` 的 [Linux CI](https://github.com/yiwer/Skynet/actions/runs/36691871149/job/109810712884) 已通过类型检查、构建和 **49/49（126.43秒，0 fail / 0 cancelled）**，包含材料资格与周/项目公开回归。
+
+clean `d89c5c6`（#29 + 材料资格 `1c41d21`）无冲突合入 `bc00a97`，运行时线程/静默编排及诊断文档与合并前一致。原始 eventId、owner、project、sourceDate、raw 和旧报告保持不变；可信原设备正常来源证明追加资格修订，当前有效分类、缓存、分析输入代次及日报/周/项目引用同步变化。后台旧数据核查每批2快照、每页1000事件，原件允许范围仍64MiB；实测17,826,999 bytes 首尾事件与重启幂等，不把允许上限写成已测样本。分析8MiB输入边界独立保留。
+
+主线自身 `npm run typecheck`、`npm run build`、`git diff --check` 与 `node --import tsx --test tests/material-qualification.test.ts tests/work-views.test.ts tests/daily-reports.test.ts tests/mcp.test.ts` **8/8 PASS（31.94秒，0 fail / 0 cancelled）**。fixture：材料 `zSGfJk`、大型旧件 `5unazv`、周/项目 `Wq1MBU`、OAuth MCP `gUPwf4`；安全日志 `F:/GenCode/Skynet-evidence/v1-2026-09-30/main-29-qualification-integration.log`。实际Claude周/项目loopback1/1来自 `d89c5c6` 支线 `1hfWI0`，本次未复跑原生、Task、maintenance 或完整Windows，全部历史红结果与G0–G4保留。
+
+一般证据解析器的非法UTF8缺口仍未修。独立 clean `1c41d21` 公开上传的单个0xFF支持消息被错误替换后读为完整事件，未解析行0、活动4（有效对照应为3）；合法U+FFFD/上下行与raw哈希保留。一次 RED helper/result 已保存 `F:/GenCode/Skynet-evidence/v1-2026-09-30/public-utf8-red.mjs` / `public-utf8-red-result.json`，由统一解析修订接续；本次资格证明的strictUTF8拒绝不等于通用证据解析已修。#30和#31继续独立实施，#32仅设计/工具准备且仍依赖#30。
+
+## 团队覆盖与来源统计组合集成（2026-09-30）
+
+clean `519d59f` 无冲突合入 `eb69a46`，保留主线Linux49/49记录、后台Worker线程/静默启动及诊断、有效资格修订、日报与周/项目冻结引用。collector仅增加有界健康观测的configured/hostEvent字段；未改launch/control路径。覆盖观测按服务器收到日/小时保留，恢复后仍能看到此前缺口；部署前历史未知。Token/文件只来自已测结构化原件及精确原材料资格/基线，不冒充账单或工时。
+
+主线自身 `npm run typecheck`、`npm run build`、`git diff --check` 与 `node --import tsx --test tests/source-statistics.test.ts tests/team-coverage.test.ts tests/daily-reports.test.ts tests/mcp.test.ts tests/material-primary.test.ts tests/work-views.test.ts` **12/12 PASS（31.43秒，0 fail / 0 cancelled）**。覆盖公开链11.79秒，fixture `5LAcc5`；safe JSON与320/375/760/1280/1920截图在 `F:/GenCode/Skynet-evidence/v1-2026-09-30/coverage-f611dad8-9b43-4b47-81a1-706c3231c67d/`，日志 `main-31-integration.log`。原材料 `jAldds/q9XPFU`、周/项目 `8TWoW4`、OAuth MCP `Xe5jhD`；从矩阵读取及下钻不新增生成POST，固定日报/统计引用和未知状态保持。
+
+未复跑实际native、Task、maintenance或完整Windows；#29原生loopback与其他CLI证据仍注明独立分支来源，旧31/33、23/24、取消及性能红结果保留。新增辅助Token/文件统计strictUTF8不替代通用证据0xFF缺口修订。所有门槛开放，#30独立接续更正/迟到版本，#32产品实现仍等#30；外部PG17/Node24工具smoke只证明前置工具，不算灾备验收。
+
+## 覆盖矩阵主线 Linux CI（2026-09-30）
+
+`a4588a6` 的 [Linux CI](https://github.com/yiwer/Skynet/actions/runs/36694392990/job/109818763622) 已通过类型检查、构建与 **53/53（162.16秒，0 fail / 0 cancelled）**。这是合入 #31 后的主线证据；主线本地定向12/12与独立原生测试来源保持区分。安全日志已保存 `F:/GenCode/Skynet-evidence/v1-2026-09-30/ci-a4588a6-linux.log`。真实Task、完整Windows、旧性能失败与G0–G4未因此关闭。

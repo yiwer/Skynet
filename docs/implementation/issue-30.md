@@ -1,6 +1,6 @@
 # #30 迟到输入与人工更正公开流程准备
 
-状态：基于 #29 组合 `d89c5c6` 的独立实现准备；正式 G0–G4、真实千问 PAYG 与运营验收仍开放。只使用隔离原件、测试账号和 loopback 提供者，没有实际 Task/setup/maintenance 或真实员工配置。
+状态：独立检查点 `80ee226` 已组合最新主线 `6d828bf`（含 #31 `519d59f`）；正式 G0–G4、真实千问 PAYG 与运营验收仍开放。只使用隔离原件、测试账号和 loopback 提供者，没有实际 Task/setup/maintenance 或真实员工配置。
 
 ## 产品行为
 
@@ -9,6 +9,7 @@
 - HTTP `POST /api/daily-reports/:employeeId/:date/corrections` 使用严格鉴别合同：kind=`note/theme/project/reanalyze`，expectedRevision、UUID requestId 和原因必填；主题/项目必须引用本日该原员工同一原项目的已确认活动。伪造 actor、未知事件或其他来源被拒绝。过期或尚待生成的并发更正返回409；相同操作者和相同内容的 requestId 重放只保留一次，不重复重算。
 - 更正使对应日报和包含该来源日的既有周/项目期间待刷新；新项目可正常列出与下钻。日、周、项目结论保留原句与分类标识，工作主题的人工覆盖另存原分析主题，项目的人工覆盖另附原来源项目。
 - 迟到原件只检查已经管理的日报期间，按原来源日期刷新，不把旧会话背景计入今天，也不新建接入前历史日报。每 tick 公平检查20期间、归一化10期间，旧期间较多时需多个 tick；不声明60秒性能验收。
+- 已建但尚无合格日报引用的项目期间，同样由有界公平的候选修订检查发现首条迟到活动，不依赖旧 day refs。周/项目每 tick 检查20期间、归一化2期间，事务冻结候选与日报选择；日报未追上当前来源输入时显式 `stale-input` 等待，不将旧计数描述为完整新输入。
 - 当前输入指纹包括已确认事件数、精确 PostgreSQL carrier 时刻、原来源资格修订、当前 parser、运行时配置与分析目标版本。准备期间输入改变则不发布旧快照；generation/资格/配置/parser、原件散列和旧作业 fencing 仍由 #24 共享队列兑现。
 - 人工重新分析为每个目标和更正 requestId 持久记录一次新 generation；同一更正轮询不反复建作业。每版仍遵守队列上限、有限尝试和共享预算预留；旧在途结果可保存为非适用历史，不能成为最新报告输入。
 - 固定 report/work-view revision 只读取其冻结 payload，不用新更正、最新输入或新统计重解释旧版本。原件字节保持不变。
@@ -17,7 +18,7 @@
 
 `GET /api/daily-reports/:employeeId/:date/corrections?offset=...` 与只读 OAuth MCP `read_report_corrections` 共用历史查询；最多20条/24KiB每页。日报最近8条、周/项目最近至多32条日更正展示，完整历史在对应日报分页读取。每个员工/日最多500次更正，主题/项目单次最多50个 eventId；超界明确拒绝，原件和既有历史不删除。原件下载、归属查询和分析预算均不因更正而覆写。
 
-新增表 `report_corrections`（报告迁移锁7402128）和 `analysis_recomputations`（沿用分析7402122→7402123迁移及 queue协议3）；日报期间增加 source_revision/last_inspected_at。灾备需要完整数据库，以保存全部更正、目标 generation、统计及固定报告版本，不能只备最新 payload。
+新增表 `report_corrections`（报告迁移锁7402128）和 `analysis_recomputations`（沿用分析7402122→7402123迁移及 queue协议3）；日报期间增加 source_revision/last_inspected_at，周/项目期间增加 candidate_revision/last_inspected_at（沿用7402131）。灾备需要完整数据库，以保存全部更正、目标 generation、统计及固定报告版本，不能只备最新 payload。#31 独立统计版本仍按其来源口径冻结，本票不将旧统计回填旧报告或把文件、Token自动猜分到人工显示项目。
 
 ## 验证记录
 
@@ -27,6 +28,10 @@
 - 完整链前的三次失败保留：54.48s 测试误把首20项当全部项目事项，改为固定 revision 翻页；39.94s 第二次重算在首个待生成更正保存前提交，正确返回409，测试改为等该版本；55.15s 测试领取了另一原件的作业却在本原件列表查找，改为按实际 snapshotId 领取。未把失败运行算通过。
 - 当前源码 `npm run typecheck`、`npm run build`、`git diff --check` 通过。后续真实 Claude 定向及 #31 主线接口组合结果追加于此。
 - 增加人工显示项目 Web→原句和 OAuth MCP 固定同版后，实际 Claude2.1.281 **1/1 PASS（55.56s，总56.25s）**，`UdcLwG`。实际重新分析仍由独立 CLI 执行，调用只到合成 loopback；旧结果延迟完成的故障注入由上述普通执行 seam 证明，不冒称实际 CLI 延迟。两份安全 JSON 已 SHA256 核对复制到 `F:/GenCode/Skynet-evidence/v1-2026-09-30/issue-30/`。
+- 组合最新主线时，只在 Web 导航回调与 MCP 测试有冲突；保留 #31 只读覆盖/统计/日报下钻与 #30 更正 body，并保留具名只读工具断言。组合 typecheck/build 通过，报告更正、材料资格及 OAuth MCP **6/6 PASS（98.50s）**，`MNxSTK`；来源统计与完整覆盖公开链 **4/4 PASS（10.76s）**，`uiJDz4`，覆盖证据直接写入持久目录。
+- 最后追加空候选项目的首条 late 活动公开 RED **null≠1（23.81s）**；增加 candidate revision 检查及日输入一致性后，公开更正/迟到整链 **3/3 PASS（60.94s）**，`5dCgd0`：已有日周项目无需再次 POST 均从未知或0更新为1，2020背景未批量建日报，固定旧日周项目文本保持相同。该修订没有扩大真实 Task 或 UI 审查范围。
+- 最终组合源码真实 Claude2.1.281 **1/1 PASS（54.37s，总55.11s）**，`xUlWpY`，6次合成 loopback 请求；最终审计/迟到 **2/2 PASS（12.09s）**，`lMisFn` / `sxW08n`，另校验 late raw 字节不变。上述组合、普通与原生 JSON 共7份已保存到持久 `issue-30/` 目录并与来源 SHA256 核对。最后 typecheck 通过。
+- 最终来源日修订后，材料资格→日周项目与 OAuth MCP 定向 **2/2 PASS（24.11s）**，`WtuXtO` / `mrnkQi`；一般 invalid UTF8 的既有解析问题仍待统一修订，没有通过本票掩盖。所有本票创建的测试 worker/浏览器/私有容器由 fixture finally 关闭；原件 fixture 和安全证据保留，不删除其他容器、Task 或用户数据。
 
 ## 仍开放
 
