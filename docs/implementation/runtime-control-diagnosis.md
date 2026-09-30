@@ -47,9 +47,9 @@ conditions do not resolve the actual full-suite failures.
 4. Task/listener startup timing delays TCP connection. Failures should occur
    before `connect`, with registration/listener timing explaining the gap.
 
-The next diagnostic change is a bounded synchronous terminal-only record
-so an uncaught CLI failure retains its request timing. No control timeout,
-ownership, port registration or capture fence has been changed.
+A bounded synchronous terminal-only diagnostic record was prepared outside
+the final product source so an uncaught CLI failure retains its timing.
+No control timeout, ownership, port registration or capture fence was changed.
 
 ## Silent launch preparation
 
@@ -90,7 +90,52 @@ Task already removed. All three CLI actions and 40 authenticated queries
 passed without additional pressure or timeout. Evidence is
 `%TEMP%/skynet-test-ySaGHQ/hidden-current-session-control-probe.json`.
 This is a different workload from eight concurrent fresh Task installs.
-The next proposed timeout fix isolates synchronous child creation in a
-Worker thread which retains the actual ChildProcess; the main thread keeps
-the authenticated control listener and capture fences. That change has
-not yet been implemented or validated.
+
+## Control worker process isolation
+
+`worker-process.ts` and `worker-process-thread.ts` now move actual child
+creation, IPC, stderr and the owned ChildProcess into one Worker thread.
+The supervisor retains its authenticated OS lease, instance, selected
+runtime and capture fences. During child creation it can answer status and
+accept stop. A stop queued before the child exists is applied after its
+normal handshake; the existing 10-second fallback kills only the actual
+ChildProcess created in that thread. Thread completion waits for owned
+resources before the supervisor releases its lease. Crash exit, selected
+payload restart and bounded backoff retain their previous behavior.
+
+The maintained regression uses a trusted private `NODE_OPTIONS --require`
+shim to wrap the actual `child_process.spawn` call for `background-worker`.
+It synchronously blocks that call for 2200 ms, longer than the unchanged
+1500 ms control timeout. It does not delay child bootstrap and introduces
+no production environment switch, HTTP privilege or worker-entry override.
+The pre-fix main-thread implementation was **RED** in 2.61 seconds with the
+same `Local runtime is unresponsive` error. After isolation, real HTTP
+status and stop must both finish before the shim's spawn-return marker,
+and the actual pending-stop child must exit zero without a restart.
+
+Final focused verification:
+
+```powershell
+npm run typecheck
+npm run build
+node --test dist/tests/control-spawn.test.js dist/tests/runtime-control.test.js dist/tests/autostart-registration.test.js
+git diff --check
+```
+
+All **12/12 pass**, 4.15 seconds. Fixture
+`%TEMP%/skynet-control-spawn-9eULd3/control-spawn-evidence.json` records status
+**6.82 ms**, stop **1.93 ms**, both acknowledged during the 2200 ms synchronous
+spawn block. The control registration remains byte-identical; actual child
+exit is zero and both role listeners release. Fixture
+`%TEMP%/skynet-control-spawn-MNCe0A/spawn-events.jsonl` records synthetic exit
+17 followed by the actual selected CLI worker, two owned child exits and
+normal final exit zero. Existing timeout/500/503/non-HTTP fail-closed
+regressions and all five Task migration orchestration cases pass.
+
+Temporary diagnostic sources and compiled artifacts are retained only in
+`%TEMP%/skynet-v1-implementation/runtime-control-temporary-instrumentation`;
+the final product contains no DEBUG hooks. No real Task installation or
+full Windows suite was run after the silent action change. Next: observe
+one controlled Windows Task launch for window behavior before rerunning
+the original full-suite workload; keep previous failure records until that
+condition passes.
