@@ -182,6 +182,10 @@ test(`public short-session analysis through independent native Claude CLI (${lin
     await writeFile(join(root, 'analysis-public-evidence.json'), JSON.stringify({ run, platform: linux ? 'Linux UID1000 image' : process.platform, workerLogs, workerError,
       nativeRequests: fixture.requests, mcpResult: same, failure, timedOut, sentinelAbsent: true, provider: 'synthetic loopback; no paid request' }, null, 2));
     console.log(`Public native analysis evidence: ${root}`);
+  } catch (error) {
+    await writeFile(join(root,'native-analysis-failure.json'),JSON.stringify({name:(error as Error).name,message:(error as Error).message,
+      stack:(error as Error).stack,code:(error as {code?:string}).code,detail:(error as {detail?:string}).detail,workerLogs,workerError},null,2));
+    console.error(`Native failure retained: ${root}`); throw error;
   } finally {
     await client?.close(); await browser?.close(); await stop(child);
     if (linux) { await command('docker', ['rm', '--force', workerName, fixtureName], process.env).catch(() => undefined); }

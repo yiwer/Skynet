@@ -8,6 +8,7 @@ import type { AnalysisRun } from '../../packages/contracts/analysis.js';
 export async function analysisTransaction<T>(db: Database, operation: (client: PoolClient) => Promise<T>): Promise<T> {
   const client = await db.connect();
   try { await client.query('BEGIN'); await client.query('SELECT pg_advisory_xact_lock(7402123)');
+    await client.query("SELECT set_config('skynet.analysis_protocol','2',true)");
     const value = await operation(client); await client.query('COMMIT'); return value;
   } catch (error) { await client.query('ROLLBACK'); throw error; } finally { client.release(); }
 }
@@ -25,6 +26,7 @@ export async function migrateQueue(client: PoolClient) {
     ALTER TABLE analysis_jobs ADD COLUMN IF NOT EXISTS lease_until timestamptz;
     ALTER TABLE analysis_jobs ADD COLUMN IF NOT EXISTS worker_id text;
     ALTER TABLE analysis_jobs ADD COLUMN IF NOT EXISTS trigger text NOT NULL DEFAULT 'manual';
+    ALTER TABLE analysis_targets ADD COLUMN IF NOT EXISTS parser_version text NOT NULL DEFAULT 'unknown';
     CREATE TABLE IF NOT EXISTS analysis_attempts(id uuid PRIMARY KEY,job_id uuid NOT NULL REFERENCES analysis_jobs(id),
       number integer NOT NULL,run_token uuid NOT NULL UNIQUE,worker_id text NOT NULL,state text NOT NULL,
       reserved_cny numeric NOT NULL,requests integer,usage jsonb,error text,started_at timestamptz NOT NULL DEFAULT now(),finished_at timestamptz,
@@ -36,6 +38,18 @@ export async function migrateQueue(client: PoolClient) {
     await client.query(`ALTER TABLE ${table} ALTER COLUMN actor_id DROP NOT NULL;
       ALTER TABLE ${table} ADD COLUMN IF NOT EXISTS actor_kind text NOT NULL DEFAULT 'user'`);
   }
+  await client.query(`UPDATE analysis_jobs SET state='superseded',error='旧队列协议的未运行任务已过期；请以当前版本发起',finished_at=now()
+    WHERE target_id IS NULL AND state IN ('queued','retry-wait');
+    CREATE OR REPLACE FUNCTION guard_analysis_protocol() RETURNS trigger LANGUAGE plpgsql AS $$
+    BEGIN
+      IF OLD.target_id IS NOT NULL AND (NEW.state IS DISTINCT FROM OLD.state OR NEW.run_token IS DISTINCT FROM OLD.run_token
+        OR NEW.attempts IS DISTINCT FROM OLD.attempts) AND COALESCE(current_setting('skynet.analysis_protocol',true),'')<>'2' THEN
+        RAISE EXCEPTION 'Analysis queue protocol mismatch; current jobs unchanged';
+      END IF;
+      RETURN NEW;
+    END $$;
+    DROP TRIGGER IF EXISTS analysis_protocol_guard ON analysis_jobs;
+    CREATE TRIGGER analysis_protocol_guard BEFORE UPDATE ON analysis_jobs FOR EACH ROW EXECUTE FUNCTION guard_analysis_protocol();`);
 }
 
 // A read also reconciles expired leases: no missing worker leaves running status forever.
@@ -67,7 +81,7 @@ export const analysisProjection = `j.id,j.snapshot_id AS "snapshotId",j.state,j.
   j.next_attempt_at AS "nextAttemptAt",j.lease_until AS "leaseUntil",j.deadline,j.target_generation AS generation,j.trigger,
   j.actor_id AS "actorId",j.actor_kind AS "actorKind",
   COALESCE((SELECT applicable_job_id=j.id AND desired_snapshot_id=j.snapshot_id AND config_hash=j.config->>'configurationHash'
-    AND generation=j.target_generation FROM analysis_targets WHERE id=j.target_id),false) AS applicable,
+    AND generation=j.target_generation AND parser_version=j.input->>'parserVersion' FROM analysis_targets WHERE id=j.target_id),false) AS applicable,
   (SELECT desired_snapshot_id FROM analysis_targets WHERE id=j.target_id) AS "desiredSnapshotId",
   (SELECT error FROM analysis_targets WHERE id=j.target_id) AS "targetError",
   COALESCE((SELECT jsonb_agg(jsonb_build_object('number',number,'state',state,'reservedCny',reserved_cny,'requests',requests,'usage',usage,'error',error,
@@ -118,9 +132,9 @@ export function analysisQueue(db: Database, config: AnalysisConfig, workerId: st
   async function finish(job: ClaimedAnalysis, result: AnalysisRun['result'], failure?: string, failureRequests?: number) {
     return analysisTransaction(db, async client => {
       await sweepQueue(client);
-      const owned = await client.query("SELECT id,EXISTS(SELECT 1 FROM analysis_targets t WHERE t.id=j.target_id AND t.generation=j.target_generation) AS current FROM analysis_jobs j WHERE id=$1 AND run_token=$2 AND worker_id=$3 AND state='running' AND lease_until>now() AND deadline>now() FOR UPDATE", [job.id, job.run_token, workerId]);
+      const owned = await client.query("SELECT id,attempts,max_attempts,EXISTS(SELECT 1 FROM analysis_targets t WHERE t.id=j.target_id AND t.generation=j.target_generation) AS current FROM analysis_jobs j WHERE id=$1 AND run_token=$2 AND worker_id=$3 AND state='running' AND lease_until>now() AND deadline>now() FOR UPDATE", [job.id, job.run_token, workerId]);
       if (!owned.rows.length) return false;
-      const retry = !result && job.attempts < config.maxAttempts && owned.rows[0].current;
+      const retry = !result && owned.rows[0].attempts < owned.rows[0].max_attempts && owned.rows[0].current;
       await client.query(`UPDATE analysis_attempts SET state=$2,requests=COALESCE(requests,$3),usage=$4,error=$5,finished_at=now() WHERE run_token=$1 AND state='running'`,
         [job.run_token, result ? 'succeeded' : 'failed', result?.usage.requests ?? failureRequests ?? null, result?.usage ?? null, failure ?? null]);
       await client.query(`UPDATE analysis_jobs SET state=$3,result=$4,error=$5,finished_at=now(),lease_until=NULL,worker_id=NULL,run_token=NULL,
