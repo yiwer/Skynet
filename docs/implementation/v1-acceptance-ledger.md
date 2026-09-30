@@ -134,3 +134,7 @@ clean `519d59f` 无冲突合入 `eb69a46`，保留Linux49/49与运行时/资格/
 `c5d23c5` 无冲突合入 `6d828bf`，运行时/资格/覆盖统计/周项目已有行为保留。主线自身typecheck/build/diffcheck及审计/late/完整更正/资格/source统计/覆盖/MCP/work **12/12 PASS（56.26s）**，`nUxLNy/bjemQB/6G2Ijm/jur5EB/rTGOXo/pl3vSp/k1YWQn/AkjTV0`。已建空日/周/项目首条迟到活动无需再POST，旧固定版本与原件不改；旧分析晚完成非适用。六份safe JSON与hash摘要/日志保存在 durable `main-30/`、`main-30-integration.log`、`main-30-evidence-summary.json`及覆盖截图目录 `coverage-a1e041b4-99fa-4822-9c9c-6b2e5174429b/`。
 
 最终实际Claude loopback1/1（54.37s）明确来自支线 `xUlWpY`，未在本次复跑；旧Linux53/53早于#30。没有Task/maintenance/fullWindows，历史RED、通用UTF8缺口及G0–G4仍保留。#32完整一致灾备与公开恢复尚未实现，工具smoke不替代AC-21；正式运营/质量/价格与签收仍待实际证据。
+
+## 迟到数据与人工更正主线 Linux CI（2026-09-30）
+
+`68ee347` 的 [Linux CI](https://github.com/yiwer/Skynet/actions/runs/36697980515/job/109830431425) 已通过类型检查、构建与 **56/56（146.80秒，0 fail / 0 cancelled）**，包含 #30 审计、首次迟到活动及完整更正流程。日志保存 `F:/GenCode/Skynet-evidence/v1-2026-09-30/ci-68ee347-linux.log`。主线本地12/12与支线实际Claude loopback54.37秒分别保留来源；未复跑Task、maintenance或完整Windows。#32在独立树实施，G0–G4与历史失败继续开放。
