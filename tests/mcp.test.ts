@@ -86,13 +86,14 @@ test('HTTPS OAuth consent, per-request revocation, MCP/Web evidence and complete
     client = new Client({ name: 'public-product-test', version: '1' });
     await client.connect(new StreamableHTTPClientTransport(new URL(resource), { fetch: sandbox.fetchTls,
       requestInit: { headers: { Authorization: `Bearer ${tokens.access_token}` } } }));
-    assert.equal((await client.listTools()).tools.length, 11);
+    assert.equal((await client.listTools()).tools.length, 12);
     async function tool(name: string, args: Record<string, unknown>) {
       const result = await client!.callTool({ name, arguments: args });
       assert.notEqual(result.isError, true, JSON.stringify(result)); assert.ok(Buffer.byteLength(JSON.stringify(result)) <= 96 * 1024);
       return JSON.parse((result.content as { text: string }[])[0]!.text);
     }
     assert.deepEqual(await tool('read_activity_statistics', {}), await (await sandbox.api('/api/activity-statistics', reader.readerCredential)).json());
+    assert.deepEqual(await tool('read_analysis_operations', {}), await (await sandbox.api('/api/analysis/operations', reader.readerCredential)).json());
       const sessions = await tool('list_sessions', { limit: 1 }); assert.equal(sessions.sessions[0].id, commit.snapshotId);
       const coverage = await tool('read_capture_status', { snapshotId: commit.snapshotId }); assert.equal(coverage.faults[0].id, captureFault.id);
       assert.deepEqual(coverage, await (await sandbox.api(`/api/snapshots/${commit.snapshotId}/capture-status`, reader.readerCredential)).json());
