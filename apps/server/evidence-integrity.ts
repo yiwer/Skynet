@@ -7,6 +7,14 @@ import {readEvidence} from './evidence.js';
 import {activityFor} from '../../packages/activity.js';
 type Query=Pick<Database,'query'>|Pick<pg.PoolClient,'query'>;
 export const integrityVersion='original-utf8-1';
+/** A corrupt primary with no readable event has no business source date. Keep
+ * its current native scope unknown instead of assigning it a fabricated date
+ * or silently declaring every employee/day source input complete. A later
+ * legal current primary removes the current gap; old raw/diagnostics stay. */
+export const unscopedRawGapsSql=(employee:string)=>`(SELECT jsonb_build_object('count',count(*)::text,'revision',COALESCE(MAX(g.revision),0)::text) FROM
+  (SELECT DISTINCT ON(s.device_id,s.source,s.source_session_id) s.* FROM snapshots s JOIN devices d ON d.id=s.device_id
+    WHERE d.employee_id=${employee} ORDER BY s.device_id,s.source,s.source_session_id,s.committed_at DESC,s.id DESC)s
+  JOIN qualification_reconcile_gaps g ON g.snapshot_id=s.id WHERE s.manifest->'restoredFrom' IS NULL AND g.reason LIKE '%UTF-8%')`;
 
 /** Append exact-original validity proofs; never change the immutable ledger.
  * Pending legacy rows cannot contribute current counts until verified. */

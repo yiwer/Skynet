@@ -129,6 +129,7 @@ export async function migrate(db: Database) {
     CREATE TABLE IF NOT EXISTS qualification_reconcile_gaps (
       snapshot_id uuid PRIMARY KEY REFERENCES snapshots(id),reason text NOT NULL
     );
+    ALTER TABLE qualification_reconcile_gaps ADD COLUMN IF NOT EXISTS revision bigserial;
     CREATE OR REPLACE VIEW effective_event_origins AS SELECT o.event_id,o.snapshot_id,o.line,o.block,o.employee_id,o.device_id,o.project,
         o.source,o.source_session_id,o.role,o.timestamp,o.source_date,COALESCE(c.context,o.context) AS context,o.material_id,o.text_offset,
         o.context AS base_context,COALESCE(c.revision,0) AS qualification_revision,c.proof_snapshot_id,c.proof_line,c.proof_block,c.enrolled_at AS proof_enrolled_at

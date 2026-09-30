@@ -18,6 +18,7 @@ import { reportService } from '../apps/server/reports.js';
 import { analysisService } from '../apps/server/analysis.js';
 import { archiveQuery } from '../apps/server/archive-query.js';
 import { RawStore } from '../apps/server/raw-store.js';
+import {workStatisticsService} from '../apps/server/work-statistics.js';
 
 const hash = (value: Buffer | string) => createHash('sha256').update(value).digest('hex');
 const json = (value: unknown): RequestInit => ({ method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(value) });
@@ -65,7 +66,8 @@ test('public daily report automatically analyzes day events through native CLI, 
     // This proves the timer policy, not a real next-morning wall-clock observation.
     const scheduleDb = connect(sandbox.env.DATABASE_URL!);
     try {
-      const reports = reportService(scheduleDb, analysisService(scheduleDb, archiveQuery(scheduleDb, new RawStore(sandbox.env.RAW_DIRECTORY!))));
+      const raw=new RawStore(sandbox.env.RAW_DIRECTORY!);
+      const reports = reportService(scheduleDb, analysisService(scheduleDb, archiveQuery(scheduleDb,raw)),workStatisticsService(scheduleDb,raw));
       await reports.tick(new Date(midnight + 86400_000 + 9 * 3600_000));
     } finally { await scheduleDb.end(); }
     const path = `/api/daily-reports/${alpha.employeeId}/${date}`;
@@ -96,7 +98,7 @@ test('public daily report automatically analyzes day events through native CLI, 
     report = { ...report, items: [...report.items, ...secondPage.items], nextOffset: null };
     assert.equal(report.statistics!.records, 8); assert.equal(report.statistics!.userTurns, 8); assert.equal(report.statistics!.toolCalls, 0);
     assert.equal(report.statistics!.historicalRecords, 0, 'old source-day records never become current historical counts');
-    assert.equal(report.statistics!.tokens, null); assert.equal(report.statistics!.humanWorkHours, null);
+    assert.equal(report.statistics!.tokens!.total, null);assert.ok(report.coverage!.workStatistics); assert.equal(report.statistics!.humanWorkHours, null);
     const archiveCounts = (await (await sandbox.api('/api/activity-statistics', beta.readerCredential)).json()).rows.find((row: any) => row.employeeId === alpha.employeeId && row.date === date);
     assert.equal(report.statistics!.records, archiveCounts.activityRecords); assert.equal(report.statistics!.userTurns, archiveCounts.activityUserTurns);
     assert.equal(report.statistics!.toolCalls, archiveCounts.activityToolCalls);
@@ -151,4 +153,3 @@ test('public daily report automatically analyzes day events through native CLI, 
     if (fixture.server.listening) await new Promise<void>(resolve => fixture.server.close(() => resolve())); await sandbox.close();
   }
 });
-

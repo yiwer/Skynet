@@ -140,7 +140,10 @@ export function workViewService(db: Database, daily: ReportService, clock: () =>
         refs.push({ employeeId: day.employeeId, employee: day.employee, date: day.date, state: staleQualification ? 'stale-qualification' : staleInput?'stale-input':day.state, revision: day.revision, version: day.version,
           dailyPath: dailyPath(day.employeeId, day.date, day.revision), originalEventHash: day.coverage?.originalEventHash ?? null,
           originalEventCount: day.coverage?.originalEventCount ?? null, qualificationRevision: day.coverage?.qualificationRevision ?? null,
-          expectedQualificationRevision: pair.qualification_revision, eligibleInputsComplete: !staleQualification && !staleInput && !!day.coverage?.eligibleInputsComplete });
+          expectedQualificationRevision: pair.qualification_revision, eligibleInputsComplete: !staleQualification && !staleInput && !!day.coverage?.eligibleInputsComplete,
+          ...(selection.kind==='weekly'&&day.coverage?.workStatistics?{workStatistics:day.coverage.workStatistics,
+            statistics:{files:day.statistics?.files??null,tokens:day.statistics?.tokens?(({definition:_definition,usageRecords:_records,unknownRecords:_unknown,...tokens})=>tokens)(day.statistics.tokens):null,
+              activityIntervalCount:day.statistics?.activityIntervals?.length??null,sourceInputsComplete:day.statistics?.sourceInputsComplete??false}}:{}) });
       }
       // Counts use only these frozen daily payloads, never the latest live ledger.
       const statisticsKnown = days.length > 0 && days.every(day => selection.kind === 'weekly' ? !!day.statistics : !!day.coverage?.projectStatisticsComplete);

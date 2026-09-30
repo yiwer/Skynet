@@ -1,5 +1,11 @@
 import { z } from 'zod';
 import type { AnalysisItem } from './analysis.js';
+import type {WorkStatistics,RecordedTokens} from './coverage.js';
+
+export type FrozenStatisticReference={employeeId:string;date:string;revision:number;version:string};
+export type FrozenStatisticSummary={files:Pick<WorkStatistics['files'],'observedCount'|'complete'|'unsupportedToolCalls'>|null;
+  tokens:Pick<RecordedTokens,'total'|'input'|'output'|'cachedInput'|'cacheWriteInput'|'reasoningOutput'>|null;
+  activityIntervalCount:number|null;sourceInputsComplete:boolean};
 
 export const reportDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine(value => {
   const date = new Date(`${value}T00:00:00+08:00`);
@@ -28,7 +34,8 @@ export type DailyReport = { employeeId: string; employee: string; date: string; 
   corrections?: ReportCorrection[];
   correctionCount?: number;
   statistics: { records: number; userTurns: number; toolCalls: number; historicalRecords: number; unknownRecords: number;
-    files: null; tokens: null; activityIntervals: null; humanWorkHours: null; definition: string } | null;
+    files: Pick<WorkStatistics['files'],'observedCount'|'complete'|'unsupportedToolCalls'>|null; tokens: RecordedTokens|null;
+    activityIntervals: WorkStatistics['intervals']|null; sourceInputsComplete?:boolean; humanWorkHours: null; definition: string } | null;
   coverage: { messages: string[]; qualificationRevision?: string;sourceRevision?:string; inputs: { snapshotId: string; hash: string; analysisId: string | null; state: string;
       applicable?: boolean; generation?: number; configurationHash?: string; parserVersion?: string;
       attributionRevision?: string;
@@ -37,5 +44,6 @@ export type DailyReport = { employeeId: string; employee: string; date: string; 
     originalEventIdsSample: string[]; originalEventCount: number; originalEventHash: string; originalEventHashComplete: boolean;
     projectStatistics?: { project: string; records: number; userTurns: number; toolCalls: number }[];
     projectStatisticsComplete?: boolean;
+    workStatistics?:FrozenStatisticReference;
     eligibleInputsComplete: boolean; dailyDeviceCoverage: 'unknown'; fixture: boolean } | null;
 };

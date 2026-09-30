@@ -189,7 +189,7 @@ export async function createApp(options: { db: Database; rawDirectory: string; w
   app.get('/api/me', { onRequest: readerGuard }, async request => reader(request.headers.authorization));
   const archive = archiveQuery(db, raw);
   const analysis = analysisService(db, archive);
-  const reports = reportService(db, analysis, options.reportClock);
+  const reports = reportService(db, analysis,workStatistics, options.reportClock);
   const workViews = workViewService(db, reports, options.reportClock);
   const reportQuery = z.object({ offset: z.coerce.number().int().min(0).max(100000).default(0),
     revision: z.coerce.number().int().min(1).optional() }).strict();

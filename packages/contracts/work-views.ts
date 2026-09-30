@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { beijingDate, reportDate, type DailyItem, type DailyReport,type ReportCorrection } from './reports.js';
+import type {FrozenStatisticReference,FrozenStatisticSummary} from './reports.js';
 
 export function addDays(date: string, days: number) { return beijingDate(new Date(new Date(`${date}T00:00:00+08:00`).getTime() + days * 86400_000)); }
 export function monday(date: string) { const day = new Date(`${date}T00:00:00Z`).getUTCDay(); return addDays(date, -(day + 6) % 7); }
@@ -23,7 +24,8 @@ export type WorkView = WorkViewSelection & { subjectLabel: string; timeZone: 'As
   statistics: { records: number | null; userTurns: number | null; toolCalls: number | null; complete: boolean; files: null; tokens: null; activityIntervals: null; humanWorkHours: null; definition: string } | null;
   coverage: { messages: string[]; fixture: boolean; complete: boolean; omittedItems: number; boundedInputs: boolean;
     days: { employeeId: string; employee: string; date: string; state: string; revision: number; version: string | null; dailyPath: string;
-      originalEventHash: string | null; originalEventCount: number | null; qualificationRevision: string | null; expectedQualificationRevision: string; eligibleInputsComplete: boolean }[] } | null };
+      originalEventHash: string | null; originalEventCount: number | null; qualificationRevision: string | null; expectedQualificationRevision: string; eligibleInputsComplete: boolean;
+      workStatistics?:FrozenStatisticReference;statistics?:FrozenStatisticSummary }[] } | null };
 export function dailyPath(employeeId: string, date: string, revision: number) {
   return `#daily?${new URLSearchParams({ employeeId, date, ...(revision ? { revision: String(revision) } : {}) })}`;
 }

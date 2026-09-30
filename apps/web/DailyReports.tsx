@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { analysisLabels, assessmentLabels } from '../../packages/contracts/analysis.js';
 import { beijingDate, previousDate, type DailyReport, type DailyItem } from '../../packages/contracts/reports.js';
 import {ReportCorrections} from './ReportCorrections.js';
+import {FrozenStatistics} from './FrozenStatistics.js';
 
 export function DailyReports({ request, currentEmployeeId, onEvidence }: {
   request: (path: string, signal?: AbortSignal, method?: 'POST',body?:unknown) => Promise<Response>;
@@ -76,7 +77,10 @@ export function DailyReports({ request, currentEmployeeId, onEvidence }: {
       {report.coverage?.fixture && <p className="notice">合成演示，非正式验收；没有调用真实千问。</p>}
       {report.statistics && <><dl><div><dt>已确认记录</dt><dd>{report.statistics.records}</dd></div><div><dt>用户轮次</dt><dd>{report.statistics.userTurns}</dd></div>
         <div><dt>工具调用</dt><dd>{report.statistics.toolCalls}</dd></div><div><dt>历史 / 关联上下文</dt><dd>{report.statistics.historicalRecords}</dd></div><div><dt>时间或接入边界未知</dt><dd>{report.statistics.unknownRecords}</dd></div></dl>
-        <p>文件数、原生 token、活动区间、人工工时：未知。</p><p className="muted">{report.statistics.definition}</p></>}
+        <dl><div><dt>文件路径观测</dt><dd>{report.statistics.files?.observedCount??'未知'}{report.statistics.files&&!report.statistics.files.complete?' · 不完整':''}</dd></div>
+          <div><dt>来源 Token 总量</dt><dd>{report.statistics.tokens?.total??'未知'}</dd></div><div><dt>活动时间段</dt><dd>{report.statistics.activityIntervals?`${report.statistics.activityIntervals.length} 段`:'未知'}</dd></div></dl>
+        <p>人工工时未知；文件为来源路径观测，Token 为来源记录量，区间是已记录活动点。</p><p className="muted">{report.statistics.definition}</p></>}
+      {report.coverage?.workStatistics?<FrozenStatistics key={report.coverage.workStatistics.version} reference={report.coverage.workStatistics} request={request} onEvidence={onEvidence}/>:report.version&&<p>旧版未绑定固定统计；保留该版本的未知值。</p>}
       {report.coverage?.messages.map(message => <p className="notice" key={message}>{message}</p>)}
       <ReportCorrections report={report} fixed={!!revision} request={request} onChanged={value=>{setReport(value);setRefresh(current=>current+1);}} />
       {[...groups].map(([key, items]) => <section key={key} aria-label={`${items[0]!.project} · ${items[0]!.theme}`}><h3>{items[0]!.project || '未归类项目'} · {items[0]!.theme}</h3>

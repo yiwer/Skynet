@@ -140,7 +140,10 @@ export async function assignOrigins(q: Query, raw: RawStore, record: Record, bac
       ON CONFLICT DO NOTHING`, [JSON.stringify(page.filter(item => item.occurrenceHash).map(({ origin, occurrenceHash }) => ({ occurrence_hash: occurrenceHash, event_id: origin.eventId }))),
     record.device_id, manifest.source, manifest.sourceSessionId]);
   }
-  await verifyOriginIntegrity(q,raw,origins.filter(item=>item.origin.snapshotId===record.id).map(item=>item.origin.eventId));
+  // A first material restoration may create new origins anchored in its parent
+  // descriptor, not this primary. Verify every mapped original; committed
+  // proofs are skipped before any raw read/hash.
+  await verifyOriginIntegrity(q,raw,origins.map(item=>item.origin.eventId));
   for (const mapping of materialMappings) {
     await q.query(`INSERT INTO material_qualifications(snapshot_id,material_id,device_id,source,source_session_id,hash,byte_length)
       VALUES($1,$2,$3,$4,$5,$6,$7) ON CONFLICT DO NOTHING`, [mapping.snapshotId, mapping.materialId, mapping.deviceId,
