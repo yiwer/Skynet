@@ -1,0 +1,20 @@
+FROM node:24-bookworm-slim AS build
+WORKDIR /app
+COPY package.json package-lock.json ./
+RUN npm ci
+COPY tsconfig.json vite.config.ts ./
+COPY packages ./packages
+COPY apps ./apps
+RUN npm run build && npm prune --omit=dev
+
+FROM node:24-bookworm-slim
+ENV NODE_ENV=production SKYNET_ANALYSIS_CONFIG=/run/analysis/config.json
+WORKDIR /app
+COPY --from=build --chown=node:node /app/package.json ./
+COPY --from=build --chown=node:node /app/node_modules ./node_modules
+COPY --from=build --chown=node:node /app/dist ./dist
+# Exact native CLI version is also checked by the worker at startup.
+RUN npm install --prefix /opt/claude --save-exact --no-audit --no-fund @anthropic-ai/claude-code@2.1.281 \
+  && mkdir -p /data/analysis && chown node:node /data/analysis
+USER node
+CMD ["node", "dist/apps/analysis/worker.js"]

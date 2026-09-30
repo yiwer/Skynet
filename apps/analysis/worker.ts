@@ -51,7 +51,9 @@ try {
       const items = validateAnalysis(job.input, result.output);
       await db.query(`UPDATE analysis_jobs SET state='succeeded',result=$3,finished_at=now() WHERE id=$1 AND run_token=$2 AND state='running' AND deadline > now()`,
         [job.id, job.run_token, { items, usage: result.usage, fixture: config.mode === 'fixture' }]);
-    } catch {
+    } catch (error) {
+      // Only our fixed diagnostic codes are logged; CLI output, keys and employee input stay out.
+      if (error instanceof Error && /^native-runtime-or-provider-failed:[a-zA-Z0-9.,:-]+$/.test(error.message)) console.error(error.message);
       await db.query(`UPDATE analysis_jobs SET state='failed',error='分析失败：运行时、模型、资源限额或原句证据校验未通过；没有发布结论。用量未知，预算预留保留。',finished_at=now()
         WHERE id=$1 AND run_token=$2 AND state='running'`, [job.id, job.run_token]);
     }

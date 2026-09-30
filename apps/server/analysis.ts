@@ -1,11 +1,15 @@
 import { randomUUID } from 'node:crypto';
-import type { Database } from './database.js';
+import { digest, type Database } from './database.js';
 import type { ArchiveQuery } from './archive-query.js';
 import { HttpError } from './identities.js';
 import { readEvidence } from './evidence.js';
 import { analysisOutputSchema, type AnalysisItem, type AnalysisRun } from '../../packages/contracts/analysis.js';
-import { evidenceLink } from '../../packages/contracts/search.js';
+import { evidenceLink, type EvidenceLocation } from '../../packages/contracts/search.js';
 import type { EvidenceLine } from '../../packages/contracts/archive.js';
+import type { ActivityEvent } from '../../packages/activity.js';
+import { activityFor } from '../../packages/activity.js';
+import { eventOrigins } from './provenance.js';
+import type { EventOrigin } from '../../packages/contracts/provenance.js';
 
 export async function migrateAnalysis(db: Database) {
   const client = await db.connect();
@@ -21,7 +25,7 @@ export async function migrateAnalysis(db: Database) {
     COMMIT;`);
   } catch (error) { await client.query('ROLLBACK'); throw error; } finally { client.release(); }
 }
-export type AnalysisInput = AnalysisRun['input'] & { events: EvidenceLine[] };
+export type AnalysisInput = AnalysisRun['input'] & { events: (EvidenceLine & Partial<Pick<ActivityEvent, 'origin' | 'context' | 'sourceDate'>>)[] };
 const runProjection = `id,snapshot_id AS "snapshotId",state,config,input - 'events' AS input,result,error,
   created_at AS "createdAt",started_at AS "startedAt",finished_at AS "finishedAt"`;
 export function analysisService(db: Database, archive: ArchiveQuery) {
@@ -39,20 +43,32 @@ export function analysisService(db: Database, archive: ArchiveQuery) {
   async function list(snapshotId: string, offset = 0) {
     await archive.snapshot(snapshotId);
     const result = await db.query(`SELECT ${runProjection} FROM analysis_jobs WHERE snapshot_id=$1 ORDER BY created_at DESC,id DESC LIMIT 11 OFFSET $2`, [snapshotId, offset]);
-    return { runs: result.rows.slice(0, 10), nextOffset: result.rows.length > 10 ? offset + 10 : null, availability: await availability() };
+    const runs: AnalysisRun[] = []; let bytes = 2048;
+    for (const run of result.rows.slice(0, 10)) {
+      const size = Buffer.byteLength(JSON.stringify(run));
+      if (runs.length && bytes + size > 80 * 1024) break;
+      runs.push(run); bytes += size;
+    }
+    return { runs, nextOffset: result.rows.length > runs.length ? offset + runs.length : null, availability: await availability() };
   }
   async function request(snapshotId: string, actorId: string) {
     const record = await archive.snapshot(snapshotId); const config = await worker();
     if (!config) throw new HttpError(503, '分析未配置或运行时离线；原件不受影响');
     if (record.manifest.byteLength > config.maxInputBytes) throw new HttpError(413, '该原件超过短会话分析限额；尚未分析，请使用后续长会话处理');
-    const { bytes } = await archive.exported(snapshotId, 'raw'); const parsed = readEvidence(bytes, record.source);
+    const { bytes } = await archive.exported(snapshotId, 'raw');
+    if (digest(bytes) !== record.hash || bytes.length !== record.manifest.byteLength) throw new HttpError(409, '分析输入原件校验失败；没有调用模型');
+    const parsed = readEvidence(bytes, record.source);
+    const origins = new Map<string, EventOrigin>((await eventOrigins(db, snapshotId)).map(origin => [`${origin.line}/${origin.block}`,
+      { ...origin, line: origin.originLine, block: origin.originBlock }]));
+    const attributed = activityFor(parsed.events, record.manifest.enrolledAt, undefined, origins);
     const input: AnalysisInput = { snapshotId, hash: record.hash, parserVersion: parsed.parserVersion, source: record.source,
-      sourceVersion: record.manifest.sourceVersion, eventCount: parsed.events.length, events: parsed.events,
+      sourceVersion: record.manifest.sourceVersion, eventCount: parsed.events.length, events: attributed.events,
       coverage: { unrecognizedLines: parsed.unrecognizedLines, partialLine: parsed.partialLine,
         excludedMaterials: record.manifest.capture?.materials.length ?? 0, captureGaps: record.manifest.capture?.gaps ?? [],
         scope: '当前不可变主原件的全部已解析事件；未知行、未闭合末行及关联材料未进入本次分析；这不表示这些范围没有活动。' } };
     if (!input.eventCount) throw new HttpError(422, '原件没有可分析的已解析事件；仍可下载完整原件');
     if (Buffer.byteLength(JSON.stringify(input)) > config.maxInputBytes) throw new HttpError(413, '规范化输入超过短会话限额；尚未分析');
+    if (Buffer.byteLength(JSON.stringify({ ...input, events: undefined })) > 16 * 1024) throw new HttpError(413, '覆盖元数据超过短会话限额；尚未分析，完整清单仍可导出');
     const client = await db.connect();
     try {
       await client.query('BEGIN'); await client.query('SELECT pg_advisory_xact_lock(7402123)');
@@ -78,14 +94,23 @@ export type AnalysisService = ReturnType<typeof analysisService>;
 export function validateAnalysis(input: AnalysisInput, value: unknown): AnalysisItem[] {
   const output = analysisOutputSchema.parse(value);
   if (!output.items.length) throw new Error('Empty analysis is not a successful extraction');
-  return output.items.map(item => {
+  const items = output.items.map(item => {
     if (item.assessment !== 'insufficient' && !item.citations.length) throw new Error('Uncited conclusion');
     const citations = item.citations.map(citation => {
       const event = input.events[citation.event];
       if (!event || event.text.slice(citation.textOffset, citation.textOffset + citation.quote.length) !== citation.quote) throw new Error('Citation does not match original evidence');
-      const location = { kind: 'event' as const, offset: citation.event, textOffset: citation.textOffset,
+      const snapshotId = event.origin?.snapshotId ?? input.snapshotId;
+      const inputLocation = { kind: 'event' as const, offset: citation.event, textOffset: citation.textOffset,
         line: event.line, block: event.block, parserVersion: input.parserVersion };
-      return { ...citation, snapshotId: input.snapshotId, role: event.role, location, webPath: evidenceLink(input.snapshotId, location) };
+      // Material/raw origin anchors are in the original artifact's coordinate system. A
+      // semantic quote offset cannot be added to raw JSON offsets across escaped text.
+      const origin = event.origin as (EventOrigin & { materialId?: string; textOffset?: number; location?: EvidenceLocation }) | undefined;
+      const location: EvidenceLocation = origin?.location ?? (origin?.materialId
+        ? { kind: 'material', materialId: origin.materialId, textOffset: origin.textOffset ?? 0 }
+        : { kind: 'event' as const, offset: citation.event, textOffset: citation.textOffset,
+        line: event.origin?.line ?? event.line, block: event.block === undefined ? undefined : event.origin?.block ?? event.block, parserVersion: input.parserVersion });
+      return { ...citation, snapshotId, role: event.role, origin: event.origin ?? null, context: event.context ?? 'unknown-enrollment',
+        inputSnapshotId: input.snapshotId, inputLocation, location, webPath: evidenceLink(snapshotId, location) };
     });
     let assessment = item.assessment;
     // Citation existence does not prove a generated proposition. Only literal tool output is
@@ -96,4 +121,6 @@ export function validateAnalysis(input: AnalysisInput, value: unknown): Analysis
     if (assessment === 'claimed' && !citations.every(citation => ['user', 'assistant'].includes(citation.role))) assessment = 'inferred';
     return { ...item, assessment, citations, classificationAdjusted: assessment !== item.assessment };
   });
+  if (Buffer.byteLength(JSON.stringify(items)) > 48 * 1024) throw new Error('Analysis result exceeds published size limit');
+  return items;
 }

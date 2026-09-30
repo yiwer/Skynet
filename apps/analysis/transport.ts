@@ -13,13 +13,14 @@ const block = z.union([textBlock,
     is_error: z.boolean().optional(), cache_control: cache.optional() }).strict(),
 ]);
 const schema = z.object({ model: z.string(), max_tokens: z.number().int().positive(), stream: z.literal(true),
+  temperature: z.number().min(0).max(1).optional(),
   messages: z.array(z.object({ role: z.enum(['user', 'assistant']), content: z.union([text, z.array(block).max(256)]) }).strict()).min(1).max(64),
   system: z.array(textBlock).max(32),
   tools: z.array(z.object({ name: z.literal('StructuredOutput'), description: z.string().max(2048), input_schema: z.unknown() }).strict()).length(1),
   metadata: z.object({ user_id: z.string().max(2048) }).strict().optional(),
   context_management: z.object({ edits: z.array(z.object({ type: z.literal('clear_thinking_20251015'), keep: z.literal('all') }).strict()).max(1) }).strict().optional(),
 }).strict();
-const expected = z.toJSONSchema(analysisOutputSchema);
+const expected = z.toJSONSchema(analysisOutputSchema, { target: 'draft-7' });
 function canonical(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(canonical).join(',')}]`;
   if (value && typeof value === 'object') return `{${Object.entries(value).sort(([a], [b]) => a.localeCompare(b)).map(([key, part]) => `${JSON.stringify(key)}:${canonical(part)}`).join(',')}}`;

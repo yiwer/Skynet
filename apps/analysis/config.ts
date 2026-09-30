@@ -1,4 +1,4 @@
-import { readFile } from 'node:fs/promises';
+import { readFile, stat } from 'node:fs/promises';
 import { isAbsolute } from 'node:path';
 import { z } from 'zod';
 import { digest } from '../server/database.js';
@@ -20,7 +20,18 @@ const schema = z.object({
   timeoutSeconds: z.number().int().min(5).max(300).default(90),
 }).strict();
 export type AnalysisConfig = z.infer<typeof schema> & { origin: string; reservationCny: number; configurationHash: string; credentialFingerprint: string | null };
+export function dedicatedPaygKey(value: string) {
+  // Explicit dedicated file only. Current and earlier generic PAYG key formats; never Token Plan or Anthropic credentials.
+  return /^sk-(?:ws-)?[A-Za-z0-9_-]+$/.test(value) && !/^sk-(?:sp|ant)-/.test(value);
+}
+export async function readCredential(config: AnalysisConfig) {
+  if (!config.credentialFile || (await stat(config.credentialFile)).size > 4096) throw new Error('Dedicated credential file required');
+  const bytes = await readFile(config.credentialFile);
+  if (digest(bytes) !== config.credentialFingerprint || !dedicatedPaygKey(bytes.toString('utf8').trim())) throw new Error('Credential changed or invalid');
+  return bytes.toString('utf8').trim();
+}
 export async function readAnalysisConfig(path: string): Promise<AnalysisConfig> {
+  if ((await stat(path)).size > 16384) throw new Error('Analysis configuration exceeds limit');
   const config = schema.parse(JSON.parse(await readFile(path, 'utf8')));
   let origin = QWEN_ORIGIN;
   if (config.mode === 'fixture') {
@@ -32,8 +43,9 @@ export async function readAnalysisConfig(path: string): Promise<AnalysisConfig> 
     || !config.pricingEvidence || !config.pricingVerifiedAt) {
     throw new Error('PAYG requires its own credential, model, current pricing and explicit positive budget');
   }
-  // Each forwarded body includes all native prompt/history. A UTF-8 byte upper bound also
-  // bounds text tokens conservatively; images and other non-text inputs are rejected by the guard.
+  // Reserve from the operator-verified text-token/byte and pricing ceilings, including cache
+  // creation/hidden-output charges. No byte-to-billed-token assumption is certified by fixtures.
+  if (config.mode === 'qwen-payg' && (await stat(config.credentialFile!)).size > 4096) throw new Error('Credential file exceeds limit');
   const credentialFingerprint = config.mode === 'qwen-payg' ? digest(await readFile(config.credentialFile!)) : null;
   const reservationCny = Math.ceil(config.maxRequests * (config.maxRequestBytes * config.inputTokensPerByteUpperBound * config.inputCnyPerMillion
     + config.maxOutputTokens * config.outputCnyPerMillion) / 1_000_000 * 1_000_000) / 1_000_000;
