@@ -41,7 +41,7 @@ test('Codex CLI preserves two projects, native version, tool results and availab
     const alpha = sessions.find((item: any) => item.project === '/synthetic/alpha');
     const detail = await (await fetch(`${origin}/api/snapshots/${alpha.id}`, { headers })).json();
     assert.equal(detail.events.length, 5); assert.equal(detail.unrecognizedLines, 1);
-    assert.equal(detail.parserVersion, 'codex-jsonl-3');
+    assert.equal(detail.parserVersion, 'codex-jsonl-4');
     assert.ok(detail.events.some((item: any) => item.text.includes('export const value = 42;')));
     assert.equal(detail.recovery.desktopUi, 'not-applicable');
     browser = await chromium.launch(); const page = await browser.newPage();

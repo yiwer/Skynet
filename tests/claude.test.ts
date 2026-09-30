@@ -68,7 +68,7 @@ test('Claude CLI native-shaped messages cross the public collector, API and brow
     let detail = await (await request(`/api/snapshots/${sessions[0].id}`)).json();
     assert.equal(detail.manifest.source, 'claude-code-cli');
     assert.equal(detail.manifest.sourceVersion, '2.1.281');
-    assert.equal(detail.parserVersion, 'claude-jsonl-2');
+    assert.equal(detail.parserVersion, 'claude-jsonl-3');
     assert.deepEqual(detail.events.map((e: { role: string }) => e.role), ['user', 'assistant', 'tool request', 'tool result', 'assistant']);
     assert.equal(detail.events.filter((e: { role: string }) => e.role === 'user').length, 1, 'tool results are not human turns');
     assert.equal(detail.unrecognizedLines, 3, 'metadata, unsupported images and malformed lines remain visible gaps');
@@ -76,7 +76,7 @@ test('Claude CLI native-shaped messages cross the public collector, API and brow
     assert.equal(detail.events[1].line, detail.events[2].line, 'multiple blocks keep the original evidence line');
     assert.deepEqual(Buffer.from(await (await request(`/api/snapshots/${sessions[0].id}/raw`)).arrayBuffer()), bytes);
     const readable = await (await request(`/api/snapshots/${sessions[0].id}/readable`)).text();
-    assert.ok(readable.includes('claude-jsonl-2') && readable.includes('合成编辑结果：false → true'));
+    assert.ok(readable.includes('claude-jsonl-3') && readable.includes('合成编辑结果：false → true'));
     assert.ok(readable.includes('{malformed-native-line}'), 'readable export includes unknown original material as text');
     const recovery = await (await request(`/api/snapshots/${sessions[0].id}/recovery`)).json();
     assert.equal(recovery.format, 'skynet-claude-recovery');
