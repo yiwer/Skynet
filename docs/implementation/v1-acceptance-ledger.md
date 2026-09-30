@@ -104,3 +104,9 @@ G0–G4、#21/G2、#22/#24 的真实 PAYG/G3均开放。#23长会话、#28日报
 安装状态观测6324d0a经9f06a49集成；旧Linux27/28以 [focused修订](issue-14-status-observation.md) 的实际失败/完成routing sweep解释为准，保留原失败。`9f06a49` 的 [CI](https://github.com/yiwer/Skynet/actions/runs/36680977269/job/109776132842) 类型检查/构建及29/29通过（111.12秒）。日报5399481经185f6af，长会话803f89b经组合主线0743d4d集成；该组合的 [Linux CI](https://github.com/yiwer/Skynet/actions/runs/36681601424/job/109778040443) 类型检查/构建及36/36通过（119.91秒）。文档冲突保留24当前适用版本、28固定版本与23原范围。主线自身typecheck/build/diffcheck通过，归属/报告等12/12（18.45秒）及组合长范围/报告等11/11（17.86秒）；本次主线实际Claude日报公开链1/1（19.92秒）eJcXIF，处理字段original-utf16-1、raw未知仍partial。没有重跑heavy完整Windows。
 
 23支线最新完整ordinary33项31pass/2fail/0cancel（237.08秒），安装GbzZun与插件j1GGMW均1500ms runtime-control无响应；该完整批次尚不包含日报，不改写为当前主线整套结果。既有recovery23/24及更早取消/失败批次同样保留，源故障继续独立诊断。G1/G2/G3及全部门槛仍开放。材料先作历史上下文后在原设备取得正常独立资格时的活动分类已交独立修订；冻结事件归属不被日报擅自重解释，G2不因计数/引用测试通过而签收。
+
+## 后台控制focused修订集成
+
+`b93ffeb` 经 `92e3711` 无冲突合入，主线自身类型检查、构建、diff检查及控制/launch-thread/旧Task登记纯编排 **14/14通过（39.63s）**。新证据 `%TEMP%/skynet-control-spawn-rw1nib`：实际spawn同步阻塞2200ms，status8.04ms、stop2.19ms，均在返回前确认；真实child退出0并释放角色租约。`2DhhCy` exit17恢复选定载荷；`zEh7J6` 与 `XwQOiK` 证明线程异常后2500ms原生租约释放前不替换，stop仍响应并最终退出。旧实现正确caller RED→GREEN见 [诊断](runtime-control-diagnosis.md)。
+
+本次没有实际Task安装或heavy完整Windows；纯Task元数据替身不算生命周期验收。此前Windows完整红/取消批次及0743d4d的Linux36/36都保留，未将旧CI或focused通过当新主线整套通过。真实隐藏Task、完整Windows、Desktop、PAYG与所有门槛继续开放。

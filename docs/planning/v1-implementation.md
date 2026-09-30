@@ -73,3 +73,11 @@ AC-01…AC-22 的已有证据和缺口集中列于 [V1 验收证据台账](../im
 先 cherry-pick 独立安装状态观测6324d0a至9f06a49，再合日报5399481至185f6af，随后合长会话803f89b。仅 README / 台账 / 规划文档冲突，按 resolving-merge-conflicts 保留14失败、24队列、28日报与23长范围；源码无冲突，日报类型接入正式 AnalysisProcessing。主线自身 typecheck/build/diffcheck通过；日报/统计/归属/历史/材料/队列/MCP12/12（18.45秒），组合日报/长范围/队列/分析/MCP11/11（17.86秒）。实际Claude2.1.281日报公开8会话24事项/分页/调度/归属/restart/Web/MCP1/1（19.92秒）来自本次组合主线，eJcXIF；返回 original-utf16-1处理范围，原件有未解析行仍partial。长会话17请求实测来自23支线6PLN80，未冒充本次复跑。
 
 没有重跑heavy完整Windows；23支线31/33（237.08秒）、安装/插件1500ms控制故障及旧23/24/取消批次均保留。focused状态观测修订 `9f06a49` 的 [Linux CI](https://github.com/yiwer/Skynet/actions/runs/36680977269/job/109776132842) 已通过类型检查、构建及29/29（111.12秒），该节点含最终24与状态观测修订、尚未含23/28；旧27/28失败保留。组合主线 `0743d4d` 的 [CI](https://github.com/yiwer/Skynet/actions/runs/36681601424/job/109778040443) 已通过类型检查、构建及36/36（119.91秒），包含新增长会话/日报。原设备后资格材料的历史/活动分类另由19后续版本化修订，未在日报中改写既有origin/raw/report。G0–G4、PAYG质量/预算、DesktopUI与五个工作日均开放。
+
+## 后台控制与静默启动定向集成（2026-09-30）
+
+独立 clean `b93ffeb` 经 `92e3711` 无冲突合入，保留组合23/24/28源码。实际创建 background-worker 的同步 spawn 移到 Worker 线程，认证 status/stop 不受该阻塞拖住；异常线程退出后等待原生 worker 的认证租约释放才替换或最终停止。隐藏 Windows 动作与已登记旧任务的精确所有权迁移保持兼容，没有 DEBUG 或测试生产开关。
+
+主线自身 `npm run typecheck`、`npm run build`、`git diff --check` 通过；`node --test dist/tests/control-spawn.test.js dist/tests/runtime-control.test.js dist/tests/autostart-registration.test.js` **14/14 PASS（39.63秒）**。本次隔离 fixture `rw1nib` 实际同步 spawn 阻塞2200ms，status8.04ms、stop2.19ms均在spawn返回前确认，真实pending-stop child退出0、原登记不变；`2DhhCy` 实际退出17后选定载荷恢复、正常停下；`zEh7J6` 的2500ms原生关闭等待在租约释放后才替换，`XwQOiK` 等待关闭期间stop可用且未启动替换。较慢本次总时间保留，不作性能验收。
+
+正确调用点 shim 的旧实现 RED 与修订 GREEN 证据见 [控制诊断](../implementation/runtime-control-diagnosis.md)；纯旧Task元数据迁移用替身，不代表实际OS任务演练。本次没有真实Task安装、maintenance、压力循环或完整Windows套件。先前31/33、23/24、1500ms故障及取消批次全部保留；`0743d4d` Linux36/36属于先前源码，不冒充本次92e3711的完整CI。真实隐藏Task观察、完整Windows与G0–G4仍待复核。

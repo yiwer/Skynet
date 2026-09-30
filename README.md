@@ -15,7 +15,8 @@
 | [npm 单授权值接入](docs/implementation/issue-11.md) | 内部离线 npm 包、自动检测与配置、私有共享身份/后台、真实 CLI 安装链；完整 G1 与 Desktop 仍待验收 |
 | [当前用户后台与崩溃恢复](docs/implementation/issue-12.md) | 认证独占控制、共享后台、Windows 隐藏用户任务、真实 Claude 崩溃后自动采集；登录/重启/休眠及 Desktop 仍待验收 |
 | [内部插件入口与共享后台](docs/implementation/issue-13.md) | 两个真实 CLI marketplace 接入、与 npm 共存、入口所有权和冻结材料补传；完整 G1 与 Desktop 市场 UI 仍待验收 |
-| [修复升级卸载与保留证据](docs/implementation/issue-14.md) | 公开维护、真实旧载荷回退和冻结 drain；guardian/UTF-8已集成；Linux安装观测完整CI通过，Windows控制响应失败正在修订 |
+| [修复升级卸载与保留证据](docs/implementation/issue-14.md) | 公开维护、真实旧载荷回退和冻结 drain；guardian/UTF-8已集成；Linux安装观测CI通过，后台控制focused修订已合入，旧Windows完整失败保留 |
+| [后台控制响应与静默启动](docs/implementation/runtime-control-diagnosis.md) | 同步spawn阻塞移到Worker线程、异常线程与原生租约协调、隐藏动作及旧Task登记兼容；主线14/14定向通过，真实Task与完整Windows复核仍开放 |
 | [账号与设备停用](docs/implementation/issue-20.md) | 显式维护权限、Web 停用、逐请求撤销校验及审计；保留共享历史读取，真实安装前置验收仍待通过 |
 | [离线持久队列与补传](docs/implementation/issue-16.md) | 原件与关联材料先落盘再交付、跨进程退避、ACK 后清理、设备同步页面；完整 G2 仍待验收 |
 | [崩溃与确认丢失后的快照一致性](docs/implementation/issue-17.md) | 持久上传键、事务提交、接入确认恢复及进程强杀回归；完整 G2 仍待验收 |
