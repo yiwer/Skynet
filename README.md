@@ -22,6 +22,7 @@
 | [本地故障与采集覆盖缺口](docs/implementation/issue-18.md) | 真实 Linux 满盘/权限/删除故障、正常 Claude hooks、独立设备/会话/MCP 覆盖报告；故障恢复不抹去未核实范围 |
 | [跨设备与独立材料历史归属](docs/implementation/issue-19.md) | 服务器验证完整前缀、冻结事件来源及原材料锚点；未独立采集材料保持上下文，完整 G2 仍待验收 |
 | [短会话公开分析准备](docs/implementation/issue-22.md) | 实际隔离 Claude Code worker、Web/MCP 与原句证据；loopback 实测不替代真实千问 PAYG 或 G3 |
+| [来源日期日报准备](docs/implementation/issue-28.md) | 09:00 自动入队、system 分析、持久分页版本、原员工/项目证据与 Web/MCP 一致；未知与 partial 明示，G3 尚未通过 |
 | [Agent 内授权读取](docs/implementation/issue-26.md) | HTTPS MCP / OAuth、共享原文与材料分页、完整导出；两个真实 CLI 正常授权与查询已测，完整发布门槛仍待验收 |
 | [组合搜索与稳定证据定位](docs/implementation/issue-27.md) | Web/MCP 共用员工、日期、项目、来源及内容搜索，历史快照与未知项目可查；命中回到固定原件行与文字位置 |
 | [PRD v1.0](docs/requirements/PRD.md) | 首版实施与验收依据：71 条用户故事、实施决策、22 组验收场景与发布门槛 |

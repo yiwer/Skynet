@@ -67,3 +67,30 @@ test('public report reads authenticate and reject invalid/future/pre-enrollment 
     assert.equal((await fetch(origin + '/health')).status, 200);
   } finally { await sandbox.close(); }
 });
+
+test('eight simultaneous employee report requests queue durably without exhausting the shared analysis connection pool', { timeout: 60000 }, async () => {
+  const sandbox = await createSandbox();
+  try {
+    const origin = await sandbox.startServer(); const employees = [];
+    for (let index = 0; index < 8; index++) {
+      const employee = await sandbox.provision(`并发日报${index}`); employees.push(employee);
+      assert.equal((await fetch(`${origin}/api/devices/enroll`, { method: 'POST', headers: { Authorization: `Bearer ${employee.enrollmentCredential}`,
+        'Content-Type': 'application/json' }, body: JSON.stringify({ installationId: randomUUID(), name: 'synthetic concurrent' }) })).status, 200);
+    }
+    const headers = { Authorization: `Bearer ${employees[0].readerCredential}`, 'Content-Type': 'application/json' };
+    const responses = await Promise.all(employees.map(employee => fetch(`${origin}/api/daily-reports/${employee.employeeId}/${beijingDate()}`,
+      { method: 'POST', headers, body: '{}', signal: AbortSignal.timeout(15000) })));
+    assert.ok(responses.every(response => response.status === 202));
+    const first = await Promise.all(responses.map(response => response.json()));
+    assert.ok(first.every(report => ['queued', 'ready'].includes(report.state)));
+    for (let attempt = 0; attempt < 40; attempt++) {
+      const reports = await Promise.all(employees.map(employee => fetch(`${origin}/api/daily-reports/${employee.employeeId}/${beijingDate()}`, { headers }).then(response => response.json())));
+      if (reports.every(report => report.state === 'ready' && !report.refreshPending)) {
+        assert.ok(reports.every(report => report.statistics.records === 0 && report.coverage.dailyDeviceCoverage === 'unknown'
+          && report.coverage.messages.some((message: string) => message.includes('不代表无活动')))); return;
+      }
+      await new Promise(resolve => setTimeout(resolve, 250));
+    }
+    assert.fail('durable queued employee periods did not drain');
+  } finally { await sandbox.close(); }
+});

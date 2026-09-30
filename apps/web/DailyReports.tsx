@@ -33,7 +33,7 @@ export function DailyReports({ request, currentEmployeeId, onEvidence }: {
     return () => abort.abort();
   }, [refresh]);
   useEffect(() => {
-    if (revision || !report || !['queued', 'waiting-analysis'].includes(report.state)) return;
+    if (revision || !report || !report.refreshPending && !['queued', 'waiting-analysis'].includes(report.state)) return;
     const timer = setTimeout(() => setRefresh(value => value + 1), 5000); return () => clearTimeout(timer);
   }, [report]);
   async function generate() {
@@ -65,6 +65,7 @@ export function DailyReports({ request, currentEmployeeId, onEvidence }: {
       {periodOffset !== null && <button onClick={async () => { try { const value = await (await request(`/api/daily-reports?offset=${periodOffset}`)).json(); setPeriods(previous => [...previous, ...value.reports]); setPeriodOffset(value.nextOffset); } catch (failure) { setError((failure as Error).message); } }}>更多日报</button>}</details>
     {busy && <p role="status">正在读取日报…</p>}{error && <p role="alert" className="error">{error}</p>}
     {report && <><h2>{report.employee} · {report.date}</h2><p role="status">{states[report.state]} · 版本 {report.revision}</p>
+      {report.refreshPending && <p role="status">刷新已入队；当前显示已保存版本。</p>}
       {report.coverage?.fixture && <p className="notice">合成演示，非正式验收；没有调用真实千问。</p>}
       {report.statistics && <><dl><div><dt>已确认记录</dt><dd>{report.statistics.records}</dd></div><div><dt>用户轮次</dt><dd>{report.statistics.userTurns}</dd></div>
         <div><dt>工具调用</dt><dd>{report.statistics.toolCalls}</dd></div><div><dt>历史 / 关联上下文</dt><dd>{report.statistics.historicalRecords}</dd></div><div><dt>时间或接入边界未知</dt><dd>{report.statistics.unknownRecords}</dd></div></dl>

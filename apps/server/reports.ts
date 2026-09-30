@@ -7,16 +7,21 @@ import { beijingDate, dueReportDate, reportDate, type DailyItem, type DailyRepor
 import { ledgerCountProjection } from './provenance.js';
 
 export async function migrateReports(db: Database) {
-  await db.query(`CREATE TABLE IF NOT EXISTS daily_report_periods(employee_id uuid NOT NULL REFERENCES employees(id),date text NOT NULL,
+  const client = await db.connect();
+  try { await client.query(`BEGIN; SELECT pg_advisory_xact_lock(7402128);
+    CREATE TABLE IF NOT EXISTS daily_report_periods(employee_id uuid NOT NULL REFERENCES employees(id),date text NOT NULL,
     requested_at timestamptz NOT NULL DEFAULT now(),last_checked_at timestamptz,PRIMARY KEY(employee_id,date));
     ALTER TABLE daily_report_periods ADD COLUMN IF NOT EXISTS last_checked_at timestamptz;
+    ALTER TABLE daily_report_periods ADD COLUMN IF NOT EXISTS generation integer NOT NULL DEFAULT 0;
+    ALTER TABLE daily_report_periods ADD COLUMN IF NOT EXISTS refresh_pending boolean NOT NULL DEFAULT true;
     CREATE INDEX IF NOT EXISTS snapshot_event_carriers ON snapshot_events(event_id,snapshot_id);
     CREATE INDEX IF NOT EXISTS report_origin_day ON archive_event_origins(employee_id,source_date,context,event_id);
     CREATE TABLE IF NOT EXISTS daily_report_revisions(id uuid PRIMARY KEY,employee_id uuid NOT NULL REFERENCES employees(id),date text NOT NULL,
       revision integer NOT NULL,version text NOT NULL,payload jsonb NOT NULL,created_at timestamptz NOT NULL DEFAULT now(),
       UNIQUE(employee_id,date,revision));
     CREATE INDEX IF NOT EXISTS daily_report_latest ON daily_report_revisions(employee_id,date,revision DESC);
-    CREATE TABLE IF NOT EXISTS daily_report_schedule(id integer PRIMARY KEY CHECK(id=1),last_date text NOT NULL);`);
+    CREATE TABLE IF NOT EXISTS daily_report_schedule(id integer PRIMARY KEY CHECK(id=1),last_date text NOT NULL);
+    COMMIT;`); } catch (error) { await client.query('ROLLBACK'); throw error; } finally { client.release(); }
 }
 
 // Conclusions supported solely by another day/employee or saved historical context
@@ -69,13 +74,15 @@ export function reportService(db: Database, analysis: AnalysisService) {
   }
   async function read(employeeId: string, date: string, offset = 0, revision?: number): Promise<DailyReport> {
     const employee = await validate(employeeId, date);
-    const row = (await db.query(`SELECT revision,version,payload,created_at FROM daily_report_revisions WHERE employee_id=$1 AND date=$2
+    const row = (await db.query(`SELECT revision,version,payload,created_at,
+      (SELECT refresh_pending FROM daily_report_periods WHERE employee_id=$1 AND date=$2) AS refresh_pending
+      FROM daily_report_revisions WHERE employee_id=$1 AND date=$2
       AND ($3::integer IS NULL OR revision=$3) ORDER BY revision DESC LIMIT 1`, [employeeId, date, revision ?? null])).rows[0];
     if (!row) {
       if (revision !== undefined) throw new HttpError(404, '报告版本不存在');
       const queued = (await db.query('SELECT 1 FROM daily_report_periods WHERE employee_id=$1 AND date=$2', [employeeId, date])).rowCount;
       return { employeeId, employee: employee.name, date, timeZone: 'Asia/Shanghai', revision: 0, version: null,
-        state: queued ? 'queued' : 'not-scheduled', createdAt: null, items: [], nextOffset: null, statistics: null, coverage: null };
+        state: queued ? 'queued' : 'not-scheduled', createdAt: null, items: [], nextOffset: null, statistics: null, coverage: null, refreshPending: !!queued };
     }
     const report = row.payload as DailyReport; const page: DailyItem[] = []; let bytes = 4096 + Buffer.byteLength(JSON.stringify(report.coverage));
     for (const item of report.items.slice(offset, offset + 20)) {
@@ -83,14 +90,16 @@ export function reportService(db: Database, analysis: AnalysisService) {
       page.push(item); bytes += size;
     }
     return { ...report, employee: employee.name, revision: row.revision, version: row.version, createdAt: row.created_at.toISOString(),
-      items: page, nextOffset: offset + page.length < report.items.length ? offset + page.length : null };
+      items: page, nextOffset: offset + page.length < report.items.length ? offset + page.length : null,
+      refreshPending: revision === undefined ? row.refresh_pending : false };
   }
   async function request(employeeId: string, date: string) {
     await validate(employeeId, date);
     if (date > beijingDate()) throw new HttpError(422, '尚未到来的日期不能生成日报');
     const managed = (await db.query(`SELECT 1 FROM devices WHERE employee_id=$1 AND enrolled_at < ($2::date+interval '1 day') AT TIME ZONE 'Asia/Shanghai' LIMIT 1`, [employeeId, date])).rowCount;
     if (!managed) throw new HttpError(422, '该日期尚无明确设备接入边界；不回填接入前日报');
-    await db.query('INSERT INTO daily_report_periods(employee_id,date) VALUES($1,$2) ON CONFLICT DO NOTHING', [employeeId, date]);
+    await db.query(`INSERT INTO daily_report_periods(employee_id,date) VALUES($1,$2) ON CONFLICT(employee_id,date)
+      DO UPDATE SET generation=daily_report_periods.generation+1,refresh_pending=true`, [employeeId, date]);
     // Public refresh and scheduled work use the same durable period and service.
     await refresh(employeeId, date);
     return read(employeeId, date);
@@ -99,8 +108,12 @@ export function reportService(db: Database, analysis: AnalysisService) {
     const client = await db.connect();
     try {
       await client.query('BEGIN ISOLATION LEVEL REPEATABLE READ');
-      const lock = await client.query('SELECT pg_try_advisory_xact_lock(hashtextextended($1,7402128)) AS locked', [`${employeeId}/${date}`]);
+      // One report normalizer globally: parallel authenticated refreshes must not
+      // occupy every pool connection while nested analysis requests await a slot.
+      // Other requests leave a durable pending generation for the bounded poll.
+      const lock = await client.query('SELECT pg_try_advisory_xact_lock(7402128) AS locked');
       if (!lock.rows[0].locked) { await client.query('ROLLBACK'); return; }
+      const generation = (await client.query('SELECT generation FROM daily_report_periods WHERE employee_id=$1 AND date=$2', [employeeId, date])).rows[0]?.generation;
       const employee = (await client.query('SELECT name FROM employees WHERE id=$1', [employeeId])).rows[0];
       const events = (await client.query(`SELECT event_id,project FROM archive_event_origins WHERE employee_id=$1 AND source_date=$2
         AND context='after-enrollment' ORDER BY event_id LIMIT 10001`, [employeeId, date])).rows;
@@ -154,7 +167,7 @@ export function reportService(db: Database, analysis: AnalysisService) {
       }
       const originalEventHash = digest(JSON.stringify([...ids]));
       const payload: DailyReport = { employeeId, employee: employee.name, date, timeZone: 'Asia/Shanghai', revision: 0, version: null,
-        state, createdAt: null, items, nextOffset: null,
+        state, createdAt: null, items, nextOffset: null, refreshPending: false,
         statistics: { ...counts, files: null, tokens: null, activityIntervals: null, humanWorkHours: null, definition },
         coverage: { messages: [...new Set(messages)], inputs, originalEventIdsSample: [...ids].slice(0, 20), originalEventCount: counts.records,
           originalEventHash, originalEventHashComplete: events.length <= 10000, eligibleInputsComplete: !incomplete && !waiting,
@@ -165,9 +178,16 @@ export function reportService(db: Database, analysis: AnalysisService) {
       const latest = (await client.query(`SELECT revision,version FROM daily_report_revisions WHERE employee_id=$1 AND date=$2 ORDER BY revision DESC LIMIT 1`, [employeeId, date])).rows[0];
       if (latest?.version !== version) await client.query(`INSERT INTO daily_report_revisions(id,employee_id,date,revision,version,payload)
         VALUES($1,$2,$3,$4,$5,$6)`, [randomUUID(), employeeId, date, (latest?.revision ?? 0) + 1, version, payload]);
-      await client.query('UPDATE daily_report_periods SET last_checked_at=now() WHERE employee_id=$1 AND date=$2', [employeeId, date]);
+      await client.query(`UPDATE daily_report_periods SET last_checked_at=now(),refresh_pending=CASE WHEN generation=$3 THEN false ELSE refresh_pending END
+        WHERE employee_id=$1 AND date=$2`, [employeeId, date, generation]);
       await client.query('COMMIT');
-    } catch (error) { await client.query('ROLLBACK'); throw error; } finally { client.release(); }
+    } catch (error) {
+      await client.query('ROLLBACK');
+      // A newer public refresh generation won while this repeatable input was
+      // being analyzed. Its durable pending request will be handled by the poll.
+      if ((error as { code?: string }).code === '40001') return;
+      throw error;
+    } finally { client.release(); }
   }
   async function tick(now = new Date()) {
     const due = dueReportDate(now);
@@ -190,7 +210,7 @@ export function reportService(db: Database, analysis: AnalysisService) {
     }
     const periods = (await db.query(`SELECT p.employee_id,p.date FROM daily_report_periods p
       LEFT JOIN LATERAL (SELECT payload,created_at FROM daily_report_revisions r WHERE r.employee_id=p.employee_id AND r.date=p.date ORDER BY revision DESC LIMIT 1) r ON true
-      WHERE r.payload IS NULL OR r.payload->>'state' IN ('waiting-analysis','queued','unavailable')
+      WHERE p.refresh_pending OR r.payload IS NULL OR r.payload->>'state' IN ('waiting-analysis','queued','unavailable')
       ORDER BY p.last_checked_at NULLS FIRST,p.requested_at LIMIT 10`)).rows;
     for (const period of periods) await refresh(period.employee_id, period.date);
   }

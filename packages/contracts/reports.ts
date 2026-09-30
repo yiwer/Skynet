@@ -16,6 +16,7 @@ export type DailyItem = AnalysisItem & { project: string; theme: string; themeAs
 export type DailyReport = { employeeId: string; employee: string; date: string; timeZone: 'Asia/Shanghai';
   revision: number; version: string | null; state: 'not-scheduled' | 'queued' | 'waiting-analysis' | 'ready' | 'partial' | 'unavailable';
   createdAt: string | null; items: DailyItem[]; nextOffset: number | null;
+  refreshPending: boolean;
   statistics: { records: number; userTurns: number; toolCalls: number; historicalRecords: number; unknownRecords: number;
     files: null; tokens: null; activityIntervals: null; humanWorkHours: null; definition: string } | null;
   coverage: { messages: string[]; inputs: { snapshotId: string; hash: string; analysisId: string | null; state: string;
