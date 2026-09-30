@@ -35,6 +35,10 @@ export const pagePath=(root:string,index:number)=>join(root,'pages',String(index
 export async function verifyBundle(input:string):Promise<{root:string;receipt:BackupReceipt}> {
   const root=await directory(input);const receipt=backupReceiptSchema.parse(await jsonFile(join(root,'complete.json'),1024*1024));
   if(root.endsWith(`.pending-${receipt.id}`))throw new Error('bundle-not-published');
+  // A bind mount can hide the host's pending basename. Create this marker only
+  // after rename and parent fsync, so completion survives that aliasing.
+  const published=z.object({version:z.literal(1),id:z.uuid(),dumpHash:z.string().regex(/^[a-f0-9]{64}$/)}).strict().parse(await jsonFile(join(root,'published.json'),1024));
+  if(published.id!==receipt.id||published.dumpHash!==receipt.dumpHash)throw new Error('publication-marker-mismatch');
   const dump=await hashFile(join(root,'database.dump'));if(dump.hash!==receipt.dumpHash||dump.bytes!==receipt.dumpBytes)throw new Error('dump-integrity');
   let objects=0,bytes=0,previous='';
   const objectRoot=await directory(join(root,'objects'));

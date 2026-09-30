@@ -14,13 +14,16 @@ export async function backupHelper(evidenceDirectory:string){
   const inspected=JSON.parse((await execute('docker',['image','inspect',image],{windowsHide:true,timeout:5000})).stdout)[0];
   if(inspected.Config.Labels['org.skynet.backup-test']!==owner)throw new Error('Unexpected helper image ownership');
   await writeFile(join(evidenceDirectory,'backup-helper-image.json'),JSON.stringify({image,id:inspected.Id,owner},null,2));
-  async function run(command:unknown,databaseUrl:string,mounts:{source:string;target:string;readonly?:boolean}[]){
+  async function run(command:unknown,databaseUrl:string,mounts:{source:string;target:string;readonly?:boolean;type?:'bind'|'volume'}[],script?:string,user?:string){
     const name=`skynet-backup-test-${randomUUID()}`;
     const args=['run','--rm','--interactive','--name',name,'--label',`org.skynet.backup-test=${owner}`,
       '--memory','512m','--cpus','1','--pids-limit','128','--read-only','--tmpfs','/tmp:rw,nosuid,nodev,size=64m',
       '--cap-drop','ALL','--security-opt','no-new-privileges','--env','DATABASE_URL'];
-    for(const mount of mounts){await mkdir(mount.source,{recursive:true});args.push('--mount',`type=bind,source=${mount.source},target=${mount.target}${mount.readonly?',readonly':''}`);}
-    args.push(image);
+    // Linux fixtures retain their caller's 0700/0600 ownership. Deployment uses
+    // image UID1000 and volumes with the same owner; never widen private modes.
+    if(user)args.push('--user',user);else if(process.getuid&&process.getgid)args.push('--user',`${process.getuid()}:${process.getgid()}`);
+    for(const mount of mounts){if(mount.type!=='volume')await mkdir(mount.source,{recursive:true});args.push('--mount',`type=${mount.type??'bind'},source=${mount.source},target=${mount.target}${mount.readonly?',readonly':''}`);}
+    if(script)args.push('--entrypoint','node');args.push(image);if(script)args.push('--input-type=module','--eval',script);
     try{return await new Promise<string>((resolve,reject)=>{
       const child=spawn('docker',args,{env:{...process.env,DATABASE_URL:databaseUrl},windowsHide:true,stdio:['pipe','pipe','pipe']});
       let output='',errors='';const timer=setTimeout(()=>{child.kill();reject(new Error('Owned backup helper exceeded60s'));},60000);

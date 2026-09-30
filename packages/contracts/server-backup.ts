@@ -9,7 +9,8 @@ export const backupReceiptSchema=z.object({version:z.literal(1),id:z.uuid(),snap
   pages:z.array(z.object({index:z.number().int().min(0).max(8191),hash:hashSchema,count:z.number().int().min(1).max(1000)}).strict()).max(8192)}).strict();
 export type BackupReceipt=z.infer<typeof backupReceiptSchema>;
 export const backupCommandSchema=z.discriminatedUnion('action',[
-  z.object({action:z.literal('backup'),rawDirectory:z.string().min(1).max(4096),backupDirectory:z.string().min(1).max(4096),failureDomain:z.enum(['same-host','off-host-declared','unknown']).default('unknown')}),
-  z.object({action:z.literal('restore'),bundleDirectory:z.string().min(1).max(4096),rawDirectory:z.string().min(1).max(4096)}),
-  z.object({action:z.literal('verify'),bundleDirectory:z.string().min(1).max(4096)}),
+  z.object({action:z.literal('backup'),rawDirectory:z.string().min(1).max(4096),backupDirectory:z.string().min(1).max(4096),failureDomain:z.enum(['same-host','off-host-declared','unknown']).default('unknown')}).strict(),
+  z.object({action:z.literal('restore'),bundleDirectory:z.string().min(1).max(4096),rawDirectory:z.string().min(1).max(4096)}).strict(),
+  z.object({action:z.literal('verify'),bundleDirectory:z.string().min(1).max(4096)}).strict(),
+  z.object({action:z.literal('reconcile'),backupDirectory:z.string().min(1).max(4096),after:z.uuid().optional()}).strict(),
 ]);

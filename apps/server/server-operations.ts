@@ -10,7 +10,8 @@ export async function migrateServerOperations(db: Database) {
     await client.query(`CREATE TABLE IF NOT EXISTS server_backups(id uuid PRIMARY KEY,state text NOT NULL,
       started_at timestamptz NOT NULL DEFAULT now(),snapshot_at timestamptz,finished_at timestamptz,receipt jsonb,error text);
       CREATE TABLE IF NOT EXISTS server_restore_drills(id uuid PRIMARY KEY,backup_id uuid NOT NULL,
-      verified_at timestamptz NOT NULL DEFAULT now(),receipt jsonb NOT NULL);`);
+      verified_at timestamptz NOT NULL DEFAULT now(),receipt jsonb NOT NULL);
+      ALTER TABLE device_health ADD COLUMN IF NOT EXISTS live_valid boolean NOT NULL DEFAULT true;`);
     await client.query('COMMIT');
   }catch(error){await client.query('ROLLBACK');throw error;}finally{client.release();}
 }

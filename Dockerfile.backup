@@ -13,6 +13,7 @@ WORKDIR /app
 COPY --from=build --chown=1000:1000 /app/package.json ./
 COPY --from=build --chown=1000:1000 /app/node_modules ./node_modules
 COPY --from=build --chown=1000:1000 /app/dist ./dist
-RUN node --version && pg_dump --version && pg_restore --version && chmod 0755 /app
+RUN node --version && pg_dump --version && pg_restore --version && chmod 0755 /app \
+    && mkdir -p /data/raw /backups && chown -R 1000:1000 /data /backups && chmod 0700 /data/raw /backups
 USER 1000:1000
 ENTRYPOINT ["node", "dist/apps/server/backup-cli.js"]
