@@ -19,6 +19,8 @@ export async function validQualificationBytes(bytes:Buffer) {
 // in this exact carrier, without changing its bytes, parser or stable event IDs.
 export const attributionRevisionSql = (snapshot: string) => `(SELECT COALESCE(MAX(c.revision),0) FROM snapshot_events se
   JOIN event_qualifications c ON c.event_id=se.event_id WHERE se.snapshot_id=${snapshot})`;
+export const qualificationDaySql = (employee: string, date: string) => `(SELECT COALESCE(MAX(c.revision),0)
+  FROM archive_event_origins qo JOIN event_qualifications c ON c.event_id=qo.event_id WHERE qo.employee_id=${employee} AND qo.source_date=${date})`;
 export async function attributionRevision(q:Query,snapshotId:string) {
   return String((await q.query(`SELECT ${attributionRevisionSql('$1')} AS revision`,[snapshotId])).rows[0].revision);
 }

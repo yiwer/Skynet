@@ -89,7 +89,7 @@ test('HTTPS OAuth consent, per-request revocation, MCP/Web evidence and complete
     const tools = (await client.listTools()).tools;
     for (const name of ['list_sessions', 'read_activity_statistics', 'search_sessions', 'read_location', 'read_snapshot', 'read_capture_status',
       'read_manifest', 'prepare_export', 'read_export', 'read_material', 'read_analysis', 'list_daily_reports', 'read_daily_report', 'read_analysis_operations',
-      'read_team_coverage', 'read_coverage_observations', 'read_work_statistics']) {
+      'read_team_coverage', 'read_coverage_observations', 'read_work_statistics', 'read_work_view', 'list_work_views', 'list_projects']) {
       const tool = tools.find(tool => tool.name === name); assert.ok(tool, `missing public tool: ${name}`);
       assert.equal(tool.annotations?.readOnlyHint, true, name);
     }

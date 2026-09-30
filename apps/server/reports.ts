@@ -67,7 +67,7 @@ export function reportRunCoverage(run: AnalysisRun) {
       omittedFindings: processing.omittedFindings, extractedRanges: processing.ranges.filter(range => range.state === 'extracted').length,
       failedRanges: processing.ranges.filter(range => range.state === 'failed').length, skippedRanges: processing.ranges.filter(range => range.state === 'skipped').length } : undefined };
 }
-export function reportService(db: Database, analysis: AnalysisService) {
+export function reportService(db: Database, analysis: AnalysisService, clock: () => Date = () => new Date()) {
   async function validate(employeeId: string, date: string) {
     reportDate.parse(date);
     const employee = (await db.query('SELECT id,name FROM employees WHERE id=$1', [employeeId])).rows[0];
@@ -97,7 +97,7 @@ export function reportService(db: Database, analysis: AnalysisService) {
   }
   async function request(employeeId: string, date: string) {
     await validate(employeeId, date);
-    if (date > beijingDate()) throw new HttpError(422, '尚未到来的日期不能生成日报');
+    if (date > beijingDate(clock())) throw new HttpError(422, '尚未到来的日期不能生成日报');
     const managed = (await db.query(`SELECT 1 FROM devices WHERE employee_id=$1 AND enrolled_at < ($2::date+interval '1 day') AT TIME ZONE 'Asia/Shanghai' LIMIT 1`, [employeeId, date])).rowCount;
     if (!managed) throw new HttpError(422, '该日期尚无明确设备接入边界；不回填接入前日报');
     await db.query(`INSERT INTO daily_report_periods(employee_id,date) VALUES($1,$2) ON CONFLICT(employee_id,date)
@@ -121,6 +121,15 @@ export function reportService(db: Database, analysis: AnalysisService) {
       const events = (await client.query(`SELECT event_id,project FROM effective_event_origins WHERE employee_id=$1 AND source_date=$2
         AND context='after-enrollment' ORDER BY event_id LIMIT 10001`, [employeeId, date])).rows;
       const ledger = (await client.query(`SELECT ${ledgerCountProjection} FROM effective_event_origins o WHERE o.employee_id=$1 AND o.source_date=$2`, [employeeId, date])).rows[0];
+      const projectRows = (await client.query(`SELECT project,${ledgerCountProjection} FROM effective_event_origins o
+        WHERE o.employee_id=$1 AND o.source_date=$2 GROUP BY project ORDER BY project LIMIT 101`, [employeeId, date])).rows;
+      const projectStatistics: NonNullable<DailyReport['coverage']>['projectStatistics'] = []; let projectBytes = 0;
+      for (const row of projectRows.slice(0, 100)) {
+        const value = { project: row.project as string, records: row.activityRecords as number, userTurns: row.activityUserTurns as number, toolCalls: row.activityToolCalls as number };
+        const size = Buffer.byteLength(JSON.stringify(value)); if (projectBytes + size > 16 * 1024) break;
+        projectStatistics.push(value); projectBytes += size;
+      }
+      const projectStatisticsComplete = projectStatistics.length === projectRows.length;
       const counts = { records: ledger.activityRecords, userTurns: ledger.activityUserTurns, toolCalls: ledger.activityToolCalls,
         historicalRecords: ledger.historicalRecords, unknownRecords: ledger.unknownRecords };
       const undated = Number((await client.query(`SELECT count(*) FROM effective_event_origins WHERE employee_id=$1 AND source_date IS NULL`, [employeeId])).rows[0].count);
@@ -135,6 +144,7 @@ export function reportService(db: Database, analysis: AnalysisService) {
         '文件、原生 token 和活动区间等待完整统计接口；未知不等于零。'];
       if (undated) messages.push(`${undated} 条来源日期未知，不能任意归入本日。`);
       if (overflow) messages.push('本日输入超出 10000 事件 / 100 主原件处理边界；保留统计，未完整生成主题。');
+      if (!projectStatisticsComplete) messages.push('逐项目计数超过 100 项 / 16KiB 元数据边界；未覆盖项目计数保持未知，员工本日总计数仍保留。');
       const runs: AnalysisRun[] = []; const inputs: NonNullable<DailyReport['coverage']>['inputs'] = [];
       const available = await analysis.availability();
       if (!available.ready) messages.push(available.reason);
@@ -173,7 +183,8 @@ export function reportService(db: Database, analysis: AnalysisService) {
       const payload: DailyReport = { employeeId, employee: employee.name, date, timeZone: 'Asia/Shanghai', revision: 0, version: null,
         state, createdAt: null, items, nextOffset: null, refreshPending: false,
         statistics: { ...counts, files: null, tokens: null, activityIntervals: null, humanWorkHours: null, definition },
-        coverage: { messages: [...new Set(messages)], inputs, originalEventIdsSample: [...ids].slice(0, 20), originalEventCount: counts.records,
+        coverage: { messages: [...new Set(messages)], inputs, qualificationRevision, originalEventIdsSample: [...ids].slice(0, 20), originalEventCount: counts.records,
+          projectStatistics, projectStatisticsComplete,
           originalEventHash, originalEventHashComplete: events.length <= 10000, eligibleInputsComplete: !incomplete && !waiting,
           dailyDeviceCoverage: 'unknown', fixture: runs.some(run => run.result?.fixture || run.config.mode === 'fixture') } };
       // Bound public metadata separately from paged conclusions; retain exact
@@ -193,7 +204,7 @@ export function reportService(db: Database, analysis: AnalysisService) {
       throw error;
     } finally { client.release(); }
   }
-  async function tick(now = new Date()) {
+  async function tick(now = clock()) {
     const due = dueReportDate(now);
     if (due) {
       const client = await db.connect();

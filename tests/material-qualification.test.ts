@@ -13,6 +13,7 @@ import { publicConfig, readAnalysisConfig } from '../apps/analysis/config.js';
 import { analysisQueue } from '../apps/analysis/queue.js';
 import { executeAnalysis } from '../apps/analysis/execute.js';
 import { beijingDate } from '../packages/contracts/reports.js';
+import { monday, addDays, type WorkView } from '../packages/contracts/work-views.js';
 import type { ClaimedAnalysis } from '../apps/analysis/queue.js';
 import { reconcileOriginalQualifications } from '../apps/server/provenance.js';
 import { RawStore } from '../apps/server/raw-store.js';
@@ -67,6 +68,13 @@ test('material-first → original normal source qualification versions activity 
     const beforeReport=await(await api(`/api/daily-reports/${A.employeeId}/${date}`,undefined,json({}))).json();
     assert.equal(beforeReport.statistics.records,0);assert.equal(beforeReport.state,'ready');assert.ok(beforeReport.revision>0);
     const frozenReport=await(await api(`/api/daily-reports/${A.employeeId}/${date}?revision=${beforeReport.revision}`)).json();
+    const projectPath='/api/work-view?'+new URLSearchParams({kind:'project',subject:'/original/A',from:date,to:date});
+    const week=monday(date);const weekPath='/api/work-view?'+new URLSearchParams({kind:'weekly',subject:A.employeeId,from:week,to:addDays(week,6)});
+    const beforeProject:WorkView=await(await api(projectPath,undefined,json({}))).json();
+    const beforeWeek:WorkView=await(await api(weekPath,undefined,json({}))).json();
+    assert.equal(beforeProject.statistics!.records,null,'context-only project has no qualified input, not fabricated zero');
+    const frozenProjectText=await(await api(projectPath+`&revision=${beforeProject.revision}`)).text();const frozenProject=JSON.parse(frozenProjectText);
+    const frozenWeekText=await(await api(weekPath+`&revision=${beforeWeek.revision}`)).text();const frozenWeek=JSON.parse(frozenWeekText);
     const configPath=join(s.directory,'analysis.json');await writeFile(configPath,JSON.stringify({mode:'fixture',executable:process.execPath,runtimeVersion:'2.1.281',model:'synthetic',workDirectory:join(s.directory,'jobs'),fixtureOrigin:'http://127.0.0.1:12345',budgetId:'qualification-fixture',budgetCny:0,inputCnyPerMillion:0,outputCnyPerMillion:0,maxAttempts:1,leaseSeconds:30,timeoutSeconds:90,autoAnalyzeUpdates:false}));
     const config=await readAnalysisConfig(configPath);await db.query('INSERT INTO analysis_workers(id,config) VALUES($1,$2)',['qualification-test',publicConfig(config)]);
     const queue=analysisQueue(db,config,'qualification-test');
@@ -121,6 +129,15 @@ test('material-first → original normal source qualification versions activity 
     for(let i=0;i<4;i++){await db.query("UPDATE analysis_workers SET updated_at=now() WHERE id='qualification-test'");const claim=await queue.claim();if(!claim)break;await finish(claim);}
     const currentReport=await(await api(`/api/daily-reports/${A.employeeId}/${date}`,undefined,json({}))).json();assert.equal(currentReport.statistics.records,1);assert.ok(currentReport.revision>beforeReport.revision);assert.ok(currentReport.items.some((item:any)=>item.activityEventIds.includes(initialIds[1])));
     assert.deepEqual(await(await api(`/api/daily-reports/${A.employeeId}/${date}?revision=${beforeReport.revision}`)).json(),frozenReport);
+    let project:WorkView=await(await api(projectPath)).json();let weekly:WorkView=await(await api(weekPath)).json();
+    const viewDeadline=Date.now()+15000;
+    while((project.statistics?.records!==1||weekly.statistics?.records!==1)&&Date.now()<viewDeadline){await new Promise(resolve=>setTimeout(resolve,200));project=await(await api(projectPath)).json();weekly=await(await api(weekPath)).json();}
+    assert.equal(project.statistics!.records,1,'trusted qualification automatically refreshes existing original-project view without another work-view POST');
+    assert.equal(weekly.statistics!.records,1,'frozen daily revision change automatically refreshes the containing weekly view');
+    assert.ok(project.coverage!.days.every(day=>day.employeeId===A.employeeId&&BigInt(day.qualificationRevision!)>0n));
+    assert.ok(project.items.every(item=>item.project==='/original/A'&&item.employeeId===A.employeeId));
+    assert.equal(await(await api(projectPath+`&revision=${beforeProject.revision}`)).text(),frozenProjectText,'fixed project revision is byte-for-byte unchanged');
+    assert.equal(await(await api(weekPath+`&revision=${beforeWeek.revision}`)).text(),frozenWeekText,'fixed weekly revision is byte-for-byte unchanged');
     const stats=await(await api('/api/activity-statistics')).json();assert.equal(stats.rows.filter((item:any)=>item.employeeId===A.employeeId).reduce((sum:number,item:any)=>sum+item.activityRecords,0),1);
     assert.equal(stats.rows.filter((item:any)=>item.employeeId===B.employeeId).reduce((sum:number,item:any)=>sum+item.activityRecords,0),0);
     assert.equal(JSON.parse(await s.collectorCommand('run',stateA)).committed,0);assert.equal(JSON.parse(await s.collectorCommand('run',stateB)).committed,0);
@@ -138,7 +155,7 @@ test('material-first → original normal source qualification versions activity 
     await page.getByRole('link',{name:'查看采集资格原件',exact:true}).nth(1).click();await expect(page.getByRole('region',{name:'命中证据',exact:true})).toContainText('甲接入后真正原活动🛰');
     await page.goto(s.origin+`/#${aSnapshot}`);
     await page.getByRole('link',{name:'原始材料第 3 行',exact:true}).first().click();await expect(page.getByRole('region',{name:'命中证据',exact:true})).toContainText('甲接入后真正原活动🛰');
-    await writeFile(join(s.directory,'material-qualification-evidence.json'),JSON.stringify({initial,qualified,oldHistory,newer,currentReport,frozenReport,stats,rawUnchanged:true,provider:'synthetic execution seam; no paid/native model'},null,2));console.log(`Material qualification evidence: ${s.directory}`);
+    await writeFile(join(s.directory,'material-qualification-evidence.json'),JSON.stringify({initial,qualified,oldHistory,newer,currentReport,frozenReport,project,weekly,frozenProject,frozenWeek,stats,rawUnchanged:true,provider:'synthetic execution seam; no paid/native model'},null,2));console.log(`Material qualification evidence: ${s.directory}`);
   } finally {clearInterval(lease);await client?.close();await browser?.close();await db.end();await s.close();}
 });
 

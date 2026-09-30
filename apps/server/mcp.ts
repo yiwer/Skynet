@@ -12,8 +12,10 @@ import type { ReportService } from './reports.js';
 import { reportDate } from '../../packages/contracts/reports.js';
 import type { CoverageService } from './team-coverage.js';
 import type { WorkStatisticsService } from './work-statistics.js';
+import type { WorkViewService } from './work-views.js';
+import { workViewQuery } from '../../packages/contracts/work-views.js';
 
-export async function registerMcp(app: FastifyInstance, db: Database, archive: ArchiveQuery, publicOrigin: string, analysis: AnalysisService, reports: ReportService, coverage: CoverageService, workStatistics: WorkStatisticsService) {
+export async function registerMcp(app: FastifyInstance, db: Database, archive: ArchiveQuery, publicOrigin: string, analysis: AnalysisService, reports: ReportService, coverage: CoverageService, workStatistics: WorkStatisticsService, workViews: WorkViewService) {
   const { guard } = await registerMcpAuth(app, db, publicOrigin);
   const offset = z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).default(0);
   const snapshotId = z.uuid().describe('Immutable snapshot ID from list_sessions, never a mutable session ID');
@@ -71,6 +73,12 @@ export async function registerMcp(app: FastifyInstance, db: Database, archive: A
     mcp.registerTool('read_daily_report', { description: '读取同一日报版本，按项目和跨会话主题组织本来源日期已确认活动；历史引用仅作背景，未知统计不等于零。翻页时固定 revision。',
       annotations, inputSchema: { employeeId: z.uuid(), date: reportDate, revision: z.number().int().min(1).optional(), offset } },
     input => result(() => reports.read(input.employeeId, input.date, input.offset, input.revision)));
+    mcp.registerTool('read_work_view', { description: '读取与 Web 相同的周工作或项目进展固定版本，包括参与者、目标、行动、成果、阻塞、待继续事项和日报证据。跨日同主题仅为推断关联，原始归属不变；翻页固定 revision。',
+      annotations, inputSchema: workViewQuery }, input => result(() => workViews.read(input, input.offset, input.revision)));
+    mcp.registerTool('list_work_views', { description: '分页列出持久周报和项目视图版本；周一北京时间09:00入队前一周，入队不保证完成。',
+      annotations, inputSchema: { offset } }, input => result(() => workViews.list(input.offset)));
+    mcp.registerTool('list_work_projects', { description: '分页列出原始项目，包括未归类项目（project为空字符串），不根据当前员工覆盖原始项目。',
+      annotations, inputSchema: { offset } }, input => result(() => workViews.projects(input.offset)));
     mcp.registerTool('read_analysis_operations', { description: '读取与 Web 相同的分析队列、有限尝试、输入版本、运行时配置与预算预留；未知账单不填零，不返还未知预留。',
       annotations, inputSchema: { offset: offset.refine(value => value <= 100000) } }, input => result(() => analysis.operations(input.offset)));
     return mcp;
