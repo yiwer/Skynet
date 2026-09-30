@@ -101,3 +101,7 @@ clean `519d59f` 无冲突合入 `eb69a46`，保留主线Linux49/49记录、后�
 主线自身 `npm run typecheck`、`npm run build`、`git diff --check` 与 `node --import tsx --test tests/source-statistics.test.ts tests/team-coverage.test.ts tests/daily-reports.test.ts tests/mcp.test.ts tests/material-primary.test.ts tests/work-views.test.ts` **12/12 PASS（31.43秒，0 fail / 0 cancelled）**。覆盖公开链11.79秒，fixture `5LAcc5`；safe JSON与320/375/760/1280/1920截图在 `F:/GenCode/Skynet-evidence/v1-2026-09-30/coverage-f611dad8-9b43-4b47-81a1-706c3231c67d/`，日志 `main-31-integration.log`。原材料 `jAldds/q9XPFU`、周/项目 `8TWoW4`、OAuth MCP `Xe5jhD`；从矩阵读取及下钻不新增生成POST，固定日报/统计引用和未知状态保持。
 
 未复跑实际native、Task、maintenance或完整Windows；#29原生loopback与其他CLI证据仍注明独立分支来源，旧31/33、23/24、取消及性能红结果保留。新增辅助Token/文件统计strictUTF8不替代通用证据0xFF缺口修订。所有门槛开放，#30独立接续更正/迟到版本，#32产品实现仍等#30；外部PG17/Node24工具smoke只证明前置工具，不算灾备验收。
+
+## 覆盖矩阵主线 Linux CI（2026-09-30）
+
+`a4588a6` 的 [Linux CI](https://github.com/yiwer/Skynet/actions/runs/36694392990/job/109818763622) 已通过类型检查、构建与 **53/53（162.16秒，0 fail / 0 cancelled）**。这是合入 #31 后的主线证据；主线本地定向12/12与独立原生测试来源保持区分。安全日志已保存 `F:/GenCode/Skynet-evidence/v1-2026-09-30/ci-a4588a6-linux.log`。真实Task、完整Windows、旧性能失败与G0–G4未因此关闭。
