@@ -124,3 +124,9 @@ clean `c5d23c5` 无冲突合入 `6d828bf`。保留 #31 矩阵/固定来源统计
 ROOT在 product `68ee347` 的冻结 compiled CLI/hook/filesystem 和产品 `launcherText` 分派下，使用全新自有 explicit-state 测量 **200次真实进程启动+本地入队**。Windows11 Pro10.0.26200、Node24.12.0、i7-14700K/28逻辑CPU；主机并发工作未控制。P50 **52.53ms**、P95 **67.17ms**、最大 **137.34ms**；200/200唯一样本确实保留在spool、无hook-gap、无原件读取/网络。每个child有3秒上限、windowsHide，完整结果与源/载荷哈希在 `F:/GenCode/Skynet-evidence/v1-2026-09-30/performance/hook-db721967-432e-4b2a-9f4f-cf7030ac2fb8/result.json`；复跑脚本 `performance/hook-baseline.mjs`。
 
 这是隔离状态的正常快路径证据，不是安装完成、真实宿主或旧Linux四任务ENOSPC压力复测；历史P95 **111.35ms** 失败与max **1075.89ms** 长尾保留。没有Task/setup/maintenance/后台启动或付费调用；AC-22/G4及原文可见延迟分布仍待完整实测。
+
+## #32 完整支线交付（2026-09-30）
+
+独立支线 e366814→55308ae9 已完成 exported SQL snapshot+ALL chunks（含staged ACK）、fresh barePG/raw恢复、publication/reconcile/启动拒绝/旧claims预算与当前heartbeat fencing、实际UID1000私有named卷。固定日周项目与更正历史、原件/可读/原生导出逐字保留；dump后枚举前公开提交C不混入备份。阶段4公开链1/1、20.32秒；阶段5实际Codex0.157.1/Claude2.1.281各3 loopback请求，从恢复服务器下载包并在原home/workspace不可用时续聊，1/1、13.37秒。
+
+无冲突吸收017c391新AC/Gates/R/E台账；own typecheck/build/diff及路径/公开restore/OAuthMCP窄回归3/3、12.18秒通过。详见 [#32实施](../implementation/issue-32.md) 与 [操作手册](../operations/server-backup.md)，durable `issue-32-native-public.json` / `issue-32-native-witnesses.json` / final logs。等待distinct merger，未冒称main native或#32 LinuxCI；off-host/第二人、G0–G4、UTF8/Web/fixed统计review及所有历史失败仍保留。没有Task/setup/maintenance/完整Windows或付费调用。
