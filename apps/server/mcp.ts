@@ -8,8 +8,10 @@ import { registerMcpAuth } from './mcp-auth.js';
 import { HttpError } from './identities.js';
 import { searchSchema, locationSchema } from '../../packages/contracts/search.js';
 import type { AnalysisService } from './analysis.js';
+import type { ReportService } from './reports.js';
+import { reportDate } from '../../packages/contracts/reports.js';
 
-export async function registerMcp(app: FastifyInstance, db: Database, archive: ArchiveQuery, publicOrigin: string, analysis: AnalysisService) {
+export async function registerMcp(app: FastifyInstance, db: Database, archive: ArchiveQuery, publicOrigin: string, analysis: AnalysisService, reports: ReportService) {
   const { guard } = await registerMcpAuth(app, db, publicOrigin);
   const offset = z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).default(0);
   const snapshotId = z.uuid().describe('Immutable snapshot ID from list_sessions, never a mutable session ID');
@@ -55,6 +57,11 @@ export async function registerMcp(app: FastifyInstance, db: Database, archive: A
     input => result(() => archive.materialPage(input.snapshotId, input.materialId, input.offset, 2048)));
     mcp.registerTool('read_analysis', { description: '分页读取同一快照的持久分析任务、结果与精确原件引用。合成 fixture 明确标记；自述、推断、记录和材料不足分开，未知用量不等于零。',
       annotations, inputSchema: { snapshotId, offset: offset.refine(value => value <= 100000) } }, input => result(() => analysis.list(input.snapshotId, input.offset)));
+    mcp.registerTool('list_daily_reports', { description: '分页列出北京时间日报入队状态及当前不可变版本。每天09:00入队前一自然日，入队不保证完成。',
+      annotations, inputSchema: { offset } }, input => result(() => reports.list(input.offset)));
+    mcp.registerTool('read_daily_report', { description: '读取同一日报版本，按项目和跨会话主题组织本来源日期已确认活动；历史引用仅作背景，未知统计不等于零。翻页时固定 revision。',
+      annotations, inputSchema: { employeeId: z.uuid(), date: reportDate, revision: z.number().int().min(1).optional(), offset } },
+    input => result(() => reports.read(input.employeeId, input.date, input.offset, input.revision)));
     mcp.registerTool('read_analysis_operations', { description: '读取与 Web 相同的分析队列、有限尝试、输入版本、运行时配置与预算预留；未知账单不填零，不返还未知预留。',
       annotations, inputSchema: { offset: offset.refine(value => value <= 100000) } }, input => result(() => analysis.operations(input.offset)));
     return mcp;

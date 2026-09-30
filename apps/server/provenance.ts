@@ -173,17 +173,21 @@ export async function backfillOrigins(db: Database, raw: RawStore) {
   finally { client.release(); }
 }
 
-export async function archiveStatistics(db: Database, offset = 0) {
-  const warnings = (await db.query(`SELECT count(*) FILTER (WHERE provenance->>'relation'='unconfirmed')::integer AS "unconfirmedRelationSnapshots",
-    count(*) FILTER (WHERE provenance->>'relation'<>'unconfirmed' AND provenance->>'warning' IS NOT NULL)::integer AS "uncertainRewriteSnapshots" FROM snapshots`)).rows[0];
-  const rows = await db.query(`SELECT o.employee_id AS "employeeId",e.name AS employee,o.source_date AS date,
-    count(*)::integer AS records,count(DISTINCT(o.snapshot_id,o.material_id,o.line)) FILTER (WHERE o.role='user')::integer AS "userTurns",
+// Shared deterministic event ledger counts. Reports select a bounded employee/day
+// and use the activity columns; the archive view also exposes historical/unknown.
+export const ledgerCountProjection = `count(*)::integer AS records,count(DISTINCT(o.snapshot_id,o.material_id,o.line)) FILTER (WHERE o.role='user')::integer AS "userTurns",
     count(*) FILTER (WHERE o.role='tool request')::integer AS "toolCalls",
     count(*) FILTER (WHERE o.context='historical')::integer AS "historicalRecords",
     count(*) FILTER (WHERE o.context IN ('unknown-time','unknown-enrollment'))::integer AS "unknownRecords",
     count(*) FILTER (WHERE o.context='after-enrollment')::integer AS "activityRecords",
     count(DISTINCT(o.snapshot_id,o.material_id,o.line)) FILTER (WHERE o.role='user' AND o.context='after-enrollment')::integer AS "activityUserTurns",
-    count(*) FILTER (WHERE o.role='tool request' AND o.context='after-enrollment')::integer AS "activityToolCalls"
+    count(*) FILTER (WHERE o.role='tool request' AND o.context='after-enrollment')::integer AS "activityToolCalls"`;
+
+export async function archiveStatistics(db: Database, offset = 0) {
+  const warnings = (await db.query(`SELECT count(*) FILTER (WHERE provenance->>'relation'='unconfirmed')::integer AS "unconfirmedRelationSnapshots",
+    count(*) FILTER (WHERE provenance->>'relation'<>'unconfirmed' AND provenance->>'warning' IS NOT NULL)::integer AS "uncertainRewriteSnapshots" FROM snapshots`)).rows[0];
+  const rows = await db.query(`SELECT o.employee_id AS "employeeId",e.name AS employee,o.source_date AS date,
+    ${ledgerCountProjection}
     FROM archive_event_origins o JOIN employees e ON e.id=o.employee_id GROUP BY o.employee_id,e.name,o.source_date
     ORDER BY e.name,o.employee_id,o.source_date NULLS LAST LIMIT 51 OFFSET $1`, [offset]);
   return { timeZone: 'Asia/Shanghai', rows: rows.rows.slice(0, 50), warnings, nextOffset: rows.rows.length > 50 ? offset + 50 : null,
