@@ -111,3 +111,9 @@ node --import tsx --test tests/native-materials.test.ts
 ```
 
 不提供已测 runtime 的普通跨平台 CI 使用明确标记的合成 receipt fixture；Windows 实测通过公开 CLI 从真实服务器恢复包生成 receipt。新增资格表及映射必须与数据库事件账本一起备份；仍独立备份原件卷。没有修改 main、推送、创建 PR、合并分支或删除 worktree。
+
+## 材料扩展主线集成
+
+实现分支 `73c745e` 随后经 `b4a60ec` 无冲突合入，前一步 #22 已经由 `73bc1bd` 合入。主线重新构建自身源码，并通过分析/MCP/历史/材料/跨设备/材料独立资格/搜索 10/10 定向回归（72.18 秒）；材料整链证据 `%TEMP%/skynet-test-us6Ouo`，已有 primary、A→B 材料增长→C、变化字节与身份/placement 拒绝证据 `cYsTRx`。分析 origin.location 保留原材料 raw 坐标，inputLocation 保留当前主原件语义原句，两者分开，没有把材料行塞进 primary 行。
+
+本次没有实际 native 源码冲突，未重新执行原生测试；`Ba7caC` 真实正常 Codex 资格证据来自实现分支 `73c745e`。#14 recovery 修订尚未合入，本次不使用先前 ignored dist、不重复完整套件，也不消除其现存 Windows 全量失败。G0–G4、真实 Desktop UI 和完整 G2 保持开放。上节“没有修改 main/合并”的描述是实现分支交付时的动作范围。
