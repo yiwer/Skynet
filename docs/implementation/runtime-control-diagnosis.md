@@ -17,8 +17,17 @@ failed probe observations include assertions and are **not** 543 timeouts.
 The two failed states recorded synchronous supervisor child creation taking
 2164.11 and 2011.15 ms after the supervisor listener was established. Recorded
 event-loop maxima were 4466.93 and 2384.46 ms. The asynchronous diagnostic
-writer did not preserve the final client timeout records, so these values
-do not yet correlate the failed role/request with that stall.
+writer did not preserve the final client timeout records. Retained client
+and server records nevertheless identify the same supervisor connections.
+In round 2, client PID 191780 connected in 1.63 ms using local port 51148;
+server PID 17972 received that connection 2086 ms after client start,
+3 ms after child creation returned. In round 6, client PID 187504 connected
+in 1.55 ms using local port 51286; server PID 71800 received it 1966 ms
+after client start, again 3 ms after child creation. Both replies finished
+with HTTP 200 within 1 ms. Synchronous worker creation blocked the already
+listening supervisor event loop beyond the unchanged 1500 ms socket
+timeout. This explains the captured two failures; other earlier failures
+without these timings remain separate observations.
 
 Earlier public probes with 0, 8 and 24 status callers all passed. Four
 concurrent fresh installs also passed. The original installation/plugin
@@ -60,8 +69,28 @@ restart delay. Arguments preserve Windows quoting, including trailing
 backslashes. Existing Task ownership checks, current-user privilege,
 maintenance fences and hidden outer PowerShell arguments are unchanged.
 
+Task operations receive structured registration JSON without overwriting
+`autostart.json` before OS ownership validation. An exact previously shipped
+action is migrated only after the existing Task independently matches its
+action, description, current-user SID and Limited privilege. Changed tasks
+or unknown old actions retain their metadata. A new Task left by a crash
+before metadata commit is recognized on repair, and a metadata write error
+is surfaced. Five pure orchestration regressions cover owned migration,
+foreign edits, unknown prior actions and interrupted metadata commits.
+
 `npm run typecheck`, `npm run build` and `git diff --check` pass. No Task was
 started after this change. The outer Task Scheduler process creation still
 needs one explicitly controlled window observation; real Task installation
 loops remain paused. This preparation does not close the 1500 ms fault or
 Windows login/reboot acceptance.
+
+After pausing Task loops, one public current-session `start/status/stop`
+probe reused the authenticated-stopped synthetic round-2 state with its
+Task already removed. All three CLI actions and 40 authenticated queries
+passed without additional pressure or timeout. Evidence is
+`%TEMP%/skynet-test-ySaGHQ/hidden-current-session-control-probe.json`.
+This is a different workload from eight concurrent fresh Task installs.
+The next proposed timeout fix isolates synchronous child creation in a
+Worker thread which retains the actual ChildProcess; the main thread keeps
+the authenticated control listener and capture fences. That change has
+not yet been implemented or validated.
