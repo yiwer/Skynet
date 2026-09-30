@@ -19,7 +19,7 @@ export function AnalysisOperations({ request }: {request: (path: string, signal?
     <p>{data?.definition}</p><p>提供商实付：未知；失败期间原件可继续同步、查询和导出。</p>
     <ul>{data?.counts.map(row => <li key={row.state}>{analysisStates[row.state]}：{row.count}</li>)}</ul>
     <h2>运行时配置</h2><ul>{data?.workers.map(worker => <li key={worker.id}>{worker.online ? '在线' : '离线'} · {worker.config.mode === 'fixture' ? '合成演示，非正式验收' : '千问按量'} · {worker.config.model}
-      <p>配置 {worker.config.configurationHash}；并发上限 {worker.config.concurrency}，尝试上限 {worker.config.maxAttempts}，每次 {worker.config.timeoutSeconds} 秒、请求 {worker.config.maxRequests} 次、输入 {worker.config.maxInputBytes} 字节；预算 ¥{worker.config.budgetCny}。</p></li>)}</ul>
+      <p>配置 {worker.config.configurationHash}；并发上限 {worker.config.concurrency}，尝试上限 {worker.config.maxAttempts}，每次 {worker.config.timeoutSeconds} 秒、请求 {worker.config.maxRequests} 次、输入 {worker.config.maxInputBytes} 字节；预算 {worker.config.budgetId} ¥{worker.config.budgetCny}。</p></li>)}</ul>
     <h2>保留的预算预留</h2><ul>{data?.budgets.map(budget => <li key={budget.id}>{budget.id}：¥{budget.reservedCny}（未知用量不退款）</li>)}</ul>
     <h2>任务</h2><ul>{data?.runs.map(run => <li key={run.id}><a href={`#${run.snapshotId}`}>{analysisStates[run.state]} · 版本 {run.generation}</a> · 尝试 {run.attempts}/{run.maxAttempts} · {run.applicable ? '当前适用' : '待适用 / 历史'}
       <p>{run.error ?? run.targetError}</p>{run.attemptHistory.map(attempt => <p key={attempt.number}>尝试 {attempt.number}：{attempt.state}；请求 {attempt.requests ?? '未知'}；预留 ¥{attempt.reservedCny}；实付未知。</p>)}</li>)}</ul>
