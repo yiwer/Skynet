@@ -10,29 +10,30 @@ const host = { observed: '已观察宿主事件', 'pending-confirmation': '宿�
 const time = (value: string | null) => value ? new Date(value).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false }) : '未知';
 const metric = (value: number | null | undefined) => value == null ? '未知' : value.toLocaleString();
 
-export function TeamCoverage({ request, onEvidence }: { request: (path: string, signal?: AbortSignal) => Promise<Response>; onEvidence: () => void }) {
+export function TeamCoverage({ request, onEvidence, currentEmployeeId }: { request: (path: string, signal?: AbortSignal) => Promise<Response>; onEvidence: () => void; currentEmployeeId: string }) {
   const [date, setDate] = useState(beijingDate()); const [offset, setOffset] = useState(0);
   const [matrix, setMatrix] = useState<CoverageMatrix>(); const [selection, setSelection] = useState<CoverageCell>();
   const [error, setError] = useState(''); const [retry, setRetry] = useState(0);
   const [detail, setDetail] = useState<{ statistics: WorkStatistics; observations: CoverageObservation[]; nextObservationOffset: number | null }>();
   const [detailError, setDetailError] = useState(''); const [detailRetry, setDetailRetry] = useState(0); const [observationOffset, setObservationOffset] = useState(0);
+  const [statisticsOffset, setStatisticsOffset] = useState(0); const [statisticsRevision, setStatisticsRevision] = useState<number>();
   useEffect(() => {
     const abort = new AbortController(); setError(''); setMatrix(undefined); setSelection(undefined);
     void request(`/api/team-coverage?date=${date}&offset=${offset}`, abort.signal).then(response => response.json()).then((value: CoverageMatrix) => {
-      if (!abort.signal.aborted) { setMatrix(value); setSelection(value.rows[0]?.cells.find(cell => cell.date === date)); setObservationOffset(0); }
+      if (!abort.signal.aborted) { setMatrix(value); setSelection((value.rows.find(row => row.employeeId === currentEmployeeId) ?? value.rows[0])?.cells.find(cell => cell.date === date)); setObservationOffset(0); setStatisticsOffset(0); setStatisticsRevision(undefined); }
     }).catch(failure => { if (!abort.signal.aborted) setError(failure.message); });
     return () => abort.abort();
   }, [date, offset, retry]);
   useEffect(() => {
     const abort = new AbortController(); setDetail(undefined); setDetailError('');
     if (selection) void Promise.all([
-      request(`/api/work-statistics/${selection.employeeId}?date=${selection.date}`, abort.signal).then(response => response.json()),
+      request(`/api/work-statistics/${selection.employeeId}?date=${selection.date}&offset=${statisticsOffset}${statisticsRevision ? `&revision=${statisticsRevision}` : ''}`, abort.signal).then(response => response.json()),
       request(`/api/team-coverage/${selection.employeeId}/observations?date=${selection.date}&offset=${observationOffset}`, abort.signal).then(response => response.json()),
-    ]).then(([statistics, observations]) => { if (!abort.signal.aborted) setDetail({ statistics, observations: observations.observations, nextObservationOffset: observations.nextOffset }); })
+    ]).then(([statistics, observations]) => { if (!abort.signal.aborted) { setDetail({ statistics, observations: observations.observations, nextObservationOffset: observations.nextOffset }); setStatisticsRevision(statistics.revision); } })
       .catch(failure => { if (!abort.signal.aborted) setDetailError(failure.message); });
     return () => abort.abort();
-  }, [selection?.employeeId, selection?.date, observationOffset, detailRetry]);
-  function select(cell: CoverageCell) { setSelection(cell); setObservationOffset(0); }
+  }, [selection?.employeeId, selection?.date, observationOffset, statisticsOffset, detailRetry]);
+  function select(cell: CoverageCell) { setSelection(cell); setObservationOffset(0); setStatisticsOffset(0); setStatisticsRevision(undefined); setDetailRetry(value => value + 1); }
   return <section className="team-coverage" aria-label="团队覆盖矩阵">
     <div className="heading"><div><p className="eyebrow">来源日期 · 北京时间</p><h1>团队覆盖</h1><p>先看记录与采集状态，再打开原件核查。</p></div>
       <label>截止日期 <input type="date" value={date} onChange={event => { if (event.target.value) { setDate(event.target.value); setOffset(0); } }} /></label></div>
@@ -63,11 +64,14 @@ export function TeamCoverage({ request, onEvidence }: { request: (path: string, 
           <h3>已记录活动</h3><dl className="coverage-metrics"><div><dt>会话</dt><dd>{metric(detail.statistics.sessions)}</dd></div><div><dt>用户轮次</dt><dd>{metric(detail.statistics.userTurns)}</dd></div>
             <div><dt>工具调用</dt><dd>{metric(detail.statistics.toolCalls)}</dd></div><div><dt>记录中文件路径</dt><dd>{metric(detail.statistics.files.observedCount)}{!detail.statistics.files.complete && ' · 不完整'}</dd></div>
             <div><dt>来源 Token 总量</dt><dd>{metric(detail.statistics.tokens.total)}</dd></div><div><dt>活动时间段</dt><dd>{detail.statistics.intervals.length} 段</dd></div></dl>
-          <p className="muted small">{detail.statistics.definition}</p><p className="muted small">{detail.statistics.tokens.definition}</p>
+          <p className="muted small">仅已确认原活动；Token 来源记录非账单，区间非工时。</p>
+          <details><summary>核查统计口径</summary><p className="muted small">{detail.statistics.definition}</p><p className="muted small">{detail.statistics.tokens.definition}</p></details>
           <details><summary>Token 分项与活动点</summary><p>输入 {metric(detail.statistics.tokens.input)}；缓存读取 {metric(detail.statistics.tokens.cachedInput)}；缓存写入 {metric(detail.statistics.tokens.cacheWriteInput)}；输出 {metric(detail.statistics.tokens.output)}；推理输出 {metric(detail.statistics.tokens.reasoningOutput)}。</p>
             <ul>{detail.statistics.intervals.map((interval, index) => <li key={index}>{time(interval.from)} — {time(interval.to)} · {interval.points} 个来源活动点</li>)}</ul></details>
           <details><summary>原件统计引用</summary><ul>{detail.statistics.references.map((reference, index) => <li key={index}><a href={reference.webPath} onClick={onEvidence}>{reference.kind === 'file' ? reference.value : `Token 记录，第 ${reference.line} 行`}</a></li>)}</ul>
-            {detail.statistics.nextOffset !== null && <p className="muted">还有引用，使用统计 API/MCP 的 nextOffset 分页；统计版本 {detail.statistics.revision} 固定。</p>}</details>
+            <div className="pagination"><button disabled={!statisticsOffset} onClick={() => setStatisticsOffset(value => Math.max(0, value - 20))}>上一页引用</button>
+              <button disabled={detail.statistics.nextOffset === null} onClick={() => setStatisticsOffset(detail.statistics.nextOffset!)}>下一页引用</button></div>
+            <p className="muted small">统计版本 {detail.statistics.revision}；翻页保持同一版本。重新选择员工与日期可读取当前版本。</p></details>
           <h3>服务器收到的设备观测</h3>{!detail.observations.length && <p>该日没有保存的观测，覆盖未知。</p>}
           <ul>{detail.observations.map((observation, index) => <li key={index}><strong>{observation.device} · {observation.source ?? '后台'}</strong><p>{time(observation.firstReceivedAt)} — {time(observation.lastReceivedAt)}</p>
             <p>{observation.gapObserved ? '曾观察采集缺口' : '未在这些时点报告缺口'}{observation.backlogObserved ? ' · 曾有待提交原件' : ''}</p></li>)}</ul>

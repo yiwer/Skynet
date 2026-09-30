@@ -86,7 +86,13 @@ test('HTTPS OAuth consent, per-request revocation, MCP/Web evidence and complete
     client = new Client({ name: 'public-product-test', version: '1' });
     await client.connect(new StreamableHTTPClientTransport(new URL(resource), { fetch: sandbox.fetchTls,
       requestInit: { headers: { Authorization: `Bearer ${tokens.access_token}` } } }));
-    assert.equal((await client.listTools()).tools.length, 14);
+    const tools = (await client.listTools()).tools;
+    for (const name of ['list_sessions', 'read_activity_statistics', 'search_sessions', 'read_location', 'read_snapshot', 'read_capture_status',
+      'read_manifest', 'prepare_export', 'read_export', 'read_material', 'read_analysis', 'list_daily_reports', 'read_daily_report', 'read_analysis_operations',
+      'read_team_coverage', 'read_coverage_observations', 'read_work_statistics']) {
+      const tool = tools.find(tool => tool.name === name); assert.ok(tool, `missing public tool: ${name}`);
+      assert.equal(tool.annotations?.readOnlyHint, true, name);
+    }
     async function tool(name: string, args: Record<string, unknown>) {
       const result = await client!.callTool({ name, arguments: args });
       assert.notEqual(result.isError, true, JSON.stringify(result)); assert.ok(Buffer.byteLength(JSON.stringify(result)) <= 96 * 1024);

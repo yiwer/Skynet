@@ -61,7 +61,7 @@ export function coverageService(db: Database) {
     const ids = employees.slice(0, 10).map(row => row.id);
     const [activity, observations, devices, reportStates, schema] = await Promise.all([
       db.query(`SELECT employee_id,source_date,count(*)::integer AS records,count(DISTINCT (source,source_session_id))::integer AS sessions
-        FROM archive_event_origins WHERE employee_id=ANY($1::uuid[]) AND source_date=ANY($2::text[]) AND context='after-enrollment'
+        FROM effective_event_origins WHERE employee_id=ANY($1::uuid[]) AND source_date=ANY($2::text[]) AND context='after-enrollment'
         GROUP BY employee_id,source_date`, [ids, dates]),
       db.query(`SELECT d.employee_id,o.date,bool_or(o.gap_observed) AS gap,min(o.first_received_at) AS first,max(o.last_received_at) AS last,
         bool_or(o.configured=true) AS configured,bool_or(o.configured=false) AS unconfigured,
