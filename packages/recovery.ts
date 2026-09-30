@@ -65,7 +65,7 @@ export function recoveryInfo(manifest: Manifest, bytes: Buffer) {
     preparation: matchingBaseline && bytes.at(-1) === 10 && requiredParentReady ? 'candidate' : 'unsupported',
     measuredTarget: baseline,
     limitation: manifest.source === 'codex-cli'
-      ? '包含本快照已收到的原件与关联材料；附件索引会保存在恢复目录，原生数据库映射仍待验证。其他版本/OS 待验证。'
+      ? '包含本快照已收到的原件与关联材料；已测版本可在全新隔离目录重建不透明附件行；未知 payload 语义及外部资源仍未验证。其他版本/OS 待验证。'
       : '包含本快照已收到的原件与关联材料；缺口和未验证映射会保留。Desktop UI 续聊未验证，后端合成测试不代表 Desktop 支持。',
   } as const;
 }

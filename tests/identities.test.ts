@@ -114,6 +114,11 @@ test('Web account/device revocation preserves shared history and enforces every 
     await alphaDownloadPage.getByRole('button', { name: '下载原件', exact: true }).click();
     assert.equal((await deniedDownload).status(), 401);
     await alphaDownloadPage.getByRole('button', { name: '进入存档' }).waitFor();
+    // Exercise the list refresh alone; a selected snapshot would also refresh and
+    // could receive its own 401 before the deliberately held list response.
+    await alphaPage.getByRole('link', { name: 'Skynet 会话存档', exact: true }).click();
+    await expect(alphaPage.getByRole('button', { name: '下载原件', exact: true })).toHaveCount(0);
+    await expect(alphaPage.getByRole('heading', { name: '选择一条会话', exact: true })).toBeVisible();
     // Keep the real revoked response pending until the refresh has visibly entered its
     // loading state. Logout aborts that request's effect, so its finally cannot reset busy.
     let releaseRevocation!: () => void;
@@ -131,6 +136,7 @@ test('Web account/device revocation preserves shared history and enforces every 
     await expect(alphaPage.getByRole('button', { name: '进入存档', exact: true })).toBeEnabled();
     await alphaPage.getByRole('button', { name: '进入存档', exact: true }).click();
     await expect(alphaPage.getByRole('button', { name: '刷新存档', exact: true })).toBeEnabled();
+    await alphaPage.locator(`a[href="#${archived.snapshotId}"]`).click();
     await expect(alphaPage.getByText('甲设备一的历史材料仍可核查', { exact: true })).toBeVisible();
     for (const path of ['/api/me', '/api/sessions', snapshotPath, `${snapshotPath}/raw`, `${snapshotPath}/readable`, `${snapshotPath}/recovery`]) {
       assert.equal((await api(path, alpha.readerCredential)).status, 401);

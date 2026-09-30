@@ -1,6 +1,6 @@
 # Skynet
 
-内部 Coding Agent 工作观察与会话存档平台。用户已确认整体设计，已完成 PRD v1.0 与 v2.0、研究与架构文档，以及 Web 平台原型。现已实现认证存档、历史增量、关联材料导出与恢复、账号和设备停用，并实测两个 CLI 的自动采集、旧会话接管和服务器独立原生续聊；真实 Codex Desktop 界面与完整发布门槛仍待验收，V1 尚未完成。进度见 [V1 实施记录](docs/planning/v1-implementation.md)。
+内部 Coding Agent 工作观察与会话存档平台。已实现认证存档、历史增量、关联材料与恢复、npm/插件共享后台、故障缺口、HTTPS MCP 和组合搜索，并实测两个 CLI 的自动采集及服务器独立原生续聊。V1 已恢复实施，正在补齐生命周期、跨设备归属和原生客户端验证；分析、工作视图和完整发布验收尚未完成，V1 仍为草稿。进度、验证与恢复入口见 [V1 实施记录](docs/planning/v1-implementation.md)。
 
 ## 文档入口
 
@@ -11,13 +11,16 @@
 | [Codex CLI 存档与恢复](docs/implementation/issue-6.md) | 正常 hook 信任、两个项目自动采集、公开导出及服务器包原生续聊；支持范围与 hook 延迟实测 |
 | [Claude Code CLI 链路](docs/implementation/issue-7.md) | 普通 hooks、多项目采集、完整导出与服务器包原生续聊；单原件范围与未验证条件 |
 | [旧会话续用与来源日期](docs/implementation/issue-8.md) | 仅同步宿主登记的旧会话、校验增量上传、历史上下文及来源日期；三来源公开流程与真实验收边界 |
+| [G0 可持续回归与剩余验收](docs/implementation/issue-10.md) | 两个 CLI 旧会话、实际 Claude 代码/子会话、两版 Codex 附件行精确恢复；Desktop UI 与普通沙箱待补齐 |
 | [npm 单授权值接入](docs/implementation/issue-11.md) | 内部离线 npm 包、自动检测与配置、私有共享身份/后台、真实 CLI 安装链；完整 G1 与 Desktop 仍待验收 |
 | [当前用户后台与崩溃恢复](docs/implementation/issue-12.md) | 认证独占控制、共享后台、Windows 隐藏用户任务、真实 Claude 崩溃后自动采集；登录/重启/休眠及 Desktop 仍待验收 |
+| [内部插件入口与共享后台](docs/implementation/issue-13.md) | 两个真实 CLI marketplace 接入、与 npm 共存、入口所有权和冻结材料补传；完整 G1 与 Desktop 市场 UI 仍待验收 |
 | [账号与设备停用](docs/implementation/issue-20.md) | 显式维护权限、Web 停用、逐请求撤销校验及审计；保留共享历史读取，真实安装前置验收仍待通过 |
 | [离线持久队列与补传](docs/implementation/issue-16.md) | 原件与关联材料先落盘再交付、跨进程退避、ACK 后清理、设备同步页面；完整 G2 仍待验收 |
 | [崩溃与确认丢失后的快照一致性](docs/implementation/issue-17.md) | 持久上传键、事务提交、接入确认恢复及进程强杀回归；完整 G2 仍待验收 |
+| [本地故障与采集覆盖缺口](docs/implementation/issue-18.md) | 真实 Linux 满盘/权限/删除故障、正常 Claude hooks、独立设备/会话/MCP 覆盖报告；故障恢复不抹去未核实范围 |
 | [Agent 内授权读取](docs/implementation/issue-26.md) | HTTPS MCP / OAuth、共享原文与材料分页、完整导出；两个真实 CLI 正常授权与查询已测，完整发布门槛仍待验收 |
-| [会话搜索与证据定位](docs/implementation/issue-27.md) | Web / MCP 组合检索、固定候选分页、历史快照与命中上下文；未知原件及文本材料可检索，完整导出保留全部字节 |
+| [组合搜索与稳定证据定位](docs/implementation/issue-27.md) | Web/MCP 共用员工、日期、项目、来源及内容搜索，历史快照与未知项目可查；命中回到固定原件行与文字位置 |
 | [PRD v1.0](docs/requirements/PRD.md) | 首版实施与验收依据：71 条用户故事、实施决策、22 组验收场景与发布门槛 |
 | [V1 验收标准](docs/requirements/v1-acceptance.md) | 把 PRD v1.0 的 AC-01…AC-22 与 G0—G4 整理成可执行的验收步骤、证据与判定规则 |
 | [PRD v2.0](docs/requirements/PRD-v2.md) | V2：数据报表、对话视图、活动记录、会话组装审计与员工使用能力评估；用户故事 72—176，验收场景 AC-23…AC-38 |

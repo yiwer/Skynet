@@ -8,15 +8,20 @@ import { join, relative, resolve } from 'node:path';
 import { mkdir, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises';
 import { setTimeout } from 'node:timers/promises';
 import { deflateSync } from 'node:zlib';
+import { createHash } from 'node:crypto';
 import { command, createSandbox, stop } from './support.js';
 
 // Explicit opt-in integration test: a real installed native runtime, synthetic local provider,
 // no login credentials, host hooks, trust flags, or source-state fallback during restoration.
 test('native fork, parent image and tool history survive server material package alone in a fresh native home', { timeout: 180_000 }, async () => {
-  const runtime = process.env.SKYNET_CODEX_RUNTIME;
-  assert.ok(runtime, 'Set SKYNET_CODEX_RUNTIME to the measured Desktop bundled codex.exe');
+  const sourceKind = process.env.SKYNET_MATERIAL_SOURCE ?? 'codex-desktop';
+  assert.ok(['codex-desktop', 'codex-cli'].includes(sourceKind));
+  const sourceVersion = sourceKind === 'codex-cli' ? '0.157.1' : '26.924.2738.0';
+  const runtimeVersion = sourceKind === 'codex-cli' ? '0.157.1' : '0.158.0-alpha.2.1';
+  const runtime = sourceKind === 'codex-cli' ? process.env.SKYNET_CODEX_CLI : process.env.SKYNET_CODEX_RUNTIME;
+  assert.ok(runtime, 'Set SKYNET_CODEX_RUNTIME or SKYNET_CODEX_CLI to the measured binary for SKYNET_MATERIAL_SOURCE');
   assert.equal(process.platform, 'win32'); assert.equal(process.arch, 'x64');
-  assert.equal((await command(runtime, ['--version'], process.env)).trim(), 'codex-cli 0.158.0-alpha.2.1');
+  assert.equal((await command(runtime, ['--version'], process.env)).trim(), `codex-cli ${runtimeVersion}`);
   const sandbox = await createSandbox();
   const requests: any[] = [];
   const userMarker = 'SKYNET_SERVER_ONLY_CONTEXT_731';
@@ -136,7 +141,7 @@ test('native fork, parent image and tool history survive server material package
     const origin = await sandbox.startServer();
     const state = join(sandbox.directory, 'collector');
     await sandbox.collectorCommand('setup', state, { server: origin, enrollmentCredential: employee.enrollmentCredential,
-      nativeRoot: join(sourceHome, 'sessions'), sourceVersion: '26.924.2738.0', sourceOs: 'win32' });
+      nativeRoot: join(sourceHome, 'sessions'), source: sourceKind, sourceVersion, sourceOs: 'win32' });
     // Simulates the host event; this is not Desktop hook trust/automatic capture acceptance.
     await sandbox.collectorCommand('hook', state, { hook_event_name: 'Stop', session_id: threadId, transcript_path: sourcePath, cwd: sourceWorkspace });
     const collected = JSON.parse(await sandbox.collectorCommand('run', state));
@@ -158,18 +163,51 @@ test('native fork, parent image and tool history survive server material package
     await writeFile(join(sandbox.directory, 'generated-parent.jsonl'), parentOriginal); await writeFile(join(sandbox.directory, 'generated-fork.jsonl'), original);
     assert.equal(resolve(sourceHome), join(resolve(sandbox.directory), 'native-source'), 'recursive removal is constrained to this test-created source home');
     await rm(sourceHome, { recursive: true, maxRetries: 20, retryDelay: 100 }); // No source transcript or database remains to consult.
+    const attachmentIndex = bundle.manifest.capture.materials.findIndex((item: any) => item.placement === 'codex-attachments');
+    const corruptions = [
+      (rows: any[]) => { rows.push(structuredClone(rows[0])); },
+      (rows: any[]) => { rows[0].thread_id = threadId; },
+      (rows: any[]) => { rows[0].payload = 'not JSON'; },
+      (rows: any[]) => { rows[0].created_at = -1; },
+    ];
+    for (const [index, corrupt] of corruptions.entries()) {
+      const bad = structuredClone(bundle); const meta = bad.manifest.capture.materials[attachmentIndex];
+      const data = bad.materials.find((item: any) => item.id === meta.id);
+      const rows = JSON.parse(Buffer.from(data.data, 'base64').toString()); corrupt(rows);
+      const bytes = Buffer.from(JSON.stringify(rows)); data.data = bytes.toString('base64');
+      meta.hash = createHash('sha256').update(bytes).digest('hex'); meta.byteLength = bytes.length;
+      const { packageSha256: _, ...content } = bad; bad.packageSha256 = createHash('sha256').update(JSON.stringify(content)).digest('hex');
+      const invalidPackage = join(sandbox.directory, `invalid-attachment-${index}.json`); await writeFile(invalidPackage, JSON.stringify(bad));
+      const invalidTarget = join(sandbox.directory, `invalid-target-${index}`);
+      await assert.rejects(command(process.execPath, ['dist/apps/collector/cli.js', 'restore', '--package', invalidPackage, '--target', invalidTarget, '--source-version', sourceVersion, '--runtime', runtime], sandbox.env), /attachment|Attachment/);
+      await assert.rejects(readdir(invalidTarget), { code: 'ENOENT' });
+    }
     const receipt = JSON.parse(await command(process.execPath, ['dist/apps/collector/cli.js', 'restore', '--package', packagePath,
-      '--target', target, '--desktop-version', '26.924.2738.0', '--runtime', runtime], sandbox.env));
-    assert.equal(receipt.state, 'prepared-desktop-unverified');
+      '--target', target, '--source-version', sourceVersion, '--runtime', runtime], sandbox.env));
+    assert.equal(receipt.state, sourceKind === 'codex-cli' ? 'prepared-cli' : 'prepared-desktop-unverified');
     assert.equal(receipt.sourceSessionId, threadId);
     assert.deepEqual(await readFile(receipt.rolloutPath), original, 'server-only restored bytes are exact before the native runtime opens them');
-    assert.deepEqual((await readdir(target)).sort(), ['restore-receipt.json', 'sessions', 'skynet-associated'], 'only native rollouts, portable attachments and a receipt are restored');
+    assert.equal(receipt.attachmentRowsReconstructed, 1);
+    assert.equal(receipt.attachmentPayloadSemantics, 'unverified');
+    assert.ok((await readdir(target)).includes('state_5.sqlite'));
+    assert.ok(!(await readdir(target)).includes('.skynet-restore-incomplete'));
+    assert.ok(!(await readdir(target)).includes('auth.json'), 'credentials are never restored');
     assert.deepEqual(await readFile(receipt.materials.find((item: any) => item.role === 'parent-transcript').path), parentOriginal);
-    assert.ok(receipt.gaps.some((item: any) => item.code === 'native-mapping-unverified'), 'attachment database mapping is not silently claimed');
+    assert.ok(receipt.gaps.some((item: any) => item.code === 'native-mapping-unverified'), 'opaque payload and Desktop semantic support is not silently claimed');
     await configure(target);
     nativeClient = await client(target, restoredWorkspace);
     const listed = await nativeClient.rpc('thread/list', { modelProviders: [], sourceKinds: ['cli', 'vscode', 'exec', 'appServer', 'unknown'], limit: 100 });
     await writeFile(join(sandbox.directory, 'native-list-before-resume.json'), JSON.stringify(listed, null, 2));
+    const archivedMaterial = bundle.manifest.capture.materials.find((item: any) => item.placement === 'codex-attachments');
+    const archivedRows = JSON.parse(Buffer.from(bundle.materials.find((item: any) => item.id === archivedMaterial.id).data, 'base64').toString());
+    const nativeAttachments = await nativeClient.rpc('thread/attachment/list', { threadId: parentId });
+    assert.equal(nativeAttachments.data.length, archivedRows.length);
+    for (const row of archivedRows) {
+      const item = nativeAttachments.data.find((item: any) => item.id === row.id); assert.ok(item);
+      assert.equal(item.createdAt, row.created_at); assert.equal(item.attachmentType, row.attachment_type);
+      assert.equal(item.identityKey, row.identity_key); assert.deepEqual(item.payload, JSON.parse(row.payload));
+    }
+    await writeFile(join(sandbox.directory, 'native-attachment-readback.json'), JSON.stringify({ archivedRows, nativeAttachments }, null, 2));
     const resumed = await nativeClient.rpc('thread/resume', { ...parameters, threadId, cwd: restoredWorkspace });
     assert.equal(resumed.thread.id, threadId);
     const beforeContinuation = requests.length;
@@ -186,14 +224,14 @@ test('native fork, parent image and tool history survive server material package
     assert.ok(JSON.stringify(restoredParent).includes(userMarker));
     await writeFile(join(sandbox.directory, 'native-read-after-resume.json'), JSON.stringify({ restored, restoredParent }, null, 2));
     await nativeClient.close(); nativeClient = undefined;
-    const evidence = { testedAt: new Date().toISOString(), desktopVersion: '26.924.2738.0', runtime: '0.158.0-alpha.2.1',
+    const evidence = { testedAt: new Date().toISOString(), source, sourceVersion, runtime: runtimeVersion,
       os: process.platform, arch: process.arch, sourceHomeRemoved: true, serverPackageOnly: true,
       originalBytesPreserved: true, contextAndToolHistoryRetained: true, nativeBackend: 'passed-synthetic-provider',
       desktopUi: 'unverified', automaticHostCapture: 'unverified', snapshotId, parentId, threadId,
-      forkBoundaryPreserved: true, inlineImageRetained: true, attachmentRowsPreserved: true, attachmentDatabaseRebuild: 'unverified',
+      forkBoundaryPreserved: true, inlineImageRetained: true, attachmentRowsPreserved: true, attachmentDatabaseRebuild: 'exact-opaque-rows', attachmentPayloadSemantics: 'unverified',
       newEmptyForkListedBeforeResume: listed.data.some((thread: any) => thread.id === threadId), forkReadReturnsOwnTurns: true };
-    await writeFile(join(sandbox.directory, 'native-materials-evidence.json'), JSON.stringify(evidence, null, 2));
-    console.log(`Native material backend evidence (Desktop UI unverified): ${join(sandbox.directory, 'native-materials-evidence.json')}`);
+    await writeFile(join(sandbox.directory, `native-materials-${sourceKind}-evidence.json`), JSON.stringify(evidence, null, 2));
+    console.log(`Native material backend evidence (Desktop UI unverified): ${join(sandbox.directory, `native-materials-${sourceKind}-evidence.json`)}`);
   } finally {
     try { await nativeClient?.close(); } finally { provider.closeAllConnections(); provider.close(); await sandbox.close(); }
   }

@@ -13,7 +13,7 @@
 | 来源 | 自动选取范围 | 限制与缺口 |
 | --- | --- | --- |
 | Claude Code CLI | 已登记 UUID 对应的 `subagents`、`tool-results`；同 ID 的 orphaned/superseded 前原件；`projects` 根对应的 `image-cache/UUID`、`uploads/UUID`；来源明确引用的 `file-history/UUID/backup`；内嵌图像 | 仅这些已知映射，不扫描其他会话。临时图像需 setup 显式给出 `nativeTempRoot`，按项目编码和会话 ID 选取。未知外部引用/原生映射不宣称可恢复。 |
-| Codex Desktop / CLI | 原生 metadata 的 fork/history/parent 引用和结构化 `spawn_agent` 返回的 child ID；只读原生 `state_N.sqlite` 精确查询这些 ID 的 `rollout_path`，递归父链最多 32 项；仅选中 ID 的 `thread_attachments` 行；主原件内嵌图像 | 不上传 SQLite 全库，不从目录变化推定资格，不跟随任意消息文本里的路径。附件 payload 原样保存成独立 JSON；未知附件类型对应的外部文件映射与数据库回填仍未验证。父原件内嵌图像保存在父原件中。 |
+| Codex Desktop / CLI | 原生 metadata 的 fork/history/parent 引用和结构化 `spawn_agent` 返回的 child ID；只读原生 `state_N.sqlite` 精确查询这些 ID 的 `rollout_path`，递归父链最多 32 项；仅选中 ID 的 `thread_attachments` 行；主原件内嵌图像 | 不上传 SQLite 全库，不从目录变化推定资格，不跟随任意消息文本里的路径。附件 payload 原样保存成独立 JSON；已测版本的隔离数据库行回填见 #10；未知附件类型的业务语义和外部文件映射仍未验证。父原件内嵌图像保存在父原件中。 |
 
 每个路径都验证配置根边界、所有路径段的 symlink/junction、常见凭据文件名和硬链接；读取前后检查文件身份。拒绝 auth、credentials、settings/config、`.env`、session-env、shell-snapshots 等配置/凭据文件。file-history 同时检查原始文件名。已知引用缺失、读取失败、危险路径、超限和无法解释的格式都记录缺口。未知 JSONL 行始终保留，详情仍显示未解析数量。
 
@@ -48,3 +48,5 @@ node --import tsx --test --test-concurrency=1 tests/native-materials.test.ts
 该运行时首次 `thread/list` 未列出还没有自有 turn 的空 fork；按 ID `thread/resume` 成功，fork 的 `thread/read` 返回自有 turn，继承上下文通过实际 provider 请求核验。独立附件行已保存在包中，原生数据库回填未验证。宿主事件在这个 fork 实验中为合成调用，因此它不证明 Desktop 普通 hook 或 Desktop UI。所有模型响应由确定性 loopback provider 生成，无信任或权限绕过。
 
 隔离证据：`C:/Users/Administrator/AppData/Local/Temp/skynet-test-VtljDf/native-materials-evidence.json`、同目录的生成父/分支原件与 native read 结果；合成 Web 证据在 `skynet-test-FZoJ7f/materials-{desktop,mobile}.png`（测试会打印当次新路径）。原生格式研究笔记为外部 `skynet-v1-implementation/associated-material-research.md`。这些诊断不是产品恢复依赖，恢复只使用服务器下载包。
+
+2026-09-30 补充：独立附件行的产品恢复现已在 Codex CLI0.157.1及 Desktop 内置0.158.0-alpha.2.1测到原 ID/时间/type/key/payload 的精确原生 readback；更早的“回填未验证”表述属于当时结果。未知附件业务语义、外部资源和 Desktop UI仍未验证。复现与边界见 [#10](issue-10.md)。

@@ -3,6 +3,7 @@ import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { realpath, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { optionalJson, jsonFile } from './install-state.js';
+import { setTimeout as delay } from 'node:timers/promises';
 
 type Role = 'supervisor' | 'worker';
 type Control = { token: string; supervisorPort: number; workerPort: number };
@@ -26,6 +27,18 @@ async function control(state: string): Promise<Control> {
   return value;
 }
 export async function askRuntime(state: string, role: Role, action: 'status' | 'stop' = 'status'): Promise<any | null> {
+  for (let attempt = 0; ; attempt++) {
+    try { return await askOnce(state, role, action); }
+    catch (error) {
+      // A connection accepted concurrently with listener shutdown can reset
+      // before its request is read. Re-probe the authenticated endpoint: only
+      // a valid reply or a new ECONNREFUSED establishes its current state.
+      if ((error as NodeJS.ErrnoException).code !== 'ECONNRESET' || attempt === 3) throw error;
+      await delay(25 * (attempt + 1));
+    }
+  }
+}
+async function askOnce(state: string, role: Role, action: 'status' | 'stop'): Promise<any | null> {
   const config = await control(state);
   return new Promise((resolve, reject) => {
     const req = request({ host: '127.0.0.1', port: config[`${role}Port`], path: `/${action}`, method: action === 'stop' ? 'POST' : 'GET',
@@ -50,8 +63,8 @@ export async function ownRuntime(state: string, role: Role, status: () => object
     if (supplied.length !== expected.length || !timingSafeEqual(supplied, expected)) { res.writeHead(401); res.end(); return; }
     if (!((req.method === 'GET' && req.url === '/status') || (req.method === 'POST' && req.url === '/stop'))) { res.writeHead(404); res.end(); return; }
     res.setHeader('Content-Type', 'application/json'); res.setHeader('Cache-Control', 'no-store');
+    if (req.url === '/stop') res.once('finish', stop);
     res.end(JSON.stringify({ role, ...status() }));
-    if (req.url === '/stop') stop();
   });
   server.headersTimeout = 3000; server.requestTimeout = 3000; server.keepAliveTimeout = 1000;
   await new Promise<void>((resolve, reject) => {
@@ -60,5 +73,11 @@ export async function ownRuntime(state: string, role: Role, status: () => object
   return server;
 }
 export async function releaseRuntime(server: Server) {
-  server.closeAllConnections(); await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
+  // Keep in-flight authenticated replies intact. Destroying every connection
+  // before close could turn a successful stop into ECONNRESET for its caller.
+  await new Promise<void>((resolve, reject) => {
+    const timer = setTimeout(() => server.closeAllConnections(), 3500);
+    server.close(error => { clearTimeout(timer); error ? reject(error) : resolve(); });
+    server.closeIdleConnections();
+  });
 }

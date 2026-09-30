@@ -6,13 +6,14 @@ import { sourceLabel } from '../../packages/contracts/archive.js';
 import { IdentityManagement } from './IdentityManagement.js';
 import { HistoryMaterials } from './HistoryMaterials.js';
 import { DeviceDelivery } from './DeviceDelivery.js';
+import { CaptureCoverage, type Coverage } from './CaptureCoverage.js';
 import './style.css';
 import { InstallationHelp } from './installation.js';
 import { ArchiveSearch } from './ArchiveSearch.js';
 import { EvidenceReader, selectedEvidence } from './EvidenceReader.js';
 
 type Detail = { snapshotId: string; employee: string; manifest: Manifest; committedAt: string; events: ActivityEvent[]; activity: ActivitySummary;
-  unrecognizedLines: number; partialLine: boolean; nextOffset: number | null; total: number;
+  unrecognizedLines: number; partialLine: boolean; nextOffset: number | null; total: number; captureHealth: Coverage;
   recovery: { nativeRuntimeVersion: string | null; preparation: string; nativeBackend: string; limitation: string } };
 const date = (value: string) => new Date(value).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false });
 const contextLabel: Record<ActivityContext, string> = { historical: '历史上下文', 'after-enrollment': '接入后活动',
@@ -140,6 +141,7 @@ function App() {
             request={(path, signal) => request(path, token, signal)} />}
           {(detail.unrecognizedLines > 0 || detail.partialLine) && <p className="notice">{detail.unrecognizedLines} 行未解析{detail.partialLine ? '，另有未闭合的末行' : ''}。全部字节仍保存在原件中。</p>}
           <HistoryMaterials key={detail.snapshotId} snapshotId={detail.snapshotId} capture={detail.manifest.capture} request={(path, signal) => request(path, token, signal)} />
+          <CaptureCoverage key={`coverage-${detail.snapshotId}`} initial={detail.captureHealth} path={`/api/snapshots/${detail.snapshotId}/capture-status`} request={path => request(path)} />
           <section className="recovery" aria-label="来源日期与活动"><h3>来源日期与活动</h3>
             <dl><div><dt>设备接入</dt><dd>{detail.activity.enrolledAt ? date(detail.activity.enrolledAt) : '未知（旧设备没有可信登记时间）'}</dd></div>
               <div><dt>宿主登记</dt><dd>{date(detail.manifest.qualifiedAt)}</dd></div>
