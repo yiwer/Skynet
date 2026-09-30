@@ -54,6 +54,7 @@ export function DailyReports({ request, currentEmployeeId, onEvidence }: {
   for (const item of report?.items ?? []) { const key = JSON.stringify([item.project, item.theme]); groups.set(key, [...(groups.get(key) ?? []), item]); }
   return <section aria-label="日工作"><p className="eyebrow">北京时间 · 工作证据</p><h1>日工作</h1>
     <p>每天 09:00 将前一自然日入队。分析完成时间取决于运行时与队列；无需逐会话申请分析。</p>
+    <p>未显示的目标、成果或阻塞表示尚无本日证据支持，不表示这些事项为零；主题关联和结论保留分析分级。</p>
     <label>员工<select value={employeeId} onChange={event => { setEmployeeId(event.target.value); setRevision(''); }}>{employees.map(employee => <option key={employee.id} value={employee.id}>{employee.name}</option>)}</select></label>
     {employeeOffset !== null && <button onClick={async () => { try { const value = await (await request(`/api/daily-report-employees?offset=${employeeOffset}`)).json(); setEmployees(previous => [...previous, ...value.employees]); setEmployeeOffset(value.nextOffset); } catch (failure) { setError((failure as Error).message); } }}>更多员工</button>}
     <label>来源日期<input type="date" value={date} max={beijingDate()} onChange={event => { setDate(event.target.value); setRevision(''); }} /></label>
@@ -73,7 +74,7 @@ export function DailyReports({ request, currentEmployeeId, onEvidence }: {
         {items.map((item, index) => <div key={`${item.analysisId}/${index}`}><h4>{analysisLabels[item.category]} · {assessmentLabels[item.assessment]}</h4><p>{item.text}</p>
           <p className="muted">{item.themeAssociation === 'inferred-single-topic' ? '主题关联为推断；当前分析仅有一个合格主题，尚无逐事项关系证据。' : item.themeAssociation === 'unassigned' ? '主题关联尚不确定；未任意归入首个主题。' : '分析中的主题记录。'}</p>
           {item.citations.map((citation, ci) => <p key={ci}><a href={citation.webPath} onClick={onEvidence}>核查本日原句 · {citation.origin?.employee} · {citation.origin?.sourceDate}</a><q>{citation.quote}</q></p>)}
-          {!!item.backgroundCitations.length && <details><summary>背景引用（不计本日活动）</summary>{item.backgroundCitations.map((citation, ci) => <p key={ci}><a href={citation.webPath} onClick={onEvidence}>{citation.origin?.employee ?? '归属未知'} · {citation.origin?.sourceDate ?? '日期未知'}</a><q>{citation.quote}</q></p>)}</details>}
+          {!!item.backgroundCitations.length && <details><summary>背景或其他项目引用（不计本项活动）</summary>{item.backgroundCitations.map((citation, ci) => <p key={ci}><a href={citation.webPath} onClick={onEvidence}>{citation.origin?.employee ?? '归属未知'} · {citation.origin?.sourceDate ?? '日期未知'} · {citation.origin?.project}</a><q>{citation.quote}</q></p>)}</details>}
         </div>)}</section>)}
       {!report.items.length && <p>尚无有本日证据支持的工作主题；不能推断目标、成果或阻塞为零。</p>}
       {report.nextOffset !== null && <button disabled={busy} onClick={more}>读取本版更多主题</button>}

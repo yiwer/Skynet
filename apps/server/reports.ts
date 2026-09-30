@@ -4,6 +4,7 @@ import { HttpError } from './identities.js';
 import type { AnalysisService } from './analysis.js';
 import type { AnalysisRun } from '../../packages/contracts/analysis.js';
 import { beijingDate, dueReportDate, reportDate, type DailyItem, type DailyReport } from '../../packages/contracts/reports.js';
+import { ledgerCountProjection } from './provenance.js';
 
 export async function migrateReports(db: Database) {
   await db.query(`CREATE TABLE IF NOT EXISTS daily_report_periods(employee_id uuid NOT NULL REFERENCES employees(id),date text NOT NULL,
@@ -44,7 +45,21 @@ export function dailyItems(runs: AnalysisRun[], employeeId: string, date: string
   return items.sort((a, b) => a.project.localeCompare(b.project) || a.theme.localeCompare(b.theme) || a.category.localeCompare(b.category) || a.text.localeCompare(b.text));
 }
 
-const definition = '记录、用户轮次（原件或材料行）、工具调用（解析 block）按不可变 eventId 去重，仅计原员工在本来源日期的已确认接入后活动。历史或关联上下文与未知单列；材料仅被保存不算活动。文件、原生 token、活动区间及按日设备覆盖尚未知；区间不是人工工时。无已确认记录不证明没有工作。';
+const definition = '记录、用户轮次（原件或材料行）、工具调用（解析 block）按不可变 eventId 去重，仅计原员工在本来源日期的已确认接入后活动。历史或关联上下文与未知单列；材料仅被保存不算活动。未确认复制保持独立，可能存在无法确认的重复。文件、原生 token、活动区间及按日设备覆盖尚未知；区间不是人工工时。无已确认记录不证明没有工作。';
+// Optional for historical short-session results. #23 owns the full per-range
+// contract; reports expose its compact scope plus the immutable analysis ID.
+type Processing = { version: string; complete: boolean; aggregation: string; omittedFindings: number;
+  ranges: { state: 'extracted' | 'failed' | 'skipped' }[] };
+export function reportRunCoverage(run: AnalysisRun) {
+  const processing = (run.result as (AnalysisRun['result'] & { processing?: Processing }))?.processing;
+  const coverage = run.input.coverage;
+  return { incomplete: coverage.unrecognizedLines > 0 || coverage.partialLine || coverage.captureGaps.length > 0
+    || coverage.excludedMaterials > 0 || !!processing && (!processing.complete || processing.omittedFindings > 0
+      || ['failed', 'limited'].includes(processing.aggregation) || processing.ranges.some(range => range.state !== 'extracted')),
+    processingScope: processing ? { version: processing.version, complete: processing.complete, aggregation: processing.aggregation,
+      omittedFindings: processing.omittedFindings, extractedRanges: processing.ranges.filter(range => range.state === 'extracted').length,
+      failedRanges: processing.ranges.filter(range => range.state === 'failed').length, skippedRanges: processing.ranges.filter(range => range.state === 'skipped').length } : undefined };
+}
 export function reportService(db: Database, analysis: AnalysisService) {
   async function validate(employeeId: string, date: string) {
     reportDate.parse(date);
@@ -89,16 +104,13 @@ export function reportService(db: Database, analysis: AnalysisService) {
       const employee = (await client.query('SELECT name FROM employees WHERE id=$1', [employeeId])).rows[0];
       const events = (await client.query(`SELECT event_id,project FROM archive_event_origins WHERE employee_id=$1 AND source_date=$2
         AND context='after-enrollment' ORDER BY event_id LIMIT 10001`, [employeeId, date])).rows;
-      const counts = (await client.query(`SELECT count(*) FILTER(WHERE context='after-enrollment')::integer AS records,
-        count(DISTINCT(snapshot_id,material_id,line)) FILTER(WHERE context='after-enrollment' AND role='user')::integer AS "userTurns",
-        count(*) FILTER(WHERE context='after-enrollment' AND role='tool request')::integer AS "toolCalls",
-        count(*) FILTER(WHERE context='historical')::integer AS "historicalRecords",
-        count(*) FILTER(WHERE context IN ('unknown-time','unknown-enrollment'))::integer AS "unknownRecords"
-        FROM archive_event_origins WHERE employee_id=$1 AND source_date=$2`, [employeeId, date])).rows[0];
+      const ledger = (await client.query(`SELECT ${ledgerCountProjection} FROM archive_event_origins o WHERE o.employee_id=$1 AND o.source_date=$2`, [employeeId, date])).rows[0];
+      const counts = { records: ledger.activityRecords, userTurns: ledger.activityUserTurns, toolCalls: ledger.activityToolCalls,
+        historicalRecords: ledger.historicalRecords, unknownRecords: ledger.unknownRecords };
       const undated = Number((await client.query(`SELECT count(*) FROM archive_event_origins WHERE employee_id=$1 AND source_date IS NULL`, [employeeId])).rows[0].count);
       // Each event's latest exact carrier is chosen, including restored primary
       // copies. Original origin coordinates/ownership stay frozen in analysis input.
-      const snapshots = (await client.query(`SELECT DISTINCT s.id,s.hash FROM archive_event_origins o
+      const snapshots = events.length > 10000 ? [] : (await client.query(`SELECT DISTINCT s.id,s.hash FROM archive_event_origins o
         CROSS JOIN LATERAL (SELECT ss.id,ss.hash FROM snapshot_events se JOIN snapshots ss ON ss.id=se.snapshot_id
           WHERE se.event_id=o.event_id ORDER BY ss.committed_at DESC,ss.id DESC LIMIT 1) s
         WHERE o.employee_id=$1 AND o.source_date=$2 AND o.context='after-enrollment' ORDER BY s.id LIMIT 101`, [employeeId, date])).rows;
@@ -113,31 +125,39 @@ export function reportService(db: Database, analysis: AnalysisService) {
       for (const snapshot of overflow ? [] : snapshots) {
         try {
           const run = await analysis.request(snapshot.id, null, { trigger: 'scheduled' }) as AnalysisRun;
-          runs.push(run); inputs.push({ snapshotId: snapshot.id, hash: snapshot.hash, analysisId: run.id, state: run.state });
+          runs.push(run); inputs.push({ snapshotId: snapshot.id, hash: snapshot.hash, analysisId: run.id, state: run.state,
+            applicable: run.applicable, generation: run.generation, configurationHash: run.config.configurationHash, parserVersion: run.input.parserVersion,
+            processingScope: reportRunCoverage(run).processingScope });
           if (run.state === 'failed') messages.push(`分析 ${run.id} 失败；本日材料尚不足以形成完整主题。`);
+          if (run.state === 'succeeded' && !run.applicable) messages.push(`分析 ${run.id} 已过时，不能作为当前日报结论；旧分析及原件仍可核查。`);
         } catch (error) {
           const message = error instanceof HttpError ? error.message : '分析暂时不可用；原件仍保留';
           messages.push(message); inputs.push({ snapshotId: snapshot.id, hash: snapshot.hash, analysisId: null, state: 'unavailable' });
         }
       }
       const ids = new Set<string>(events.slice(0, 10000).map(row => row.event_id));
-      const waiting = runs.some(run => ['queued', 'running'].includes(run.state));
-      const incomplete = overflow || inputs.some(input => ['failed', 'unavailable'].includes(input.state));
-      const items = dailyItems(runs.filter(run => run.state === 'succeeded'), employeeId, date, ids);
-      const state: DailyReport['state'] = waiting ? 'waiting-analysis' : incomplete ? (items.length ? 'partial' : 'unavailable')
+      const waiting = runs.some(run => ['queued', 'running', 'retry-wait'].includes(run.state));
+      const evidenceIncomplete = runs.some(run => reportRunCoverage(run).incomplete);
+      const incomplete = overflow || evidenceIncomplete || inputs.some(input => ['failed', 'unavailable'].includes(input.state)
+        || (input.state === 'succeeded' && !input.applicable));
+      const items = dailyItems(runs.filter(run => run.state === 'succeeded' && run.applicable), employeeId, date, ids);
+      const state: DailyReport['state'] = waiting ? 'waiting-analysis' : incomplete ? (runs.some(run => run.state === 'succeeded' && run.applicable) ? 'partial' : 'unavailable')
         : events.length && !items.length ? 'partial' : 'ready';
       if (events.length && !items.length && !waiting) messages.push('没有可用于本日目标、行动、结果或阻塞的分析引用；不能推断这些事项为零。');
       for (const run of runs) {
         const coverage = run.input.coverage;
         if (coverage.unrecognizedLines || coverage.partialLine || coverage.captureGaps.length || coverage.excludedMaterials)
           messages.push(`原件 ${run.snapshotId}：${coverage.unrecognizedLines} 行未解析，${coverage.partialLine ? '有未闭合末行' : '末行闭合'}，${coverage.excludedMaterials} 项关联材料未分析，${coverage.captureGaps.length} 项采集缺口。未分析不表示无活动。`);
+        const processing = reportRunCoverage(run).processingScope;
+        if (processing && (!processing.complete || processing.failedRanges || processing.skippedRanges || processing.omittedFindings))
+          messages.push(`分析 ${run.id}：${processing.extractedRanges} 范围提取、${processing.failedRanges} 失败、${processing.skippedRanges} 跳过，聚合 ${processing.aggregation}，省略 ${processing.omittedFindings} 项。仅保留本日已证实原句，未覆盖范围未知。`);
       }
       const originalEventHash = digest(JSON.stringify([...ids]));
       const payload: DailyReport = { employeeId, employee: employee.name, date, timeZone: 'Asia/Shanghai', revision: 0, version: null,
         state, createdAt: null, items, nextOffset: null,
         statistics: { ...counts, files: null, tokens: null, activityIntervals: null, humanWorkHours: null, definition },
-        coverage: { messages: [...new Set(messages)], inputs, originalEventIdsSample: [...ids].slice(0, 20), originalEventCount: events.length,
-          originalEventHash, eligibleInputsComplete: !incomplete && !waiting,
+        coverage: { messages: [...new Set(messages)], inputs, originalEventIdsSample: [...ids].slice(0, 20), originalEventCount: counts.records,
+          originalEventHash, originalEventHashComplete: events.length <= 10000, eligibleInputsComplete: !incomplete && !waiting,
           dailyDeviceCoverage: 'unknown', fixture: runs.some(run => run.result?.fixture || run.config.mode === 'fixture') } };
       // Bound public metadata separately from paged conclusions; retain exact
       // event input identity as a digest instead of a response containing 10000 IDs.

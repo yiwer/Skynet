@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { dueReportDate, beijingDate, reportDate } from '../packages/contracts/reports.js';
-import { dailyItems } from '../apps/server/reports.js';
+import { dailyItems, reportRunCoverage } from '../apps/server/reports.js';
 import { validateAnalysis, type AnalysisInput } from '../apps/server/analysis.js';
 import type { AnalysisRun } from '../packages/contracts/analysis.js';
 import { createSandbox } from './support.js';
@@ -21,6 +21,9 @@ test('Beijing midnight/09:00 scheduling and cited day provenance keep independen
         context: 'after-enrollment', sourceDate: index === 0 ? '2026-09-29' : index === 3 ? '2026-10-01' : '2026-09-30' } })),
     coverage: { unrecognizedLines: 0, partialLine: false, excludedMaterials: 0, captureGaps: [], scope: 'synthetic' } };
   const citation = (event: number) => ({ event, textOffset: 0, quote: input.events[event]!.text });
+  input.events[0]!.origin!.context = 'historical';
+  input.events[0]!.origin!.materialId = 'original-parent';
+  input.events[0]!.origin!.location = { kind: 'material', materialId: 'original-parent', textOffset: 123 };
   const result = validateAnalysis(input, { items: [
     { category: 'topic', assessment: 'inferred', text: '主题一', citations: [citation(1)] },
     { category: 'topic', assessment: 'inferred', text: '主题二', citations: [citation(2)] },
@@ -29,9 +32,17 @@ test('Beijing midnight/09:00 scheduling and cited day provenance keep independen
     { category: 'next', assessment: 'claimed', text: '未来事实不回填本日', citations: [citation(3)] },
   ] });
   const run = { id: randomUUID(), state: 'succeeded', result: { items: result, fixture: true } } as AnalysisRun;
+  run.input = input;
+  assert.equal(reportRunCoverage(run).incomplete, false);
+  const longRun = { ...run, result: { ...run.result!, processing: { version: 'original-utf16-1', complete: false, aggregation: 'limited',
+    omittedFindings: 3, ranges: [{ state: 'extracted' }, { state: 'failed' }, { state: 'skipped' }] } } } as AnalysisRun;
+  assert.equal(reportRunCoverage(longRun).incomplete, true);
+  assert.equal(reportRunCoverage(longRun).processingScope!.failedRanges, 1);
+  assert.equal(reportRunCoverage(longRun).processingScope!.omittedFindings, 3);
   const items = dailyItems([run], employeeId, '2026-09-30', new Set(['e1', 'e2']));
   assert.equal(items.length, 3); const mixed = items.find(item => item.category === 'activity')!;
   assert.equal(mixed.themeAssociation, 'unassigned'); assert.equal(mixed.backgroundCitations.length, 1);
+  assert.deepEqual(mixed.backgroundCitations[0]!.location, { kind: 'material', materialId: 'original-parent', textOffset: 123 });
   assert.deepEqual(mixed.activityEventIds, ['e1']);
   assert.equal(dailyItems([run], randomUUID(), '2026-09-30', new Set(['e1'])).length, 0);
   input.events[1]!.origin!.context = 'historical';
