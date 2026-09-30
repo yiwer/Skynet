@@ -60,6 +60,7 @@ export async function migrate(db: Database) {
     CREATE INDEX IF NOT EXISTS capture_faults_session ON capture_faults(device_id,source,session_id);
     ALTER TABLE snapshots ADD COLUMN IF NOT EXISTS source text GENERATED ALWAYS AS (manifest->>'source') STORED;
     CREATE UNIQUE INDEX IF NOT EXISTS snapshots_source_identity ON snapshots(device_id,source,source_session_id,manifest_hash);
+    CREATE INDEX IF NOT EXISTS snapshots_source_hash ON snapshots(device_id,source,source_session_id,hash);
     CREATE TABLE IF NOT EXISTS snapshot_uploads (
       device_id uuid NOT NULL REFERENCES devices(id), upload_id uuid NOT NULL,
       manifest_hash text NOT NULL, snapshot_id uuid NOT NULL REFERENCES snapshots(id),
@@ -79,6 +80,21 @@ export async function migrate(db: Database) {
       PRIMARY KEY(snapshot_id,line,block)
     );
     CREATE INDEX IF NOT EXISTS archive_event_owner_day ON archive_event_origins(employee_id,source_date);
+    ALTER TABLE archive_event_origins ADD COLUMN IF NOT EXISTS material_id text;
+    ALTER TABLE archive_event_origins ADD COLUMN IF NOT EXISTS text_offset integer NOT NULL DEFAULT 0;
+    CREATE TABLE IF NOT EXISTS material_qualifications (
+      snapshot_id uuid NOT NULL REFERENCES snapshots(id), material_id text NOT NULL,
+      device_id uuid NOT NULL REFERENCES devices(id), source text NOT NULL, source_session_id text NOT NULL,
+      hash text NOT NULL, byte_length integer NOT NULL, qualified_at timestamptz NOT NULL DEFAULT now(),
+      PRIMARY KEY(snapshot_id,material_id)
+    );
+    CREATE INDEX IF NOT EXISTS material_qualification_source ON material_qualifications(device_id,source,source_session_id,qualified_at);
+    CREATE INDEX IF NOT EXISTS material_qualification_hash ON material_qualifications(device_id,source,source_session_id,hash);
+    CREATE TABLE IF NOT EXISTS material_events (
+      snapshot_id uuid NOT NULL REFERENCES snapshots(id), material_id text NOT NULL,
+      line integer NOT NULL, block integer NOT NULL, event_id text NOT NULL REFERENCES archive_event_origins(event_id),
+      PRIMARY KEY(snapshot_id,material_id,line,block)
+    );
     CREATE TABLE IF NOT EXISTS native_event_occurrences (
       device_id uuid NOT NULL REFERENCES devices(id), source text NOT NULL, source_session_id text NOT NULL,
       occurrence_hash text NOT NULL, event_id text NOT NULL REFERENCES archive_event_origins(event_id),

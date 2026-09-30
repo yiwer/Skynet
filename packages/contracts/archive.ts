@@ -13,7 +13,7 @@ export const enrollmentSchema = z.object({ installationId: z.uuid(), name: bound
 // A receipt is a claim, never an ownership grant. The server verifies its immutable
 // source snapshot and the exact native prefix before carrying event origins forward.
 export const restoredFromSchema = z.object({ snapshotId: z.uuid(), hash: hashSchema,
-  byteLength: z.number().int().positive().max(MAX_ARTIFACT_BYTES) }).strict();
+  byteLength: z.number().int().positive().max(MAX_ARTIFACT_BYTES), materialId: hashSchema.optional() }).strict();
 export const manifestSchema = z.object({
   protocolVersion: z.literal(1),
   sourceSessionId: bounded,

@@ -224,12 +224,51 @@ test('native fork, parent image and tool history survive server material package
     assert.ok(JSON.stringify(restoredParent).includes(userMarker));
     await writeFile(join(sandbox.directory, 'native-read-after-resume.json'), JSON.stringify({ restored, restoredParent }, null, 2));
     await nativeClient.close(); nativeClient = undefined;
+    let independentlyQualifiedMaterial: unknown = null;
+    if (process.env.SKYNET_MATERIAL_PRIMARY === '1') {
+      assert.equal(sourceKind, 'codex-cli', 'Normal CLI material qualification is measured separately from Desktop backend/UI');
+      const ptyRoot = process.env.SKYNET_NODE_PTY_ROOT; assert.ok(ptyRoot, 'Normal hook review requires the owned node-pty fixture');
+      const nextEmployee = await sandbox.provision('材料恢复后正常 CLI 员工乙');
+      const nextState = join(sandbox.directory, 'material-primary-collector');
+      await sandbox.collectorCommand('setup', nextState, { server: origin, enrollmentCredential: nextEmployee.enrollmentCredential,
+        nativeRoot: join(target, 'sessions'), source: 'codex-cli', sourceVersion, sourceOs: 'win32' });
+      const cliPath = resolve('dist/apps/collector/cli.js');
+      await writeFile(join(target, 'hooks.json'), JSON.stringify({ hooks: { UserPromptSubmit: [{ hooks: [{ type: 'command',
+        command: `"${process.execPath}" "${cliPath}" hook --state "${nextState}"`,
+        commandWindows: `& '${process.execPath}' '${cliPath}' hook --state '${nextState}'`, timeout: 3 }] }] } }));
+      const nativeEnv: NodeJS.ProcessEnv = Object.fromEntries(['SystemRoot', 'WINDIR', 'TEMP', 'TMP', 'PATH', 'PATHEXT', 'COMSPEC',
+        'ProgramFiles', 'ProgramFiles(x86)', 'ProgramData'].filter(key => process.env[key]).map(key => [key, process.env[key]]));
+      Object.assign(nativeEnv, { CODEX_HOME: target, USERPROFILE: join(sandbox.directory, 'synthetic-user'), HOME: join(sandbox.directory, 'synthetic-user'),
+        APPDATA: join(sandbox.directory, 'appdata'), LOCALAPPDATA: join(sandbox.directory, 'localappdata'), TEMP: sandbox.directory, TMP: sandbox.directory });
+      await command('git', ['init', '--quiet', restoredWorkspace], nativeEnv);
+      await command(process.execPath, ['dist/tests/codex-hook-review.js'], process.env, JSON.stringify({ runtime, ptyRoot,
+        alpha: restoredWorkspace, sourceHome: target, directory: sandbox.directory, env: nativeEnv }));
+      const continuation = spawn(runtime!, ['--no-daemon', 'exec', 'resume', '--json', parentId,
+        'SKYNET_MATERIAL_PRIMARY_SUFFIX_197: continue the restored parent through normal CLI hooks.'],
+      { env: nativeEnv, cwd: restoredWorkspace, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
+      let output = ''; let errors = ''; continuation.stdout.on('data', part => { output += part; }); continuation.stderr.on('data', part => { errors += part; });
+      const timer = globalThis.setTimeout(() => continuation.kill(), 45_000);
+      try { assert.equal((await once(continuation, 'exit'))[0], 0, errors); } finally { clearTimeout(timer); }
+      await writeFile(join(sandbox.directory, 'material-primary-native-output.jsonl'), output);
+      const collectedPrimary = JSON.parse(await sandbox.collectorCommand('run', nextState)); assert.deepEqual(collectedPrimary.errors, []);
+      const selected = (await (await fetch(origin + '/api/sessions', { headers })).json()).sessions.find((item: any) =>
+        item.source_session_id === parentId && item.employee === '材料恢复后正常 CLI 员工乙');
+      assert.ok(selected, 'normal UserPromptSubmit qualified the restored material without a synthetic hook');
+      const detail = await (await fetch(`${origin}/api/snapshots/${selected.id}`, { headers })).json();
+      assert.equal(detail.manifest.restoredFrom.materialId, parentMaterial.id);
+      assert.ok(detail.events.some((item: any) => item.origin.employeeId === employee.employeeId && item.origin.materialId === parentMaterial.id && item.context === 'historical'));
+      assert.ok(detail.events.some((item: any) => item.text.includes('SKYNET_MATERIAL_PRIMARY_SUFFIX_197') && item.origin.employeeId === nextEmployee.employeeId && item.context === 'after-enrollment'));
+      assert.deepEqual(Buffer.from(await (await fetch(`${origin}/api/snapshots/${snapshotId}/materials/${parentMaterial.id}`, { headers })).arrayBuffer()), parentOriginal);
+      independentlyQualifiedMaterial = { snapshotId: selected.id, originalMaterialId: parentMaterial.id, normalHookReview: true,
+        sourceEmployeeId: employee.employeeId, currentEmployeeId: nextEmployee.employeeId, origins: detail.events.map((item: any) => item.origin) };
+      await writeFile(join(sandbox.directory, 'native-material-primary-details.json'), JSON.stringify(detail, null, 2));
+    }
     const evidence = { testedAt: new Date().toISOString(), source, sourceVersion, runtime: runtimeVersion,
       os: process.platform, arch: process.arch, sourceHomeRemoved: true, serverPackageOnly: true,
       originalBytesPreserved: true, contextAndToolHistoryRetained: true, nativeBackend: 'passed-synthetic-provider',
       desktopUi: 'unverified', automaticHostCapture: 'unverified', snapshotId, parentId, threadId,
       forkBoundaryPreserved: true, inlineImageRetained: true, attachmentRowsPreserved: true, attachmentDatabaseRebuild: 'exact-opaque-rows', attachmentPayloadSemantics: 'unverified',
-      newEmptyForkListedBeforeResume: listed.data.some((thread: any) => thread.id === threadId), forkReadReturnsOwnTurns: true };
+      newEmptyForkListedBeforeResume: listed.data.some((thread: any) => thread.id === threadId), forkReadReturnsOwnTurns: true, independentlyQualifiedMaterial };
     await writeFile(join(sandbox.directory, `native-materials-${sourceKind}-evidence.json`), JSON.stringify(evidence, null, 2));
     console.log(`Native material backend evidence (Desktop UI unverified): ${join(sandbox.directory, `native-materials-${sourceKind}-evidence.json`)}`);
   } finally {
