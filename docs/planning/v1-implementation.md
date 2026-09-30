@@ -4,7 +4,7 @@
 
 实现采用 [tracer-bullet ticket 图](tracer-bullet-tickets.md)，范围为 #4–#33；V2 的 #3 与 #34–#54 不在本次范围。每个实现任务使用独立 worktree，合并到同一草稿 PR。代码与合成测试通过不等同于真实客户端验收通过。
 
-当前主线 `594fec89f457aac35c2e0acc5a25cda9c2cab3d6` 已集成 #32 灾备与 #33 验收准备；[该源码 Linux CI](https://github.com/yiwer/Skynet/actions/runs/36710344930/job/109870368469) typecheck/build 与61/61通过，0失败/取消，210066.943933ms。主线公开 backup 窄回归4/4、33590ms来自 ROOT 实测，双实际CLI续聊1/1、13366.7888ms仍来自#32独立分支。最终评审修订在 `implement/v1-final-review-fixes`，尚未合入；[修订记录](../implementation/v1-review-fixes.md)按阶段保存固定源码及 RED/GREEN，[验收台账](../implementation/v1-acceptance-ledger.md)是唯一验收索引。后文各日期、未合入叙述和旧失败均为历史现场，不改写为新结果。最终 distinct merge/主线新CI由主线负责人记录后才能计为新证据；PR55和全部真实门槛保持开放。
+当前代码基准 `83537e6f4225f0d2af037770df7e302c0c861fec` 已集成 #4–#33 与最终评审修订；全源两轴复核及d306b2e、69f1da7、85d2982各delta均PASS、0新finding，由distinct merger完成主线合入。[该代码基准 Linux CI](https://github.com/yiwer/Skynet/actions/runs/36744710095/job/109987831824) typecheck/build与74/74普通测试通过，0失败/取消/跳过，245536.973069ms。主线永久backup-reader1/1、18921.2433ms验证完整固定统计/报告与HTTP/OAuth恢复；最终三项parser/备份故障回归3/3、34871.6276ms，type/build/diff通过。原84ea5fb窄集成8/9、76280.9473ms的过期更正版本RED、0cba CI输出丢失（底层数量未知）和acd CI71/74、229070.717454ms均保留；旧594的CI61/61、210066.943933ms与公开backup4/4、33590ms是此前源码。双实际CLI续聊1/1、13366.7888ms仍来自#32独立分支，未重跑。最终修订分支证据见[修订记录](../implementation/v1-review-fixes.md)，[验收台账](../implementation/v1-acceptance-ledger.md)仍是唯一验收索引。后文各日期、未合入叙述和旧失败均为历史现场，不改写为新结果；当前文档不预报自己的未来CI。PR55与全部真实门槛保持开放。
 
 ## 恢复实施（2026-09-30）
 

@@ -1,6 +1,6 @@
 # V1 验收证据台账
 
-V1 尚未完成，AC-01…AC-22 与 G0…G4 均未整体签收。本台账是唯一验收索引；各票文档保留实验过程。当前主线 `594fec89f457aac35c2e0acc5a25cda9c2cab3d6`（2026-09-30）已集成 #4–#33，Linux CI typecheck/build、61/61通过、0失败/取消、210066.943933ms；#32 原支线 `e366814`→`55308ae9` 的实际CLI与灾备结果保留原源码边界。最终评审修订位于独立分支 `implement/v1-final-review-fixes`，尚未合入主线，见 [修订记录](v1-review-fixes.md)。本台账不提前记录最终merge或新CI。
+V1 尚未完成，AC-01…AC-22 与 G0…G4 均未整体签收。本台账是唯一验收索引；各票文档保留实验过程。当前代码基准 `83537e6f4225f0d2af037770df7e302c0c861fec`（2026-10-01）已集成 #4–#33 和最终评审修订，独立Standards/Spec全源与后续delta均PASS、0新finding；Linux CI typecheck/build与74/74普通测试通过，0失败/取消/跳过，245536.973069ms。distinct merger完成84ea5fb、0cba9a8、acd58e7及83537e6集成；主线永久backup-reader1/1、18921.2433ms和最终三项parser/备份故障回归3/3、34871.6276ms通过。之前8/9集成RED、0cba输出丢失和acd CI71/74均保留，见E1/E9。#32 原支线 `e366814`→`55308ae9` 的实际CLI与灾备结果保留原源码边界；不把代码/合成通过写为真实验收，见 [修订记录](v1-review-fixes.md)。
 
 依据：[PRD](../requirements/PRD.md)、[V1 验收标准](../requirements/v1-acceptance.md)、[实施记录](../planning/v1-implementation.md)、[原生支持矩阵](native-validation-status.md)。[PRD v2 适用规则](../requirements/PRD-v2.md#与既有文档的关系) 已确认：使用能力评估与报表守则以 V2 为准，其余以 V1 为准。因此不能继续把全部自动评估写成永久禁止；本票不提前实现 V2 AC-23…38。V1 统计与四级证据仍须可追溯，Token 不是账单，事件区间不是工时；名次、榜单、按指数排序人员及自动人事动作仍在范围外。
 
@@ -21,7 +21,7 @@ V1 尚未完成，AC-01…AC-22 与 G0…G4 均未整体签收。本台账是唯
 
 ## AC-01…22
 
-复跑步骤R1…R8及证据E1…E8见下文。表内“已验证”不是整项签收；票据文档包含准确参数、原始环境和历史记录。
+复跑步骤R1…R8及证据E1…E9见下文。表内“已验证”不是整项签收；票据文档包含准确参数、原始环境和历史记录。
 
 | 验收 | 环境与复跑步骤 | 已验证结果 / 证据 | 未解决项 |
 | --- | --- | --- | --- |
@@ -39,13 +39,13 @@ V1 尚未完成，AC-01…AC-22 与 G0…G4 均未整体签收。本台账是唯
 | AC-12 日周项目证据 | W/L/C，R1/R4/R6；[#27](issue-27.md)/[#28](issue-28.md)/[#29](issue-29.md)/[#30](issue-30.md) | HTTP/Web/OAuth MCP固定版本、分页、员工/项目下钻；主线#30及#31各12/12；E1/E2 | 真实模型质量/运营来源；Web修订合成验证见E9 |
 | AC-13 分级统计 | W/L/C，R1/R4；[#22](issue-22.md)/[#19](issue-19.md)/[#31](issue-31.md) 引用/资格/固定统计 | 四级结论，来源event去重、记录Token/基线/缓存、文件参数/时间点区间，缺项未知；E2 | PAYG抽检；本修订通用0xFF/既存账本计数与冻结指针见E9；V2守则按本文依据适用 |
 | AC-14 北京归期 | W/L，R1/R4；[#28](issue-28.md)09:00/[#29](issue-29.md)周一/[#30](issue-30.md)迟到 | 已管理空日周项目首条迟到自动刷新；原来源日，接入前日期不批量建报告；E1/E2 | 真实调度负载、全部日期边界 |
-| AC-15 更正隔离 | W/L/C，R1/R4；[#24](issue-24.md)/[#30](issue-30.md) 更正/并发/晚结果 | 审计说明/主题/显示项目、幂等重算；旧固定日周项目逐字不变、原件不变、晚结果非适用；E1/E2 | 实际运行/模型/操作、最终组合review |
-| AC-16 认证共享读 | W/L，R1；[#20](issue-20.md) 撤销/冒充/新接口 | 每请求撤销、认证共享读、维护权限与审计；E1/E2 | 最终全表面审查、真实部署 |
+| AC-15 更正隔离 | W/L/C，R1/R4；[#24](issue-24.md)/[#30](issue-30.md) 更正/并发/晚结果 | 审计说明/主题/显示项目、幂等重算；旧固定日周项目逐字不变、原件不变、晚结果非适用；两轴复核与当前更正版本恢复见E9 | 实际运行/模型/操作 |
+| AC-16 认证共享读 | W/L，R1；[#20](issue-20.md) 撤销/冒充/新接口 | 每请求撤销、认证共享读、维护权限与审计；最终两轴代码复核PASS；E1/E2/E9 | 真实部署 |
 | AC-17 MCP | C/X/W，R3/R1；[#26](issue-26.md)/[#27](issue-27.md) OAuth/到期刷新/分页/导出 | 两实际CLI正常HTTPS授权；报告/队列/覆盖同服务版本；E2/E4 | 实际HTTPS origin/G3、登录故障不阻采集复核 |
 | AC-18 实际长分析 | C/L，R4；[#22](issue-22.md)/[#23](issue-23.md)/[#24](issue-24.md) 独立CLI分段聚合 | Claude2.1.281 loopback短长公开链、原UTF16引用/全job请求预算；E4 | G2前置、指定千问PAYG真实长质量 |
 | AC-19 分析故障 | W/L/C，R1/R4；[#24](issue-24.md) 领取/租约/重启/新输入/超时 | 有限总attempts、并发/时间/输入/请求/预算caps、未知不退款；CLI两次停止，原件查导可用；E4 | 真计费上界/账单/G2/G3；#32旧claims fencing已集成 |
 | AC-20 指令隔离 | C/L，R4；[#22](issue-22.md) Bash/外发/伪造引用 | 实际CLI只有StructuredOutput、无副作用、不继承hooks/auth/MCP、不回流采集；E4 | 指定PAYG模型、完整G3抽检 |
-| AC-21 服务器灾备 | B/W/C/X，R8；[#32](issue-32.md) 支线e366814→55308ae9 | ALL staged/SQL同边界、fresh恢复、崩溃/claims/heartbeat fencing；冻结日周项目/更正/原件/导出exact；两实际CLI续聊1/1、13.37s；最终窄回归3/3、12.18s；E7 | 594已合主线；最终修订review/merge/CI、off-host/第二位操作者/实际部署灾备签收 |
+| AC-21 服务器灾备 | B/W/C/X，R8；[#32](issue-32.md) 支线e366814→55308ae9 | ALL staged/SQL同边界、fresh恢复、崩溃/claims/heartbeat fencing；冻结日周项目/更正/原件/导出exact；两实际CLI续聊1/1、13.37s；最终窄回归3/3、12.18s；当前主线固定统计HTTP/OAuth恢复1/1、18921.2433ms；E7/E9 | off-host/第二位操作者/实际部署灾备签收 |
 | AC-22 性能运营 | W/L，R5/R7；[#11](issue-11.md)/[#12](issue-12.md)/[#14](issue-14.md)/[#18](issue-18.md) | ROOT200hook P50 52.53/P95 67.17/max137.34ms；另公开200原文可见P95 1161.15ms；E5 | 压力P95 111.35ms红；支持客户端/登记负载的安装≤2min和原文≤60s分布；第二人/五日 |
 
 ## G0…G4
@@ -56,7 +56,7 @@ V1 尚未完成，AC-01…AC-22 与 G0…G4 均未整体签收。本台账是唯
 | G1 / #15 | 未通过 | R2后R7；真实静默Task/图标/登录/重启/休眠及完整安装环境，保留Windows全量红取消 |
 | G2 / #21 | 未通过 | R1/R3/R5；G1后三来源完整故障矩阵、关系/材料未知；本修订UTF8闭合范围见E9 |
 | G3 / #25 | 未通过 | R4后真实PAYG；独立Claude、指定模型质量/引用/长范围、价格预算 |
-| G4 / #33 | 未通过 | R1/R6/R7/R8；最终修订review/merge/CI、登记负载性能、第二人、前置通过后五日试点和签收 |
+| G4 / #33 | 未通过 | R1/R6/R7/R8；登记负载性能、第二人、前置通过后五日试点和签收；代码review/merge与当前代码CI已完成，见E1/E9 |
 
 按门槛顺序验收；合成/代码回归不解除真实条件，#32阶段性结果与本票前置交付不代表完成。
 
@@ -141,7 +141,10 @@ E5正常hook的外部`performance/hook-baseline.mjs`固定main路径/产品68com
 | 代号 | 结果 / 来源 / 现存证据 |
 | --- | --- |
 | E1 历史CI | 产品68 [Linux CI](https://github.com/yiwer/Skynet/actions/runs/36697980515/job/109830431425) typecheck/build、**56/56，146.80s，0fail/0cancel**，`ci-68ee347-linux.log`。docs150 [CI36700854354](https://github.com/yiwer/Skynet/actions/runs/36700854354) completed/success、head15021a4；docs1c281 CI36698515617 success不重复计产品覆盖 |
-| E1 当前集成CI | `594fec8` [Linux CI](https://github.com/yiwer/Skynet/actions/runs/36710344930/job/109870368469) typecheck/build、61/61，0fail/0cancel，210066.943933ms。ROOT公开backup窄回归4/4、33590ms；这是本修订之前的主线，不是final-review分支的新CI |
+| E1 前一集成CI | `594fec8` [Linux CI](https://github.com/yiwer/Skynet/actions/runs/36710344930/job/109870368469) typecheck/build、61/61，0fail/0cancel，210066.943933ms。ROOT公开backup窄回归4/4、33590ms；这是本修订之前的主线，不是最终代码的新CI |
+| E1 最终修订首次CI红 | `0cba9a817556bf9f168d017a79eca2e18d56acef` [Linux CI](https://github.com/yiwer/Skynet/actions/runs/36739289289/job/109969104393) typecheck/build通过、npm test exit1；`ci-0cba9a8-linux-red.log`实际丢子suite stdout，只见exited1/stderr空，底层用例与数量未知，不用后一run回填 |
+| E1 诊断修订CI红 | `acd58e79f921b2e67bfd0b003f1e203e2a4f2310`，`ci-acd58e7-linux-red.log` typecheck/build通过，74tests/71pass/3fail/0cancel，229070.717454ms；严格parser版本2→3/3→4的旧断言及旧failed(86)文案三项失败，保留原footer；不是产品parser回退 |
+| E1 当前代码CI | `83537e6f4225f0d2af037770df7e302c0c861fec` [Linux CI](https://github.com/yiwer/Skynet/actions/runs/36744710095/job/109987831824) typecheck/build、74/74 PASS，0fail/0cancel/0skip，245536.973069ms；完整`ci-83537e6-linux-final.log`。head只指代码基准，不预报当前doc-only提交的未来检查 |
 | E2 当前公开主线 | #30 `main-30-integration.log`/`main-30-evidence-summary.json`/`main-30/`：12/12、56.26s；#31 `main-31-integration.log`/`main-31-evidence-summary.json`/`coverage-f611dad8-9b43-4b47-81a1-706c3231c67d/public-flow.json`：12/12、31.43s、5LAcc5；#30组合矩阵`coverage-a1e041b4-99fa-4822-9c9c-6b2e5174429b/public-flow.json`。旧报告不从latest账本回填 |
 | E3 控制与资格已集成 | runtime b93ffeb→92e3711，main14/14、39.63s；rw1nib status8.04/stop2.19ms、2DhhCy exit17、zEh7J6/XwQOiK 2500ms drain见[诊断](runtime-control-diagnosis.md)，部分TEMP已失效。资格/周项目主线8/8、31.94s，`main-29-qualification-integration.log`/`main-29-qualification/`；旧件17,826,999bytes，raw64MiB、analysis8MiB；`caQOyh-legacy-material-qualification-evidence.json`/`wJq5or-material-qualification-evidence.json` |
 | E4 实际native分支 | G0497e8da六项通过→3fb6454；#22 2af8421：B3TxgX(W)/oc2IFY(L)；#19 73c745e：Ba7caC正常Codex材料资格；#24 f2b9cf9：5Mze6i(W)30.9s/pvpq1E(L UID1000)32.1s；#29组合`issue-29/1hfWI0-work-view-public-evidence.json`；#30 `issue-30/xUlWpY-work-view-public-evidence.json`1/1、54.37s。无源码冲突合入复用分支证据，不冒称main再native；各票列详细hash/配方/边界 |
@@ -150,7 +153,7 @@ E5正常hook的外部`performance/hook-baseline.mjs`固定main路径/产品68com
 | E6 历史Web/UTF8红 | `web-audit/run-2/result.json`/`web-audit/summary.json`/`web-audit/audit-handoff.md`：producta458、112captures、58overflow、0capture/page exceptions；56dark仍亮色。简化直接文字contrast min5.436/0fail非完整无障碍证明；21代表PNG人工核对+ROOT两张。`public-utf8-red-result.json`/`public-utf8-red.mjs`/`evidence-utf8-probe-result.json`：FF产生U+FFFD/gap0/额外活动；合法encoded U+FFFD控制与下载原hash通过；通用parser/既存origin修订见E9；不覆盖本历史RED |
 | E7 #32原支线阶段 | bbcb37b `issue-32-backup-stage2-green.log`1/1，用例9.16s/总9.82s、4eBW26；`issue-32-stage2-public.json`：两对象296bytes/dump89662bytes/PG17.11/Node24.21/same-host/integrity-only/stagedSubmission200，`issue-32-stage2-helper-image.json`。随后heartbeat修订 `issue-32-heartbeat-reconcile-green.log`2/2、总19.81s：restore live_valid=false/真实heartbeat再true，历史观测不改。`backup-permission-preflight-result.json` UID1000访问1001私有0700/0600 EACCES→匹配1001读写成功；未放宽product权限。stage3 clean70c3034 `issue-32-stage3-green.log`4/4、总37.59s，paths/public/fault/Linuxvolumes；`issue-32-stage3-fault-public.json`/`issue-32-stage3-heartbeat-public.json`/`issue-32-stage3-linux-volumes.json`；named-volume app/helper UID1000保持目录0700/文件0600。加严格SQLerror枚举与raw非空目标拒绝后 `issue-32-crash-fence-final.log`1/1，用例32.09s/总32.74s。stage4 e04df968 `issue-32-readers-boundary-visual.log`1/1、20.32s，dump后/ALL枚举前sourceC public提交而restoreC404，冻结报告/更正/原件/导出exact，12运行页截图。stage5 e366814 `issue-32-native-first.log`1/1、13.37s，VlcMls两实际CLI各3loopback请求、上下文/工具完整；`issue-32-native-public.json` SHA b2aa1f2396cd7123c951dd0202c7870ff5313c9e9649b1355472579d6ffb1e0b，witnesses保留六份原件/续聊/包哈希，request bodies仅本次内存断言未落盘。55308ae9吸收017台账，type/build/diff和 `issue-32-final-narrow.log`3/3、12.18s通过；594已合main，实测仍来自该支线；非off-host/第二人 |
 | E8 历史与失效 | 原inventory44份durable、main30/31收据SHA一致，17条旧TEMP不存在。`ci-9b90e7a-linux.log`红；`ci-0743d4d-linux.log`36/36、`ci-6089062-linux.log`45/45、`ci-0dc863a-linux.log`49/49、`ci-a4588a6-linux.log`53/53只证明各源码。早期基线17/17、1665d08的19/19、f6ccbca的28/28（100.38s）仍保留各票/CI记录 |
-| E9 最终评审修订分支 | [阶段记录](v1-review-fixes.md)保存完整原件/既存origin/缓存竞态、全mapped材料证明与零semantic-origin坏原件、同RR冻结日周统计及旧null/no-pointer契约。固定667统计1/1、11113.23ms有独立Spec PASS，前一源10/10、27926.9205ms另留；固定476的S3/S4有独立Standards PASS。`web-review-all-green/result.json`与`review-web-all-green.log`330截图、0溢出/直接文字对比度失败、1/1、154839.589ms；`web-review-controls-green/result.json`/log代表控件+分析错误20截图、202 active控件、minratio5.43617713962106、1/1、15220.0494ms，明确CSS简化边界。`review-web-reader-race-green.log`1/1、9329.908ms；`review-frozen-payload-green.log`1/1、2120.1146ms；工具契约和最终当前源码回归见阶段记录。全部准确区分源码/diff/compiled hash，尚未distinct merge/新主线CI，不能据此关闭外部验收 |
+| E9 已集成最终评审修订 | [阶段记录](v1-review-fixes.md)保存完整原件/既存origin/缓存竞态、全mapped材料证明与零semantic-origin坏原件、同RR冻结日周统计及旧null/no-pointer契约。固定667统计1/1、11113.23ms有独立Spec PASS，前一源10/10、27926.9205ms另留；固定476的S3/S4有独立Standards PASS。`web-review-all-green/result.json`与`review-web-all-green.log`330截图、0溢出/直接文字对比度失败、1/1、154839.589ms；`web-review-controls-green/result.json`/log代表控件+分析错误20截图、202 active控件、minratio5.43617713962106、1/1、15220.0494ms，明确CSS简化边界。`review-web-reader-race-green.log`1/1、9329.908ms；`review-frozen-payload-green.log`1/1、2120.1146ms；工具契约和最终当前源码回归见阶段记录。全部准确区分源码/diff/compiled hash。固定8b64的零事件P2与d306的备份读者delta独立两轴PASS，当前代码835已distinct merge，两轴后续69/85 delta亦PASS，CI74/74见E1。main-review-integration.log原8/9 RED、76280.9473ms保留；外部fixedstat extension1/1、16727.2612ms另列；main-reader-fix-integration.log永久主线1/1、18921.2433ms（case18270.0553ms）验证固定统计HTTP/OAuth恢复，type/build/diff通过、ownedcontainers前后为空。review-backup-reader-current-revision-red.log与review-backup-reader-fixed-statistics-public.json记录current2一次更正至3、原固定1仍exact。不能据此关闭外部验收 |
 
 旧TEMP17条精确路径保留原inventory：native research/code-change/subagent/attachment、runtime diagnosis/reporting readiness、六G0原记录am35Jw/T5UcDo/iKyW27/fXHp3P/Frh0VR/TTEPSP、runtime summary ySaGHQ/main rw1nib、hook qZM0lv、local-fault txjgno、UTF8 finding。原因未知，不重造原日志。票据历史值保留，但失效原文件不能作为现存附件；新复跑不倒填旧run。
 
@@ -173,7 +176,7 @@ E5正常hook的外部`performance/hook-baseline.mjs`固定main路径/产品68com
 | #32支线 | status404 3.76s、CLI缺失；首dump/restore成功但错预期201（现有接口200）23.05s；旧heartbeat错误connected16.18s；permission首fixture错单独留存 | stage2 9.16s/WIP heartbeat2/2独立登记；UID匹配不是完整恢复 |
 | 历史UTF8/Web | E6 FF额外活动gap0、58overflow/无dark；首测112次`__name`测量错保留`failed-measurement-run.json`，非产品失败 | strict分析/proof/统计不等于通用parser修复；run2成功测量不等于页面通过 |
 
-[#18](issue-18.md)初始16/17 logout竞态、[#23](issue-23.md)时间戳/原锚点fixture错误等仍留原票。源修订、测试修订、环境失败与验收分别记账，当前594的61/61和修订分支定向验证不覆盖历史。
+[#18](issue-18.md)初始16/17 logout竞态、[#23](issue-23.md)时间戳/原锚点fixture错误等仍留原票。源修订、测试修订、环境失败与验收分别记账，前一594的61/61、当前代码CI与修订分支定向验证都不覆盖历史。
 
 ## 需要真人、账号或连续运行的最少条件
 
@@ -182,6 +185,6 @@ E5正常hook的外部`performance/hook-baseline.mjs`固定main路径/产品68com
 3. 第二位操作者复现安装/修复/升级/卸载和#32新服务器恢复；登记备份故障域/试点负载，采集安装与原文可见延迟。
 4. G0–G3通过后授权连续5个工作日试点，负责人核对验收产出物，在[Issue #1](https://github.com/yiwer/Skynet/issues/1)签收。
 
-clean dc225d3完整Standards PASS；完整Spec确认原五项但新增零semantic-origin未闭合/畸形JSON/未知格式P2。该项公开RED1/1、10824.5366ms与首次修订失败1/1、11302.6532ms均保留；后续三类输入及合法metadata/Token控制公开1/1、12263.0214ms通过，旧日周/原件恢复/独立分析不变。最终有界primary证明与既存材料/完整性回归4/4、20522.0602ms、type/build/diff通过，精确源码边界及旧大夹具未知padding失败3/4见E9[阶段7](v1-review-fixes.md)。尚待新clean delta独立复核，不把dc完整Spec称通过。
+clean dc225d3完整Standards PASS；完整Spec确认原五项但新增零semantic-origin未闭合/畸形JSON/未知格式P2。该项公开RED1/1、10824.5366ms与首次修订失败1/1、11302.6532ms均保留；后续三类输入及合法metadata/Token控制公开1/1、12263.0214ms通过，旧日周/原件恢复/独立分析不变。最终有界primary证明与既存材料/完整性回归4/4、20522.0602ms、type/build/diff通过，精确源码边界及旧大夹具未知padding失败3/4见E9[阶段7](v1-review-fixes.md)。随后固定8b64 Spec与694文档delta均PASS，该P2关闭；d306的永久backup-reader修订两轴PASS，随后69诊断与85旧断言修订两轴delta亦PASS，现已集成835且源码CI74/74通过。不把dc原完整Spec改写为通过。
 
-下一步：最终修订clean源码交独立Standards/Spec delta review，distinct merger合入后由主线负责人记录实际新CI；真人与连续运行条件具备后按R1…R8推进门槛，保持PR草稿与未验收tickets开放。
+下一步：代码review/merge与当前代码CI已完成，见E1/E9；真人与连续运行条件具备后按R1…R8推进门槛，保持PR草稿与未验收tickets开放。

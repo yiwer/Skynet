@@ -1,6 +1,6 @@
 # Skynet
 
-内部 Coding Agent 工作观察与会话存档平台。#4–#33 的代码与验收准备已集成至主线 `594fec8`，该源码 Linux CI 61/61 通过；最终评审修订保留独立分支证据。真实 Desktop、完整 Windows 生命周期、千问 PAYG、第二位操作者与连续五个工作日试点尚未验收，V1 与 PR #55 仍为草稿。验收入口见 [V1 验收台账](docs/implementation/v1-acceptance-ledger.md)，实现进度见 [V1 实施记录](docs/planning/v1-implementation.md)。
+内部 Coding Agent 工作观察与会话存档平台。#4–#33 的代码、验收准备与最终评审修订已集成至代码基准 `83537e6`，两轴独立复核通过；该源码 Linux CI typecheck/build 与74/74普通测试通过。真实 Desktop、完整 Windows 生命周期、千问 PAYG、第二位操作者与连续五个工作日试点尚未验收，V1 与 PR #55 仍为草稿。验收入口见 [V1 验收台账](docs/implementation/v1-acceptance-ledger.md)，实现进度见 [V1 实施记录](docs/planning/v1-implementation.md)。
 
 ## 文档入口
 
