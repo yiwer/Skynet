@@ -90,6 +90,7 @@ export function archiveSearch(db: Database, raw: RawStore) {
           && project.toLowerCase().includes(filters.project.toLowerCase()) && (filters.projectState === 'all' || project === '');
         const currentOwnerMatches = ownerMatches(row.employee, manifest.project);
         let hitEmployee = row.employee; let hitProject = manifest.project;
+        let hitOrigin: SearchHit['origin'];
         let hit: Pick<SearchHit, 'location' | 'line' | 'block' | 'sourceDate' | 'excerpt' | 'matchLength'> | undefined;
         function match(text: string, timestamp: string | null, location: EvidenceLocation, line: number | null, block: number | null = null) {
           if (!dateMatches(timestamp)) return;
@@ -103,7 +104,8 @@ export function archiveSearch(db: Database, raw: RawStore) {
           const origin = origins.get(`${event.line}/${event.block ?? 0}`);
           if (!ownerMatches(origin?.employee ?? row.employee, origin?.project ?? manifest.project)) continue;
           match(event.text, event.timestamp, { kind: 'event', offset, textOffset: 0, line: event.line, block: event.block, parserVersion: evidence.parserVersion }, event.line, event.block ?? null);
-          if (hit) { hitEmployee = origin?.employee ?? row.employee; hitProject = origin?.project ?? manifest.project; break; }
+          if (hit) { hitEmployee = origin?.employee ?? row.employee; hitProject = origin?.project ?? manifest.project;
+            hitOrigin = origin ? { ...origin, line: origin.originLine, block: origin.originBlock } : undefined; break; }
         }
         if (!hit) {
           // Raw lines also preserve metadata, unsupported formats and partial trailing writes.
@@ -114,7 +116,8 @@ export function archiveSearch(db: Database, raw: RawStore) {
             let timestamp: string | null = null;
             try { timestamp = sourceTimestamp(JSON.parse(line)?.timestamp); } catch { /* Unknown source time remains unknown. */ }
             match(line, timestamp, { kind: 'raw', line: index + 1, textOffset: 0 }, index + 1);
-            if (hit) { hitEmployee = origin?.employee ?? row.employee; hitProject = origin?.project ?? manifest.project; break; }
+            if (hit) { hitEmployee = origin?.employee ?? row.employee; hitProject = origin?.project ?? manifest.project;
+              hitOrigin = origin ? { ...origin, line: origin.originLine, block: origin.originBlock } : undefined; break; }
           }
         }
         if (!hit && currentOwnerMatches && !(filters.from || filters.to)) for (const material of manifest.capture?.materials ?? []) {
@@ -127,7 +130,7 @@ export function archiveSearch(db: Database, raw: RawStore) {
         if (hit) {
           const session: SessionSummary = { id: row.id, employee: hitEmployee, source_session_id: row.source_session_id, project: hitProject,
             committed_at: row.committed_at.toISOString(), hash: row.hash, byte_length: manifest.byteLength, source_version: manifest.sourceVersion, source_os: manifest.sourceOs, source: manifest.source };
-          const result = { ...session, ...hit, generation: manifest.capture?.generation ?? null, revision: manifest.capture?.revision ?? null, webPath: evidenceLink(row.id, hit.location) };
+          const result = { ...session, ...hit, origin: hitOrigin, generation: manifest.capture?.generation ?? null, revision: manifest.capture?.revision ?? null, webPath: evidenceLink(row.id, hit.location) };
           if (hits.length && Buffer.byteLength(JSON.stringify([...hits, result])) > 7000) break;
           hits.push(result);
         }

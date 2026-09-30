@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { locationSchema, type EvidenceLocation } from '../../packages/contracts/search.js';
+import type { EventOrigin } from '../../packages/contracts/provenance.js';
 
 export function selectedEvidence(hash: string) {
   const params = new URLSearchParams(hash.split('?')[1]);
@@ -8,7 +9,7 @@ export function selectedEvidence(hash: string) {
     .filter(key => object[key] !== undefined).map(key => [key, Number(object[key])])) });
   return result.success ? result.data : null;
 }
-type Page = { kind: string; events?: { line: number; block?: number; textOffset: number; text: string; role: string; origin?: { employee: string; project: string; snapshotId: string; line: number } }[];
+type Page = { kind: string; events?: { line: number; block?: number; textOffset: number; text: string; role: string; origin?: EventOrigin }[];
   text?: string; line?: number; textOffset?: number; next: EvidenceLocation | null; interpretation?: string; context?: string };
 export function EvidenceReader({ snapshotId, location, request }: { snapshotId: string; location: EvidenceLocation;
   request: (path: string, signal?: AbortSignal) => Promise<Response> }) {
@@ -32,7 +33,7 @@ export function EvidenceReader({ snapshotId, location, request }: { snapshotId: 
     {error && <><p className="error" role="alert">{error}</p><button onClick={() => setRetry(value => value + 1)}>重试证据</button></>}
     {page?.events?.map(event => <section className="message" key={`${event.line}:${event.block ?? 0}:${event.textOffset}`}><div className="message-meta">
       <strong>{event.role}</strong><span>原件第 {event.line} 行{event.block === undefined ? '' : ` / block ${event.block}`} · 文字位置 {event.textOffset}</span></div>
-      {event.origin && <p className="muted small">原始归属：{event.origin.employee} · {event.origin.project || '未归类项目'} · <a href={`#${event.origin.snapshotId}`}>原始快照第 {event.origin.line} 行</a></p>}<pre>{event.text}</pre></section>)}
+      {event.origin && <p className="muted small">原始归属：{event.origin.employee} · {event.origin.project || '未归类项目'} · <a href={event.origin.webPath ?? `#${event.origin.snapshotId}`}>原始{event.origin.materialId ? '材料' : '快照'}第 {event.origin.line} 行</a></p>}<pre>{event.text}</pre></section>)}
     {page?.text !== undefined && <><p>{page.kind === 'raw' ? `原件第 ${page.line} 行` : '关联材料（上下文，不计新增活动）'} · 文字位置 {page.textOffset}</p><pre>{page.text}</pre></>}
     {page?.interpretation && <p className="muted small">{page.interpretation}</p>}
     <div className="export-actions"><button disabled={busy || positions.length === 1} onClick={() => setPositions(previous => previous.slice(0, -1))}>上一段原文</button>

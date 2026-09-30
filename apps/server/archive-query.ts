@@ -212,7 +212,7 @@ export function archiveQuery(db: Database, raw: RawStore) {
     const owner = (await db.query('SELECT employee_id FROM devices WHERE id=$1', [origin.device_id])).rows[0];
     return { snapshotId: origin.id, materialId, deviceId: origin.device_id, employeeId: owner.employee_id, employee: origin.employee,
       relation: previousSource ? 'changed-context-uncertain' : origin.id === record.id ? 'captured-context' : 'verified-identical-context', countedAsActivity: false, warning, previousSource,
-      limitation: '这是关联上下文的捕获来源，不是独立员工活动。已确认的主会话恢复不自动确认此材料后来作为主会话续用时的事件归属。' };
+      limitation: '这是关联上下文的捕获来源，不是独立员工活动。材料经正常宿主事件独立采集后，只有服务器验证原生身份和完整原件前缀的恢复声明才能确认历史事件归属。' };
   }
   async function materialPage(id: string, materialId: string, offset = 0, limit = 32_768) {
     const file = await material(id, materialId);

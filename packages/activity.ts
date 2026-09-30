@@ -61,7 +61,7 @@ export function activityFor(events: EvidenceLine[], enrolledAt: string | undefin
     const historical = origin ? origin.context === 'historical' : timestamp < boundary!;
     if (historical && unique) { summary.historicalRecords++; day.historicalRecords++; }
     else if (!historical && unique) {
-      count(day.afterEnrollment, event, userLines.get(sourceDate)!, origin ? `${origin.snapshotId}/${origin.line}` : String(event.line));
+      count(day.afterEnrollment, event, userLines.get(sourceDate)!, origin ? `${origin.snapshotId}/${origin.materialId ?? ''}/${origin.line}` : String(event.line));
     }
     return { ...event, ...attachment, context: historical ? 'historical' : 'after-enrollment', sourceDate };
   });
