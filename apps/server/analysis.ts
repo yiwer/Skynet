@@ -17,11 +17,13 @@ export async function migrateAnalysis(db: Database) {
   await client.query(`BEGIN; SELECT pg_advisory_xact_lock(7402122);
     CREATE TABLE IF NOT EXISTS analysis_workers (id text PRIMARY KEY, config jsonb NOT NULL, updated_at timestamptz NOT NULL DEFAULT now());
     CREATE TABLE IF NOT EXISTS analysis_jobs (id uuid PRIMARY KEY, snapshot_id uuid NOT NULL REFERENCES snapshots(id),
-      actor_id uuid NOT NULL REFERENCES employees(id), state text NOT NULL, config jsonb NOT NULL, input jsonb NOT NULL,
+      actor_id uuid REFERENCES employees(id), actor_kind text NOT NULL DEFAULT 'user', state text NOT NULL, config jsonb NOT NULL, input jsonb NOT NULL,
       result jsonb, error text, created_at timestamptz NOT NULL DEFAULT now(), started_at timestamptz, finished_at timestamptz,
       run_token uuid, deadline timestamptz);
     CREATE INDEX IF NOT EXISTS analysis_snapshot_time ON analysis_jobs(snapshot_id,created_at DESC,id DESC);
     CREATE TABLE IF NOT EXISTS analysis_budgets (id text PRIMARY KEY, reserved_cny numeric NOT NULL DEFAULT 0);
+    ALTER TABLE analysis_jobs ALTER COLUMN actor_id DROP NOT NULL;
+    ALTER TABLE analysis_jobs ADD COLUMN IF NOT EXISTS actor_kind text NOT NULL DEFAULT 'user';
     COMMIT;`);
   } catch (error) { await client.query('ROLLBACK'); throw error; } finally { client.release(); }
 }
@@ -51,7 +53,8 @@ export function analysisService(db: Database, archive: ArchiveQuery) {
     }
     return { runs, nextOffset: result.rows.length > runs.length ? offset + runs.length : null, availability: await availability() };
   }
-  async function request(snapshotId: string, actorId: string) {
+  async function request(snapshotId: string, actorId: string | null, options?: { trigger: 'manual' | 'incremental' | 'scheduled' }) {
+    if (actorId === null && !['scheduled', 'incremental'].includes(options?.trigger ?? '')) throw new HttpError(403, '自动分析必须使用内部调度入口');
     const record = await archive.snapshot(snapshotId); const config = await worker();
     if (!config) throw new HttpError(503, '分析未配置或运行时离线；原件不受影响');
     if (record.manifest.byteLength > config.maxInputBytes) throw new HttpError(413, '该原件超过短会话分析限额；尚未分析，请使用后续长会话处理');
@@ -77,8 +80,8 @@ export function analysisService(db: Database, archive: ArchiveQuery) {
       if (existing.rows[0]) { await client.query('COMMIT'); return existing.rows[0]; }
       const count = await client.query("SELECT count(*)::int AS count FROM analysis_jobs WHERE state IN ('queued','running')");
       if (count.rows[0].count >= 100) throw new HttpError(429, '分析队列已满，请稍后重试；原件不受影响');
-      const result = await client.query(`INSERT INTO analysis_jobs(id,snapshot_id,actor_id,state,config,input) VALUES($1,$2,$3,'queued',$4,$5) RETURNING ${runProjection}`,
-        [randomUUID(), snapshotId, actorId, config, input]);
+      const result = await client.query(`INSERT INTO analysis_jobs(id,snapshot_id,actor_id,actor_kind,state,config,input) VALUES($1,$2,$3,$6,'queued',$4,$5) RETURNING ${runProjection}`,
+        [randomUUID(), snapshotId, actorId, config, input, actorId === null ? 'system' : 'user']);
       await client.query('COMMIT'); return result.rows[0];
     } catch (error) { await client.query('ROLLBACK'); throw error; } finally { client.release(); }
   }

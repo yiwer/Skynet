@@ -86,7 +86,7 @@ test('HTTPS OAuth consent, per-request revocation, MCP/Web evidence and complete
     client = new Client({ name: 'public-product-test', version: '1' });
     await client.connect(new StreamableHTTPClientTransport(new URL(resource), { fetch: sandbox.fetchTls,
       requestInit: { headers: { Authorization: `Bearer ${tokens.access_token}` } } }));
-    assert.equal((await client.listTools()).tools.length, 11);
+    assert.equal((await client.listTools()).tools.length, 13);
     async function tool(name: string, args: Record<string, unknown>) {
       const result = await client!.callTool({ name, arguments: args });
       assert.notEqual(result.isError, true, JSON.stringify(result)); assert.ok(Buffer.byteLength(JSON.stringify(result)) <= 96 * 1024);
