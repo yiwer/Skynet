@@ -17,10 +17,18 @@ export async function validQualificationBytes(bytes:Buffer) {
 }
 // Global append sequence makes max revision change for any later qualification
 // in this exact carrier, without changing its bytes, parser or stable event IDs.
-export const attributionRevisionSql = (snapshot: string) => `(SELECT COALESCE(MAX(c.revision),0) FROM snapshot_events se
-  JOIN event_qualifications c ON c.event_id=se.event_id WHERE se.snapshot_id=${snapshot})`;
-export const qualificationDaySql = (employee: string, date: string) => `(SELECT COALESCE(MAX(c.revision),0)
-  FROM archive_event_origins qo JOIN event_qualifications c ON c.event_id=qo.event_id WHERE qo.employee_id=${employee} AND qo.source_date=${date})`;
+const carrierEvents=(snapshot:string)=>`(SELECT event_id FROM snapshot_events WHERE snapshot_id=${snapshot}
+  UNION SELECT event_id FROM effective_snapshot_events WHERE snapshot_id=${snapshot})`;
+// Keep old base proofs in the revision even when an effective mapping changes.
+// Every component can only increase; replacing a high old proof with a lower
+// existing canonical proof cannot cancel the new override revision.
+export const attributionRevisionSql = (snapshot: string) => `((SELECT COALESCE(MAX(c.revision),0) FROM ${carrierEvents(snapshot)} se
+  JOIN event_qualifications c ON c.event_id=se.event_id)+(SELECT COALESCE(MAX(i.revision),0)
+  FROM ${carrierEvents(snapshot)} se JOIN event_integrity i ON i.event_id=se.event_id WHERE i.version='original-utf8-1')+(SELECT COALESCE(MAX(v.revision),0) FROM event_origin_overrides v WHERE v.snapshot_id=${snapshot} AND v.version='original-utf8-1'))`;
+export const qualificationDaySql = (employee: string, date: string) => `((SELECT COALESCE(MAX(c.revision),0)
+  FROM archive_event_origins qo JOIN event_qualifications c ON c.event_id=qo.event_id WHERE qo.employee_id=${employee} AND qo.source_date=${date})+
+  (SELECT COALESCE(MAX(i.revision),0) FROM archive_event_origins qo JOIN event_integrity i ON i.event_id=qo.event_id
+  WHERE qo.employee_id=${employee} AND qo.source_date=${date} AND i.version='original-utf8-1'))`;
 export async function attributionRevision(q:Query,snapshotId:string) {
   return String((await q.query(`SELECT ${attributionRevisionSql('$1')} AS revision`,[snapshotId])).rows[0].revision);
 }

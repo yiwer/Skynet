@@ -6,6 +6,7 @@ import type { AnalysisRun, AnalysisProcessing } from '../../packages/contracts/a
 import { beijingDate, dueReportDate, reportDate, correctionInput, type ReportCorrection, type DailyItem, type DailyReport } from '../../packages/contracts/reports.js';
 import { ledgerCountProjection } from './provenance.js';
 import {readEvidence} from './evidence.js';
+import {qualificationDaySql} from './qualification.js';
 
 // This is a report display classification, never a rewrite of an origin. The
 // last authenticated project correction assigns each eligible event exactly once.
@@ -67,8 +68,7 @@ const definition = '记录、用户轮次（原件或材料行）、工具调用
 // Optional for historical short-session results. #23 owns the full per-range
 // contract; reports expose its compact scope plus the immutable analysis ID.
 type Processing = AnalysisProcessing;
-const qualificationForPeriod = `(SELECT COALESCE(MAX(c.revision),0) FROM archive_event_origins o JOIN event_qualifications c ON c.event_id=o.event_id
-  WHERE o.employee_id=p.employee_id AND o.source_date=p.date)`;
+const qualificationForPeriod = qualificationDaySql('p.employee_id','p.date');
 export function reportRunCoverage(run: AnalysisRun) {
   const processing = (run.result as (AnalysisRun['result'] & { processing?: Processing }))?.processing;
   const coverage = run.input.coverage;
@@ -83,13 +83,13 @@ export function reportService(db: Database, analysis: AnalysisService, clock: ()
   const parserVersions=['codex-cli','codex-desktop','claude-code-cli'].map(source=>readEvidence(Buffer.alloc(0),source as 'codex-cli').parserVersion);
   async function sourceRevision(query: Pick<Database,'query'>,employeeId:string,date:string) {
     const row=(await query.query(`SELECT
-      (SELECT MAX(s.committed_at)::text FROM effective_event_origins o JOIN snapshot_events se ON se.event_id=o.event_id JOIN snapshots s ON s.id=se.snapshot_id
+      (SELECT MAX(s.committed_at)::text FROM effective_event_origins o JOIN effective_snapshot_events se ON se.event_id=o.event_id JOIN snapshots s ON s.id=se.snapshot_id
         WHERE o.employee_id=$1 AND o.source_date=$2 AND o.context='after-enrollment') AS carrier,
       (SELECT count(*)::text FROM effective_event_origins o WHERE o.employee_id=$1 AND o.source_date=$2 AND o.context='after-enrollment') AS events,
       (SELECT count(*)::text FROM effective_event_origins o WHERE o.employee_id=$1 AND o.source_date IS NULL) AS undated,
-      (SELECT COALESCE(MAX(c.revision),0)::text FROM archive_event_origins o JOIN event_qualifications c ON c.event_id=o.event_id WHERE o.employee_id=$1 AND o.source_date=$2) AS qualification,
+      ${qualificationDaySql('$1','$2')} AS qualification,
       (SELECT MAX(t.updated_at)::text FROM analysis_targets t JOIN snapshots s ON s.id=t.desired_snapshot_id WHERE EXISTS(
-        SELECT 1 FROM snapshot_events se JOIN effective_event_origins o ON o.event_id=se.event_id WHERE se.snapshot_id=s.id AND o.employee_id=$1 AND o.source_date=$2 AND o.context='after-enrollment')) AS targets,
+        SELECT 1 FROM effective_snapshot_events se JOIN effective_event_origins o ON o.event_id=se.event_id WHERE se.snapshot_id=s.id AND o.employee_id=$1 AND o.source_date=$2 AND o.context='after-enrollment')) AS targets,
       (SELECT string_agg(DISTINCT config->>'configurationHash',',' ORDER BY config->>'configurationHash') FROM analysis_workers WHERE updated_at>now()-interval '15 seconds') AS config`,[employeeId,date])).rows[0];
     return digest(JSON.stringify({row,parserVersions}));
   }
@@ -200,7 +200,7 @@ export function reportService(db: Database, analysis: AnalysisService, clock: ()
       // Each event's latest exact carrier is chosen, including restored primary
       // copies. Original origin coordinates/ownership stay frozen in analysis input.
       const snapshots = events.length > 10000 ? [] : (await client.query(`SELECT DISTINCT s.id,s.hash FROM effective_event_origins o
-        CROSS JOIN LATERAL (SELECT ss.id,ss.hash FROM snapshot_events se JOIN snapshots ss ON ss.id=se.snapshot_id
+        CROSS JOIN LATERAL (SELECT ss.id,ss.hash FROM effective_snapshot_events se JOIN snapshots ss ON ss.id=se.snapshot_id
           WHERE se.event_id=o.event_id ORDER BY ss.committed_at DESC,ss.id DESC LIMIT 1) s
         WHERE o.employee_id=$1 AND o.source_date=$2 AND o.context='after-enrollment' ORDER BY s.id LIMIT 101`, [employeeId, date])).rows;
       const overflow = events.length > 10000 || snapshots.length > 100;

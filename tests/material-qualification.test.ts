@@ -13,6 +13,7 @@ import { publicConfig, readAnalysisConfig } from '../apps/analysis/config.js';
 import { analysisQueue } from '../apps/analysis/queue.js';
 import { executeAnalysis } from '../apps/analysis/execute.js';
 import { beijingDate } from '../packages/contracts/reports.js';
+import {archiveQuery} from '../apps/server/archive-query.js';
 import { monday, addDays, type WorkView } from '../packages/contracts/work-views.js';
 import type { ClaimedAnalysis } from '../apps/analysis/queue.js';
 import { reconcileOriginalQualifications } from '../apps/server/provenance.js';
@@ -85,15 +86,19 @@ test('material-first → original normal source qualification versions activity 
     });
     // Pause the public caller immediately after its exact origin rows were read.
     // The actual A capture then commits a new proof before request creates a job.
-    const originalQuery=s.testDatabase.query;let releaseOrigins!:()=>void;let originsRead!:()=>void;let armed=true;
+    const originalQuery=s.testDatabase.query;let releaseOrigins!:()=>void;let originsRead!:()=>void;let reads=0;
     const readGate=new Promise<void>(resolve=>{originsRead=resolve;});const released=new Promise<void>(resolve=>{releaseOrigins=resolve;});
     s.testDatabase.query=((sql:unknown,values:unknown[])=>{
       const result=(originalQuery as (sql:string,values:unknown[])=>Promise<import('pg').QueryResult>).call(s.testDatabase,sql as string,values);
-      if(armed&&typeof sql==='string'&&sql.includes('FROM snapshot_events s JOIN effective_event_origins')&&values?.[0]===bSnapshot) {
-        armed=false;return Promise.resolve(result).then(async value=>{originsRead();await released;return value;});
+      if(reads<3&&typeof sql==='string'&&sql.includes('FROM effective_snapshot_events s JOIN effective_event_origins')&&values?.[0]===bSnapshot) {
+        reads++;return Promise.resolve(result).then(async value=>{if(reads===3)originsRead();await released;return value;});
       }
       return result;
     }) as typeof originalQuery;
+    // Two cold caller caches read the same old origins while the public analysis
+    // request is preparing. The trusted public A upload then changes revision.
+    const coldArchive=archiveQuery(s.testDatabase,new RawStore(s.env.RAW_DIRECTORY!));
+    const racingCaches=Promise.allSettled([coldArchive.detail(bSnapshot),coldArchive.exported(bSnapshot,'readable')]);
     const racingRequest=api(`/api/snapshots/${bSnapshot}/analysis`,undefined,json({}));let aSnapshot:string;
     try {
       await Promise.race([readGate,new Promise((_,reject)=>setTimeout(()=>reject(new Error('public analysis origin-read seam was not reached')),12000))]);
@@ -101,6 +106,9 @@ test('material-first → original normal source qualification versions activity 
     } finally {releaseOrigins();s.testDatabase.query=originalQuery;}
     const staleResponse=await racingRequest;assert.equal(staleResponse.status,409,'an input read before the trusted proof cannot be attached to its new generation');
     assert.match((await staleResponse.json()).error,/资格版本已更新/);
+    for(const value of await racingCaches){assert.equal(value.status,'rejected','a cold cache must not publish old origins under a changed attribution revision');assert.equal((value as PromiseRejectedResult).reason.statusCode,409);}
+    assert.equal((await coldArchive.detail(bSnapshot)).events[1]!.context,'after-enrollment');
+    assert.ok((await coldArchive.exported(bSnapshot,'readable')).bytes.toString('utf8').includes('after-enrollment'));
     const qualified=await(await api(`/api/snapshots/${aSnapshot}`)).json();
     await writeFile(join(s.directory,'qualification-after-normal-diagnostic.json'),JSON.stringify({initial,qualified,beforeReport,oldRequested},null,2));
     assert.equal(qualified.events[1].context,'after-enrollment','normal original A proof must qualify the original post-enrollment event once');
@@ -243,7 +251,7 @@ test('legacy material qualification reconciles >16MiB committed original primary
     let gaps=await(await api('/api/activity-statistics')).json();const gapDeadline=Date.now()+8000;
     while(!gaps.warnings.qualificationGaps&&Date.now()<gapDeadline){await new Promise(resolve=>setTimeout(resolve,200));gaps=await(await api('/api/activity-statistics')).json();}
     assert.equal(gaps.warnings.qualificationGaps,1);assert.equal(gaps.rows.reduce((sum:number,item:any)=>sum+item.activityRecords,0),2);
-    const badDetail=await(await api(`/api/snapshots/${badPrimary}`)).json();assert.ok(badDetail.events.every((event:any)=>event.context==='historical'&&!event.origin.qualification),'replacement-character parsing cannot create an exact original-source proof');
+    const badDetail=await(await api(`/api/snapshots/${badPrimary}`)).json();assert.equal(badDetail.unrecognizedLines,1);assert.equal(badDetail.total,0,'new corrupt capture has a visible parser gap and no semantic activity or qualification');
     assert.deepEqual(Buffer.from(await(await api(`/api/snapshots/${badPrimary}/raw`)).arrayBuffer()),badBytes);
     await writeFile(join(s.directory,'legacy-material-qualification-evidence.json'),JSON.stringify({byteLength:childBytes.length,hash:digest(childBytes),initial,qualified,repeated,stats,frozen,noReupload:true,analysisRejected413:true},null,2));
   } finally {await db.end();await s.close();}

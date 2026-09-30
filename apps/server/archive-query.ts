@@ -14,6 +14,7 @@ import { eventOrigins, archiveStatistics } from './provenance.js';
 import type { EventOrigin } from '../../packages/contracts/provenance.js';
 import type { Provenance } from '../../packages/contracts/provenance.js';
 import { attributionRevision } from './qualification.js';
+import {verifySnapshotIntegrity} from './evidence-integrity.js';
 
 export const exportFormat = z.enum(['raw', 'readable', 'recovery']);
 export type ExportFormat = z.infer<typeof exportFormat>;
@@ -78,8 +79,15 @@ export function archiveQuery(db: Database, raw: RawStore) {
   }
   async function detail(id: string, offset = 0, summary = false) {
     if (!z.uuid().safeParse(id).success) throw new HttpError(404, '未找到存档');
+    await verifySnapshotIntegrity(db,raw,id);
     const revision=await attributionRevision(db,id);
-    const { record, evidence, activity, recovery } = await evidenceCache.get(`${id}:${beijingDate(new Date())}:${revision}`, () => parsed(id));
+    const { record, evidence, activity, recovery } = await evidenceCache.get(`${id}:${beijingDate(new Date())}:${revision}`, async () => {
+      if(await attributionRevision(db,id)!==revision)throw new HttpError(409,'原件归属版本已更新，请重新读取');
+      const value=await parsed(id);
+      if(await attributionRevision(db,id)!==revision)throw new HttpError(409,'原件归属版本已更新，请重新读取');
+      return value;
+    });
+    if(await attributionRevision(db,id)!==revision)throw new HttpError(409,'原件归属版本已更新，请重新读取');
     return { snapshotId: record.id, employee: record.employee, deviceId: record.device_id, manifest: record.manifest,
       committedAt: record.committed_at, state: 'committed', backup: 'single-copy', ...evidence, recovery, provenance: record.provenance,
       captureHealth: await readCaptureHealth(db, record.device_id, record.source, record.source_session_id),
@@ -127,8 +135,16 @@ export function archiveQuery(db: Database, raw: RawStore) {
   }
   async function exported(id: string, format: ExportFormat) {
     if (!z.uuid().safeParse(id).success) throw new HttpError(404, '未找到存档');
+    if(format==='readable')await verifySnapshotIntegrity(db,raw,id);
     const revision=format==='readable'?await attributionRevision(db,id):'raw';
-    return exportCache.get(`${id}:${format}:${revision}`, () => buildExport(id, format));
+    const value=await exportCache.get(`${id}:${format}:${revision}`, async () => {
+      if(format==='readable'&&await attributionRevision(db,id)!==revision)throw new HttpError(409,'原件归属版本已更新，请重新导出');
+      const value=await buildExport(id, format);
+      if(format==='readable'&&await attributionRevision(db,id)!==revision)throw new HttpError(409,'原件归属版本已更新，请重新导出');
+      return value;
+    });
+    if(format==='readable'&&await attributionRevision(db,id)!==revision)throw new HttpError(409,'原件归属版本已更新，请重新导出');
+    return value;
   }
   async function buildExport(id: string, format: ExportFormat) {
     const record = await snapshot(id); const bytes = await raw.read(record.device_id, record.hash);

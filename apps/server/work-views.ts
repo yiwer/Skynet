@@ -26,9 +26,11 @@ export async function migrateWorkViews(db: Database) {
     COMMIT;`); } catch (error) { await client.query('ROLLBACK'); throw error; } finally { client.release(); }
 }
 const identity = (selection: WorkViewSelection) => digest(JSON.stringify([selection.kind, selection.subject, selection.from, selection.to]));
-const qualificationForView = `(SELECT COALESCE(MAX(c.revision),0) FROM archive_event_origins qo JOIN event_qualifications c ON c.event_id=qo.event_id
+const qualificationForView = `((SELECT COALESCE(MAX(c.revision),0) FROM archive_event_origins qo JOIN event_qualifications c ON c.event_id=qo.event_id
   WHERE qo.source_date BETWEEN p.selection->>'from' AND p.selection->>'to' AND CASE WHEN p.selection->>'kind'='weekly'
-    THEN qo.employee_id::text=p.selection->>'subject' ELSE ${displayProjectSql('qo')}=p.selection->>'subject' END)`;
+    THEN qo.employee_id::text=p.selection->>'subject' ELSE ${displayProjectSql('qo')}=p.selection->>'subject' END)+(SELECT COALESCE(MAX(i.revision),0) FROM archive_event_origins qo JOIN event_integrity i ON i.event_id=qo.event_id AND i.version='original-utf8-1'
+  WHERE qo.source_date BETWEEN p.selection->>'from' AND p.selection->>'to' AND CASE WHEN p.selection->>'kind'='weekly'
+    THEN qo.employee_id::text=p.selection->>'subject' ELSE ${displayProjectSql('qo')}=p.selection->>'subject' END))`;
 const candidateRevisionSql=`(SELECT concat(count(*),'/',count(DISTINCT(o.employee_id,o.source_date))) FROM effective_event_origins o
   WHERE o.context='after-enrollment' AND o.source_date BETWEEN p.selection->>'from' AND p.selection->>'to' AND CASE WHEN p.selection->>'kind'='weekly'
     THEN o.employee_id::text=p.selection->>'subject' ELSE ${displayProjectSql('o')}=p.selection->>'subject' END)`;

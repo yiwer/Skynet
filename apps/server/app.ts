@@ -27,6 +27,7 @@ import { workStatisticsService } from './work-statistics.js';
 import { migrateWorkViews, workViewService } from './work-views.js';
 import { workViewQuery } from '../../packages/contracts/work-views.js';
 import { assertRestoreReady } from './backup-files.js';
+import {reconcileOriginIntegrity} from './evidence-integrity.js';
 
 export async function createApp(options: { db: Database; rawDirectory: string; webDirectory?: string; publicOrigin?: string; reportClock?: () => Date }) {
   const { db } = options;
@@ -40,10 +41,11 @@ export async function createApp(options: { db: Database; rawDirectory: string; w
   await migrateWorkViews(db);
   const raw = new RawStore(options.rawDirectory);
   await backfillOrigins(db, raw);
+  await reconcileOriginIntegrity(db,raw);
   const app = Fastify({ bodyLimit: CHUNK_BYTES, logger: false, requestTimeout: 30_000 });
   let qualifying: Promise<void> | undefined;
   const qualificationTimer=setInterval(()=>{
-    if(!qualifying)qualifying=reconcileOriginalQualifications(db,raw).catch(error=>{
+    if(!qualifying)qualifying=reconcileOriginIntegrity(db,raw).then(()=>reconcileOriginalQualifications(db,raw)).catch(error=>{
       app.log.error(error,'Legacy original-source qualification reconciliation failed');
     }).finally(()=>{qualifying=undefined;});
   },1000);qualificationTimer.unref();

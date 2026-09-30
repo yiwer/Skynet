@@ -8,6 +8,7 @@ import type { WorkStatistics, StatisticReference, RecordedTokens } from '../../p
 import { nativeStatistics, statisticsExtractorVersion, type TokenComponents } from '../../packages/native-statistics.js';
 import { materialSource } from './material-provenance.js';
 import type { Provenance } from '../../packages/contracts/provenance.js';
+import {qualificationDaySql} from './qualification.js';
 
 type Event = { event_id: string; snapshot_id: string; material_id: string | null; device_id: string; line: number; block: number;
   source: Manifest['source']; source_session_id: string; role: string; timestamp: string | null; context: string; text_offset: number; project: string;
@@ -55,7 +56,10 @@ export function workStatisticsService(db: Database, raw: RawStore) {
         FROM effective_event_origins WHERE employee_id=$1 AND source_date=$2`, [employeeId, date])).rows[0];
       const all = (await client.query(`SELECT * FROM effective_event_origins WHERE employee_id=$1 AND source_date=$2
         AND context='after-enrollment' ORDER BY event_id LIMIT 10001`, [employeeId, date])).rows as Event[];
-      const events = all.slice(0, 10000); let inputComplete = all.length <= 10000;
+      const integrity=(await client.query(`SELECT count(*)::integer AS gaps FROM archive_event_origins o WHERE employee_id=$1 AND source_date=$2
+        AND NOT EXISTS(SELECT 1 FROM event_integrity i WHERE i.event_id=o.event_id AND i.version='original-utf8-1' AND i.valid)`,[employeeId,date])).rows[0].gaps as number;
+      const attribution=(await client.query(`SELECT ${qualificationDaySql('$1','$2')} AS revision`,[employeeId,date])).rows[0].revision;
+      const events = all.slice(0, 10000); let inputComplete = all.length <= 10000 && integrity===0;
       const sources = new Map<string, Event[]>();
       for (const event of events) {
         const key = `${event.snapshot_id}/${event.material_id ?? ''}`;
@@ -147,7 +151,7 @@ export function workStatisticsService(db: Database, raw: RawStore) {
       const content = { employeeId, employee: employee.name, date, ...counts, files: { observedCount: fileKeys.size, paths: [...paths].sort().slice(0, 40), complete: fileComplete && paths.size <= 40, unsupportedToolCalls: unsupportedTools },
         tokens, intervals: intervals.slice(0, 50), references: references.slice(0, 10000), sourceInputsComplete: inputComplete && intervals.length <= 50 && references.length <= 10000,
         definition, humanWorkHours: null, extractorVersion: statisticsExtractorVersion,
-        inputDigest: digest(JSON.stringify([events.map(event => [event.event_id, event.context, event.qualification_revision ?? '0']), inputKeys])) };
+        inputDigest: digest(JSON.stringify([events.map(event => [event.event_id, event.context, event.qualification_revision ?? '0']), inputKeys,attribution,integrity,'original-utf8-1'])) };
       const version = digest(JSON.stringify(content));
       const known = (await client.query('SELECT payload FROM work_statistic_revisions WHERE employee_id=$1 AND date=$2 AND version=$3', [employeeId, date, version])).rows[0];
       let payload: WorkStatistics;

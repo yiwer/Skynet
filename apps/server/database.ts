@@ -108,6 +108,18 @@ export async function migrate(db: Database) {
       UNIQUE(event_id,proof_snapshot_id)
     );
     CREATE INDEX IF NOT EXISTS event_qualification_latest ON event_qualifications(event_id,revision DESC);
+    CREATE TABLE IF NOT EXISTS event_integrity (
+      revision bigserial PRIMARY KEY,event_id text NOT NULL REFERENCES archive_event_origins(event_id),
+      version text NOT NULL,valid boolean NOT NULL,record_hash text,reason text,
+      checked_at timestamptz NOT NULL DEFAULT now(),UNIQUE(event_id,version)
+    );
+    CREATE TABLE IF NOT EXISTS event_origin_overrides (
+      revision bigserial PRIMARY KEY,snapshot_id uuid NOT NULL REFERENCES snapshots(id),line integer NOT NULL,block integer NOT NULL,
+      version text NOT NULL,event_id text REFERENCES archive_event_origins(event_id),record_hash text,reason text,
+      created_at timestamptz NOT NULL DEFAULT now(),UNIQUE(snapshot_id,line,block,version)
+    );
+    CREATE OR REPLACE VIEW effective_snapshot_events AS SELECT s.snapshot_id,s.line,s.block,COALESCE(v.event_id,s.event_id) AS event_id
+      FROM snapshot_events s LEFT JOIN event_origin_overrides v ON v.snapshot_id=s.snapshot_id AND v.line=s.line AND v.block=s.block AND v.version='original-utf8-1';
     CREATE TABLE IF NOT EXISTS qualification_reconcile (
       id integer PRIMARY KEY CHECK(id=1),cutoff timestamptz NOT NULL DEFAULT now(),
       last_committed_at timestamptz,last_snapshot_id uuid,complete boolean NOT NULL DEFAULT false,last_error text
@@ -117,12 +129,11 @@ export async function migrate(db: Database) {
     CREATE TABLE IF NOT EXISTS qualification_reconcile_gaps (
       snapshot_id uuid PRIMARY KEY REFERENCES snapshots(id),reason text NOT NULL
     );
-    DO $$ BEGIN IF to_regclass('effective_event_origins') IS NULL THEN
-      EXECUTE 'CREATE VIEW effective_event_origins AS SELECT o.event_id,o.snapshot_id,o.line,o.block,o.employee_id,o.device_id,o.project,
+    CREATE OR REPLACE VIEW effective_event_origins AS SELECT o.event_id,o.snapshot_id,o.line,o.block,o.employee_id,o.device_id,o.project,
         o.source,o.source_session_id,o.role,o.timestamp,o.source_date,COALESCE(c.context,o.context) AS context,o.material_id,o.text_offset,
         o.context AS base_context,COALESCE(c.revision,0) AS qualification_revision,c.proof_snapshot_id,c.proof_line,c.proof_block,c.enrolled_at AS proof_enrolled_at
-        FROM archive_event_origins o LEFT JOIN LATERAL(SELECT * FROM event_qualifications WHERE event_id=o.event_id ORDER BY revision DESC LIMIT 1)c ON true';
-    END IF; END $$;
+        FROM archive_event_origins o LEFT JOIN LATERAL(SELECT * FROM event_qualifications WHERE event_id=o.event_id ORDER BY revision DESC LIMIT 1)c ON true
+        WHERE EXISTS(SELECT 1 FROM event_integrity i WHERE i.event_id=o.event_id AND i.version='original-utf8-1' AND i.valid);
     COMMIT;
   `);
 }
