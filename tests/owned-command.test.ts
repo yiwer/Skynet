@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {command} from './support.js';
-import {removeOwnedContainer,ownedReady,stopOwnedChild,cleanupOwned} from './owned-command.js';
+import {removeOwnedContainer,ownedReady,stopOwnedChild,cleanupOwned,OwnedCommandError,ownedCommand} from './owned-command.js';
 import {spawn} from 'node:child_process';
 import {mkdtemp,readFile,writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
@@ -17,6 +17,35 @@ test('owned command bounds both streams and preserves decoded chunks without lea
   for(const stream of ['stdout','stderr'])await assert.rejects(command(process.execPath,['-e',`process.${stream}.write('x'.repeat(4096))`],process.env,'',{timeoutMs:1000,maxOutputBytes:512}),new RegExp(`${stream} limit`));
   const bytes='中文😀';assert.equal(await command(process.execPath,['-e',`const b=Buffer.from(${JSON.stringify(bytes)});process.stdout.write(b.subarray(0,2));setTimeout(()=>process.stdout.write(b.subarray(2)),20)`],process.env),bytes);
   await assert.rejects(command(process.execPath,['-e','process.stderr.write(process.env.DATABASE_URL);process.exitCode=1'],{...process.env,DATABASE_URL:'postgresql://private:secret@private-host/db'}),error=>error instanceof Error&&!error.message.includes('secret')&&!error.message.includes('private-host'));
+});
+
+test('failed owned child retains its bounded stdout footer and redacts both failure streams',{timeout:5000},async()=>{
+  const credential='controlled-private-child-credential',inputSecret='controlled-private-input-secret';
+  const script="let input='';process.stdin.setEncoding('utf8');process.stdin.on('data',part=>input+=part);process.stdin.on('end',()=>{const secret=JSON.parse(input).credential;for(const stream of [process.stdout,process.stderr])stream.write('synthetic failure '+process.env.PROBE_CREDENTIAL+' '+secret+' postgresql://private:password@private-host/db Bearer opaque-private-value\\n');process.stdout.write('# tests 1\\n# fail 1\\n');process.exitCode=1});";
+  await assert.rejects(ownedCommand(process.execPath,['-e',script],{...process.env,PROBE_CREDENTIAL:credential},JSON.stringify({credential:inputSecret}),{timeoutMs:1000,maxOutputBytes:1024}),error=>{
+    assert.ok(error instanceof OwnedCommandError);assert.equal(error.reason,'exited');assert.equal(error.code,1);
+    const stdout=Reflect.get(error,'stdout');assert.equal(typeof stdout,'string');assert.match(stdout,/# tests 1\n# fail 1/);
+    for(const output of [stdout,error.stderr,error.message]){assert.match(output,/synthetic failure/);assert.match(output,/\[private\]/);for(const secret of [credential,inputSecret,'private-host','opaque-private-value'])assert.ok(!output.includes(secret));}
+    assert.ok(Buffer.byteLength(stdout)<=1024);assert.ok(Buffer.byteLength(error.stderr)<=1024);return true;
+  });
+});
+
+test('suite runner prints a real failing test footer and exits nonzero without leaking child credentials',{timeout:5000},async()=>{
+  const directory=await mkdtemp(join(tmpdir(),'skynet-suite-output-')),failing=join(directory,'synthetic-failure.test.mjs'),wrapper=join(directory,'wrapper.mjs');
+  const secret='controlled-runner-private-credential';
+  await writeFile(failing,"import test from 'node:test';import assert from 'node:assert/strict';test('synthetic reporter failure',()=>assert.fail(process.env.PROBE_CREDENTIAL));");
+  const runner=new URL('./run.ts',import.meta.url).href;
+  // The outer observer does not know the inner secret, so it cannot mask a
+  // missing runner redaction and turn a leak into a false positive.
+  await writeFile(wrapper,`import{runTests}from${JSON.stringify(runner)};await runTests([${JSON.stringify(failing)}],{...process.env,PROBE_CREDENTIAL:${JSON.stringify(secret)}});`);
+  // Standalone CI has no inherited nested-node:test context. Preserve that
+  // entry condition rather than asking Node to run a suite inside its worker.
+  const observerEnv={...process.env};delete observerEnv.NODE_TEST_CONTEXT;
+  await assert.rejects(ownedCommand(process.execPath,['--import','tsx',wrapper],observerEnv,'',{timeoutMs:3000,maxOutputBytes:64*1024}),error=>{
+    assert.ok(error instanceof OwnedCommandError);assert.equal(error.code,1);assert.equal(error.reason,'exited');
+    assert.match(error.stdout,/synthetic reporter failure/,error.stderr);assert.match(error.stdout,/(?:#|ℹ) tests 1/);assert.match(error.stdout,/(?:#|ℹ) fail 1/);assert.match(error.stdout,/\[private\]/);
+    assert.match(error.stderr,/Owned command exited \(1\)/);assert.ok(!error.stdout.includes(secret));assert.ok(!error.stderr.includes(secret));return true;
+  });
 });
 
 test('container cleanup refuses unknown ownership or failed inspection and removes only the exact owned name',{timeout:5000},async()=>{
