@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
-import { beijingDate } from '../../packages/contracts/reports.js';
+import { beijingDate, type DailyReport } from '../../packages/contracts/reports.js';
+import { assessmentLabels } from '../../packages/contracts/analysis.js';
 import type { CoverageCell, CoverageMatrix, CoverageObservation, WorkStatistics } from '../../packages/contracts/coverage.js';
 
 const collection = { 'gap-observed': '采集缺口已观察', 'observations-only': '仅有时点观测', unknown: '覆盖未知' };
@@ -14,13 +15,14 @@ export function TeamCoverage({ request, onEvidence, currentEmployeeId }: { reque
   const [date, setDate] = useState(beijingDate()); const [offset, setOffset] = useState(0);
   const [matrix, setMatrix] = useState<CoverageMatrix>(); const [selection, setSelection] = useState<CoverageCell>();
   const [error, setError] = useState(''); const [retry, setRetry] = useState(0);
-  const [detail, setDetail] = useState<{ statistics: WorkStatistics; observations: CoverageObservation[]; nextObservationOffset: number | null }>();
+  const [detail, setDetail] = useState<{ statistics: WorkStatistics; observations: CoverageObservation[]; nextObservationOffset: number | null; report: DailyReport | null }>();
   const [detailError, setDetailError] = useState(''); const [detailRetry, setDetailRetry] = useState(0); const [observationOffset, setObservationOffset] = useState(0);
   const [statisticsOffset, setStatisticsOffset] = useState(0); const [statisticsRevision, setStatisticsRevision] = useState<number>();
+  const [reportRevision, setReportRevision] = useState<number>();
   useEffect(() => {
     const abort = new AbortController(); setError(''); setMatrix(undefined); setSelection(undefined);
     void request(`/api/team-coverage?date=${date}&offset=${offset}`, abort.signal).then(response => response.json()).then((value: CoverageMatrix) => {
-      if (!abort.signal.aborted) { setMatrix(value); setSelection((value.rows.find(row => row.employeeId === currentEmployeeId) ?? value.rows[0])?.cells.find(cell => cell.date === date)); setObservationOffset(0); setStatisticsOffset(0); setStatisticsRevision(undefined); }
+      if (!abort.signal.aborted) { setMatrix(value); setSelection((value.rows.find(row => row.employeeId === currentEmployeeId) ?? value.rows[0])?.cells.find(cell => cell.date === date)); setObservationOffset(0); setStatisticsOffset(0); setStatisticsRevision(undefined); setReportRevision(undefined); }
     }).catch(failure => { if (!abort.signal.aborted) setError(failure.message); });
     return () => abort.abort();
   }, [date, offset, retry]);
@@ -29,11 +31,12 @@ export function TeamCoverage({ request, onEvidence, currentEmployeeId }: { reque
     if (selection) void Promise.all([
       request(`/api/work-statistics/${selection.employeeId}?date=${selection.date}&offset=${statisticsOffset}${statisticsRevision ? `&revision=${statisticsRevision}` : ''}`, abort.signal).then(response => response.json()),
       request(`/api/team-coverage/${selection.employeeId}/observations?date=${selection.date}&offset=${observationOffset}`, abort.signal).then(response => response.json()),
-    ]).then(([statistics, observations]) => { if (!abort.signal.aborted) { setDetail({ statistics, observations: observations.observations, nextObservationOffset: observations.nextOffset }); setStatisticsRevision(statistics.revision); } })
+      request(`/api/daily-reports/${selection.employeeId}/${selection.date}${reportRevision ? `?revision=${reportRevision}` : ''}`, abort.signal).then(response => response.json()).catch(() => null),
+    ]).then(([statistics, observations, report]) => { if (!abort.signal.aborted) { setDetail({ statistics, observations: observations.observations, nextObservationOffset: observations.nextOffset, report }); setStatisticsRevision(statistics.revision); setReportRevision(report?.revision || undefined); } })
       .catch(failure => { if (!abort.signal.aborted) setDetailError(failure.message); });
     return () => abort.abort();
   }, [selection?.employeeId, selection?.date, observationOffset, statisticsOffset, detailRetry]);
-  function select(cell: CoverageCell) { setSelection(cell); setObservationOffset(0); setStatisticsOffset(0); setStatisticsRevision(undefined); setDetailRetry(value => value + 1); }
+  function select(cell: CoverageCell) { setSelection(cell); setObservationOffset(0); setStatisticsOffset(0); setStatisticsRevision(undefined); setReportRevision(undefined); setDetailRetry(value => value + 1); }
   return <section className="team-coverage" aria-label="团队覆盖矩阵">
     <div className="heading"><div><p className="eyebrow">来源日期 · 北京时间</p><h1>团队覆盖</h1><p>先看记录与采集状态，再打开原件核查。</p></div>
       <label>截止日期 <input type="date" value={date} onChange={event => { if (event.target.value) { setDate(event.target.value); setOffset(0); } }} /></label></div>
@@ -61,6 +64,18 @@ export function TeamCoverage({ request, onEvidence, currentEmployeeId }: { reque
           <li>{collection[selection.collection]}</li><li>{analysis[selection.analysis]}</li></ul>
         <p className="muted small">服务器收到观测：{time(selection.firstReceivedAt)} — {time(selection.lastReceivedAt)}。这不是连续采集证明。</p>
         {detailError ? <><p role="alert" className="error">{detailError}</p><button onClick={() => setDetailRetry(value => value + 1)}>重试统计与观测</button></> : !detail ? <p role="status">正在读取原始统计与观测…</p> : <>
+          <section aria-label="方向主题与阻塞"><h3>方向、主题与阻塞</h3>
+            {detail.report?.coverage?.fixture && <p className="notice">合成分析，非正式模型验收。</p>}
+            {detail.report?.version ? <p className="muted small">已保存日报 v{detail.report.revision}{detail.report.refreshPending ? ' · 后续刷新待完成' : ''}{detail.report.state !== 'ready' ? ' · 材料或分析不完整' : ''}</p>
+              : <p>{detail.report ? '本日主题尚未生成' : '日报暂不可读取'}；方向与阻塞未知。</p>}
+            {([['goal', '方向'], ['topic', '主题'], ['blocker', '阻塞']] as const).map(([category, label]) => {
+              const items = (detail.report?.items ?? []).filter(item => item.category === category).slice(0, 1);
+              return <div key={category}><h4>{label}</h4>{items.length ? items.map((item, index) => <div key={index}><p>{item.text}</p><p className="muted small">{assessmentLabels[item.assessment]}</p>
+                <a href={`#work?${new URLSearchParams({ kind: 'project', subject: item.project, from: selection.date, to: selection.date })}`}>查看项目工作：{item.project || '未归类项目'}</a></div>)
+                : <p className="muted small">尚无本页证据支持的{label}，不代表没有。</p>}</div>;
+            })}
+            <p><a href={`#daily?${new URLSearchParams({ employeeId: selection.employeeId, date: selection.date, ...(detail.report?.revision ? { revision: String(detail.report.revision) } : {}) })}`}>查看该员工本日工作</a></p>
+          </section>
           <h3>已记录活动</h3><dl className="coverage-metrics"><div><dt>会话</dt><dd>{metric(detail.statistics.sessions)}</dd></div><div><dt>用户轮次</dt><dd>{metric(detail.statistics.userTurns)}</dd></div>
             <div><dt>工具调用</dt><dd>{metric(detail.statistics.toolCalls)}</dd></div><div><dt>记录中文件路径</dt><dd>{metric(detail.statistics.files.observedCount)}{!detail.statistics.files.complete && ' · 不完整'}</dd></div>
             <div><dt>来源 Token 总量</dt><dd>{metric(detail.statistics.tokens.total)}</dd></div><div><dt>活动时间段</dt><dd>{detail.statistics.intervals.length} 段</dd></div></dl>

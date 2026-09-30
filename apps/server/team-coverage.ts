@@ -8,7 +8,8 @@ import type { z } from 'zod';
 import type { installationObservationSchema } from '../../packages/contracts/coverage.js';
 
 export async function migrateCoverage(db: Database) {
-  await db.query(`BEGIN; SELECT pg_advisory_xact_lock(7402131);
+  const client = await db.connect();
+  try { await client.query(`BEGIN; SELECT pg_advisory_xact_lock(7402131);
     CREATE TABLE IF NOT EXISTS coverage_schema(id integer PRIMARY KEY CHECK(id=1),started_at timestamptz NOT NULL DEFAULT now());
     INSERT INTO coverage_schema(id) VALUES(1) ON CONFLICT DO NOTHING;
     CREATE TABLE IF NOT EXISTS device_coverage_observations(device_id uuid NOT NULL REFERENCES devices(id),source text NOT NULL,
@@ -21,7 +22,7 @@ export async function migrateCoverage(db: Database) {
     CREATE TABLE IF NOT EXISTS work_statistic_revisions(employee_id uuid NOT NULL REFERENCES employees(id),date text NOT NULL,
       revision integer NOT NULL,version text NOT NULL,payload jsonb NOT NULL,created_at timestamptz NOT NULL DEFAULT now(),
       PRIMARY KEY(employee_id,date,revision),UNIQUE(employee_id,date,version));
-    COMMIT;`);
+    COMMIT;`); } catch (error) { await client.query('ROLLBACK'); throw error; } finally { client.release(); }
 }
 
 // One bounded row per source/server-received hour retains adverse observations
@@ -36,8 +37,11 @@ export async function observeCoverage(db: Database, deviceId: string, report: {
     backlog: Boolean(report.delivery?.pendingSnapshots), configured: null,
     host: report.capture?.observation === 'host-event-observed' ? 'observed' : report.capture ? 'not-observed' : 'unknown',
     codes: [...new Set(report.capture?.faults.map(fault => fault.code) ?? [])] });
-  for (const client of report.installation?.clients ?? []) observations.push({ source: client.source,
-    gap: false, backlog: false, configured: client.configured, host: client.hostEvent, codes: [] });
+  for (const client of report.installation?.clients ?? []) {
+    const existing = observations.find(observation => observation.source === client.source);
+    if (existing) { existing.configured = client.configured; if (existing.host !== 'observed') existing.host = client.hostEvent; }
+    else observations.push({ source: client.source, gap: false, backlog: false, configured: client.configured, host: client.hostEvent, codes: [] });
+  }
   for (const observation of observations) await db.query(`
     INSERT INTO device_coverage_observations(device_id,source,date,hour,gap_observed,backlog_observed,configured,host_event,fault_codes)
     VALUES($1,$2,to_char(now() AT TIME ZONE 'Asia/Shanghai','YYYY-MM-DD'),extract(hour FROM now() AT TIME ZONE 'Asia/Shanghai'),$3,$4,$5,$6,$7)

@@ -8,6 +8,9 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { mcpSandbox } from './mcp-support.js';
 import { beijingDate } from '../packages/contracts/reports.js';
+import { readAnalysisConfig, publicConfig } from '../apps/analysis/config.js';
+import { analysisQueue } from '../apps/analysis/queue.js';
+import { executeAnalysis } from '../apps/analysis/execute.js';
 
 const hash = (value: string | Buffer) => createHash('sha256').update(value).digest('hex');
 const json = (value: unknown): RequestInit => ({ method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(value) });
@@ -110,11 +113,62 @@ test('public coverage matrix, frozen source-day statistics and original evidence
     const mcpMatrix = await client.callTool({ name: 'read_team_coverage', arguments: { date: day } });
     const httpMatrix = await (await api(`/api/team-coverage?date=${day}`)).json();
     assert.deepEqual(JSON.parse((mcpMatrix.content as { text: string }[])[0]!.text).rows, httpMatrix.rows);
+    const configPath = join(s.directory, 'coverage-explicit-synthetic-analysis.json');
+    await writeFile(configPath, JSON.stringify({ mode: 'fixture', executable: process.execPath, runtimeVersion: '2.1.281', model: 'synthetic-coverage-fixture',
+      workDirectory: join(s.directory, 'synthetic-analysis'), fixtureOrigin: 'http://127.0.0.1:9', budgetId: 'coverage-fixture', budgetCny: 0,
+      inputCnyPerMillion: 0, outputCnyPerMillion: 0, maxRequests: 3, maxOutputTokens: 4096, maxAttempts: 1, timeoutSeconds: 30, autoAnalyzeUpdates: false }));
+    const config = await readAnalysisConfig(configPath); const queue = analysisQueue(s.testDatabase, config, 'coverage-synthetic-runner');
+    await s.testDatabase.query('INSERT INTO analysis_workers(id,config) VALUES($1,$2)', ['coverage-synthetic-runner', publicConfig(config)]);
+    assert.equal((await api(`/api/daily-reports/${A.employeeId}/${day}`, A.readerCredential, json({}))).status, 202);
+    let dailyReport: any;
+    for (let attempt = 0; attempt < 70; attempt++) {
+      await s.testDatabase.query("UPDATE analysis_workers SET updated_at=now() WHERE id='coverage-synthetic-runner'");
+      for (let index = 0; index < 10; index++) {
+        const job = await queue.claim(); if (!job) break;
+        const result = await executeAnalysis(config, job.input, new AbortController().signal, () => queue.allowForward(job), async (_config, input, _signal, beforeForward) => {
+          assert.equal(await beforeForward!(), true);
+          const event = input.events.findIndex(item => item.role === 'user' && item.origin?.employeeId === A.employeeId && item.origin?.sourceDate === day && item.origin?.context === 'after-enrollment');
+          return { output: { items: event < 0 ? [] : (['goal', 'topic', 'blocker'] as const).map(category => ({ category, assessment: 'claimed' as const,
+            text: `合成${category}：${input.events[event]!.text}`, citations: [{ event, textOffset: 0, quote: input.events[event]!.text }] })) },
+            usage: { inputTokens: 100, outputTokens: 20, requests: 1, runtimeCostUsd: null, providerBilledCny: null } };
+        });
+        assert.equal(await queue.finish(job, result), true);
+      }
+      dailyReport = await (await api(`/api/daily-reports/${A.employeeId}/${day}`)).json();
+      if (dailyReport.items.some((item: any) => item.category === 'blocker') && !dailyReport.refreshPending) break;
+      await new Promise(resolve => setTimeout(resolve, 250));
+    }
+    assert.ok(dailyReport.items.some((item: any) => item.category === 'blocker'), JSON.stringify(dailyReport));
+    assert.equal(dailyReport.coverage.fixture, true);
+    const mcpDaily = await client.callTool({ name: 'read_daily_report', arguments: { employeeId: A.employeeId, date: day, revision: dailyReport.revision } });
+    const frozenDaily = await (await api(`/api/daily-reports/${A.employeeId}/${day}?revision=${dailyReport.revision}`)).json();
+    assert.deepEqual(JSON.parse((mcpDaily.content as { text: string }[])[0]!.text), frozenDaily);
+    const requestsBeforeMatrix = s.traffic.filter(item => item.method === 'POST' && item.path.startsWith('/api/daily-reports/')).length;
     browser = await chromium.launch({ headless: true }); const page = await browser.newPage({ ignoreHTTPSErrors: true });
     await page.goto(s.origin); await page.getByLabel('个人读取凭据').fill(A.readerCredential); await page.getByRole('button', { name: '进入存档' }).click();
     await page.getByRole('button', { name: '团队覆盖', exact: true }).click();
     await expect(page.getByRole('region', { name: '团队覆盖矩阵' })).toContainText('采集缺口已观察');
     await expect(page.getByRole('complementary', { name: '选中员工与日期' })).toContainText('来源 Token 总量');
+    await expect(page.getByRole('region', { name: '方向主题与阻塞' })).toContainText('合成blocker');
+    await page.getByRole('button', { name: new RegExp(`^覆盖丙：旧客户端未知 ${day}，`) }).click();
+    await expect(page.getByRole('region', { name: '方向主题与阻塞' })).toContainText('本日主题尚未生成');
+    await page.getByRole('button', { name: new RegExp(`^覆盖甲：有活动与缺口 ${day}，`) }).click();
+    await expect(page.getByRole('region', { name: '方向主题与阻塞' })).toContainText('合成blocker');
+    const dailyLink = page.getByRole('link', { name: '查看该员工本日工作', exact: true });
+    await expect(dailyLink).toHaveAttribute('href', `#daily?${new URLSearchParams({ employeeId: A.employeeId, date: day, revision: String(dailyReport.revision) })}`);
+    await dailyLink.click(); await expect(page.getByRole('region', { name: '日工作' })).toContainText('合成blocker');
+    const dailyPanel = page.getByRole('region', { name: '日工作' });
+    assert.equal(await dailyPanel.getByLabel('来源日期', { exact: true }).inputValue(), day); await expect(dailyPanel.getByRole('combobox')).toHaveValue(A.employeeId);
+    await expect(dailyPanel.getByLabel('历史版本（留空读取最新）')).toHaveValue(String(dailyReport.revision));
+    await page.getByRole('button', { name: '团队覆盖', exact: true }).click();
+    const projectLink = page.getByRole('link', { name: '查看项目工作：/synthetic/coverage', exact: true }).first();
+    await expect(projectLink).toHaveAttribute('href', `#work?${new URLSearchParams({ kind: 'project', subject: '/synthetic/coverage', from: day, to: day })}`);
+    await projectLink.click(); await expect(page.getByRole('region', { name: '周工作与项目' })).toBeVisible();
+    const projectPanel = page.getByRole('region', { name: '周工作与项目' });
+    await expect(projectPanel.getByRole('combobox').nth(0)).toHaveValue('project'); await expect(projectPanel.getByRole('combobox').nth(1)).toHaveValue('/synthetic/coverage');
+    await expect(projectPanel.getByLabel('起始来源日期')).toHaveValue(day); await expect(projectPanel.getByLabel('结束来源日期')).toHaveValue(day);
+    assert.equal(s.traffic.filter(item => item.method === 'POST' && item.path.startsWith('/api/daily-reports/')).length, requestsBeforeMatrix, 'matrix reads/drilldown never generate a report or model attempt');
+    await page.getByRole('button', { name: '团队覆盖', exact: true }).click();
     await page.getByText('原件统计引用', { exact: true }).click(); await page.getByRole('link', { name: 'synthetic/code.ts', exact: true }).click();
     await expect(page.getByRole('region', { name: '命中证据' })).toContainText('*** Add File: synthetic/code.ts');
     await page.getByRole('button', { name: '团队覆盖', exact: true }).click();
@@ -138,7 +192,7 @@ test('public coverage matrix, frozen source-day statistics and original evidence
     await s.restart();
     assert.deepEqual(await (await api(statsPath + `&revision=${statistics.revision}`)).json(), statistics);
     assert.equal((await (await api(`/api/team-coverage?date=${day}`)).json()).rows.find((row: any) => row.employeeId === A.employeeId).cells.at(-1).collection, 'gap-observed');
-    await writeFile(join(evidence, 'public-flow.json'), JSON.stringify({ snapshotId, restored, matrix: httpMatrix, statistics, bStatistics, parentSnapshot, proofSnapshot, materialStatistics, corruptSnapshot, corruptStatistics, layouts,
+    await writeFile(join(evidence, 'public-flow.json'), JSON.stringify({ snapshotId, restored, matrix: httpMatrix, statistics, bStatistics, parentSnapshot, proofSnapshot, materialStatistics, corruptSnapshot, corruptStatistics, dailyReport, layouts,
       boundary: 'Public authenticated synthetic upload and native-record-schema rows, immutable export, Web/OAuth MCP and restart; no real provider/model/paid call or Task setup.' }, null, 2));
     console.log(`Coverage public-flow evidence: ${evidence}`);
   } finally { await browser?.close(); await client?.close(); await s.close(); }

@@ -2,6 +2,8 @@
 
 此实现完成一条窄的公开 tracer bullet：绑定设备上传合成原件 → 持久来源归属与按日观测 → 员工×日期矩阵 → 选中日期统计 → Web / OAuth MCP → 原件位置 → 重启读取固定统计版本。使用 V1 已选的 C 矩阵及 inspector 结构；没有评分、排名或工时。
 
+检查器还通过共享 GET 读取该员工 / 来源日期已经保存的日报版本，首层各显示一项方向、主题与阻塞，保留分析分级和合成标记；没有版本或该类事项则显示未知 / 尚未生成。员工下钻携带 employeeId / date / revision 进入日工作，项目下钻携带原 project / from / to 进入 #29 项目视图。矩阵读取与下钻不调用生成 POST、不触发模型；日报暂不可用时已有来源统计仍可阅读。
+
 ## 服务与口径
 
 - `GET /api/team-coverage?date=YYYY-MM-DD&offset=0`：七个北京时间日期、每页十名员工。活动、采集观测、安装配置、宿主确认、当前连接及报告状态分别返回。历史日期不使用当前 heartbeat 回填；没有观测为未知，没有已观察活动不证明没有工作。
@@ -29,14 +31,14 @@ Token 为来源记录量，不是计费账单。Codex 使用原件中的累计�
 ```powershell
 npm run typecheck
 npm run build
-node node_modules/tsx/dist/cli.mjs --test tests/source-statistics.test.ts tests/team-coverage.test.ts tests/daily-reports.test.ts tests/mcp.test.ts tests/material-primary.test.ts
+node node_modules/tsx/dist/cli.mjs --test tests/source-statistics.test.ts tests/team-coverage.test.ts tests/daily-reports.test.ts tests/mcp.test.ts tests/material-primary.test.ts tests/work-views.test.ts
 ```
 
-首条公共用例通过（4.705s），随后扩展原材料资格和原件锚点用例通过（5.215s）。扩展后的十项定向回归初轮 9/10：唯一失败是旧 MCP 测试把工具数固定为 14，而新工具数为 17。改为逐项检查公开工具及只读注解后，单项 MCP 回归通过（6.457s）。最终验证结果在下方交付记录补充。
+首条公共用例通过（4.705s），随后扩展原材料资格和原件锚点用例通过（5.215s）。扩展后的十项定向回归初轮 9/10：唯一失败是旧 MCP 测试把工具数固定为 14，而新工具数为 17。改为逐项检查公开工具及只读注解后，单项 MCP 回归通过（6.457s），十项完整定向回归 10/10 通过（16.625s）。再合 #29 d89c5c6，补方向 / 主题 / 阻塞及员工 / 项目下钻后，最终十二项定向回归 12/12 通过（26.283s）；typecheck、build 与 diff check 通过。按小时合并同一请求的来源观测、添加迁移回滚后，公共 tracer 再次单项通过（9.503s）。
 
-公共用例验证：认证拒绝 / 日期拒绝；三名合成员工的活动与缺口、宿主确认待核对、旧客户端未知；孤立时钟 fixture 模拟当前断连；历史未知不由今日心跳回填；已恢复报告保留收到时的缺口；原件上传 / 恢复 suffix 的原归属；原材料 sourceSnapshotId 父件陷阱；晚到正常来源资格使当前统计形成新版本、旧版本保持不变；原 Token 基线及未知分项；文件和 Token 精确 raw / material 锚点；损坏 UTF-8 的辅助统计不可用但原件与查询仍可用；OAuth MCP / Web 一致；证据跳转；重启。
+公共用例验证：认证拒绝 / 日期拒绝；三名合成员工的活动与缺口、宿主确认待核对、旧客户端未知；孤立时钟 fixture 模拟当前断连；历史未知不由今日心跳回填；已恢复报告保留收到时的缺口；原件上传 / 恢复 suffix 的原归属；原材料 sourceSnapshotId 父件陷阱；晚到正常来源资格使当前统计形成新版本、旧版本保持不变；原 Token 基线及未知分项；文件和 Token 精确 raw / material 锚点；损坏 UTF-8 的辅助统计不可用但原件与查询仍可用；OAuth MCP / Web 一致；方向 / 主题 / 阻塞来自固定的合成日报，未知员工显示尚未生成；员工页面实际选中原员工、原日期、固定日报版本，项目页实际选中原项目和同日范围；读取与下钻不增加生成 POST；证据跳转；重启。合成日报由正常公开生成请求、持久队列和可信测试 runner 产生，runner 显式 fixture 模式、零预算、无实际 provider 调用，不冒充独立真实 CLI。
 
-外部稳定证据目录 `F:/GenCode/Skynet-evidence/v1-2026-09-30/coverage-bf5995a4-ad9f-448f-be68-cc18117e4284/` 含 public-flow.json 及 320 / 375 / 760 / 1280 / 1920 PNG。五种宽度没有横向溢出，320 退出按钮不拆字，inspector 首层保留一句口径、详细定义可展开。所有浏览器和子进程隐藏运行，没有 Windows Task 安装循环，没有真实账号 / 用户配置 / 付费模型请求。
+外部稳定证据目录 `F:/GenCode/Skynet-evidence/v1-2026-09-30/coverage-1a971a47-16e6-4af9-93ea-b8f9fe1c00eb/` 含 public-flow.json（固定日报 / 统计版本）及 320 / 375 / 760 / 1280 / 1920 PNG。五种宽度没有横向溢出，320 退出按钮不拆字，inspector 首层保留一句口径、详细定义可展开。所有浏览器和子进程隐藏运行，没有 Windows Task 安装循环，没有真实账号 / 用户配置 / 付费模型请求。
 
 ## 验收边界
 
