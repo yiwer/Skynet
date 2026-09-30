@@ -111,6 +111,17 @@ test('offline npm package with scripts disabled → one key setup → owned hook
     await page.getByRole('link').filter({ hasText: '安装合成员工' }).filter({ hasText: 'Codex CLI' }).click(); await expect(page.getByText('会话记录显示测试通过。')).toBeVisible();
     // The setup shell has exited. The background continues without its Key/PATH;
     // a crashed owned worker is restarted by the supervisor, retaining identity.
+    if (process.platform === 'win32') {
+      const taskEnvironment = { ...env, SKYNET_TEST_TASK: status.autostart.taskName };
+      const taskCommand = (verb: string) => command('powershell.exe', ['-NoProfile', '-NonInteractive', '-EncodedCommand',
+        Buffer.from(`${verb}-ScheduledTask -TaskName $env:SKYNET_TEST_TASK | Out-Null`, 'utf16le').toString('base64')], taskEnvironment);
+      try {
+        await taskCommand('Disable'); await installed.run('stop');
+        const fallback = JSON.parse(await installed.run('start'));
+        assert.equal(fallback.autostart.taskState, 'Disabled'); assert.equal(fallback.autostart.state, 'degraded');
+        assert.equal(fallback.background, 'running'); assert.ok(fallback.autostart.fallback?.observedAt);
+      } finally { await taskCommand('Enable'); }
+    }
     const beforeCrash = JSON.parse(await installed.run('status'));
     process.kill(beforeCrash.worker.pid, 'SIGKILL');
     let recovered: any;
@@ -124,8 +135,8 @@ test('offline npm package with scripts disabled → one key setup → owned hook
     assert.equal(recovered.deviceId, identity.deviceId);
     let supervisorCrashRecovered = false;
     if (process.platform === 'win32') {
-      // The isolated registered task's action remains alive across a crashed
-      // supervisor and recovers it without issuing another start.
+      // The hidden current-session guardian owns its actual child and recovers
+      // a crash without issuing another start or using a diagnostic PID.
       const previousSupervisor = recovered.supervisor.instance;
       process.kill(recovered.supervisor.pid, 'SIGKILL');
       const recoveryDeadline = Date.now() + 30_000;
@@ -185,6 +196,7 @@ test('offline npm package with scripts disabled → one key setup → owned hook
     await writeFile(join(sandbox.directory, 'runtime-evidence.json'), JSON.stringify({ platform: process.platform, setupParentExited: true,
       currentUserAutostart: restarted.autostart, concurrentStartsOneWorker: true, unauthenticatedControlRejected: true,
       workerCrashRecovered: true, supervisorCrashRecovered, stalePidNotAuthority: true, networkBacklogWhileAlive: backlog, uploadAfterRestart: true,
+      disabledTaskFallbackCrashRecovery: process.platform === 'win32',
       nativeClient: false, login: 'not-verified', reboot: 'not-verified', sleepResume: 'not-verified', desktopIcon: 'not-verified' }, null, 2));
     // Unknown app-server origin is retained without falsely counting Desktop work.
     const unknown = await syntheticSession(join(codex, 'sessions'));

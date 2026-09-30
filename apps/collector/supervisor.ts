@@ -4,10 +4,30 @@ import { join, resolve } from 'node:path';
 import { setTimeout } from 'node:timers/promises';
 import { askRuntime, ownRuntime, releaseRuntime } from './runtime-control.js';
 import { installationSchema, jsonFile } from './install-state.js';
-import { markAutostartDelayed, startAutostart } from './autostart.js';
+import { launchCurrentSession, markAutostartDelayed, startAutostart } from './autostart.js';
 import { atomicJson } from '../../packages/filesystem.js';
 import { payloadRoot } from './release.js';
 import { assertCaptureFences } from './capture-fence.js';
+
+export async function runGuardian(state: string) {
+  const installation = installationSchema.parse(await jsonFile(join(state, 'installation.json')));
+  if (resolve(payloadRoot) !== resolve(installation.maintenanceRuntime ?? installation.runtime)) throw new Error('This guardian is no longer the registered maintenance release; use the stable launcher');
+  await assertCaptureRuntime(state, installation);
+  let delay = 500;
+  for (;;) {
+    const started = Date.now();
+    const child = spawn(installation.node, [installation.launcher, 'background', '--state', state],
+      { windowsHide: true, stdio: 'ignore', env: { ...process.env, SKYNET_KEY: undefined } });
+    const code = await new Promise<number | null>(resolve => {
+      child.once('error', () => resolve(null)); child.once('exit', resolve);
+    });
+    // Duplicate authenticated owner and normal stop both return zero. Failure
+    // restarts our real child, never a PID recovered from a diagnostic file.
+    if (code === 0) return;
+    if (Date.now() - started >= 30_000) delay = 500;
+    await setTimeout(delay); delay = Math.min(30_000, delay * 2);
+  }
+}
 
 export async function runSupervisor(state: string) {
   const installation = installationSchema.parse(await jsonFile(join(state, 'installation.json')));
@@ -75,13 +95,9 @@ export async function ensureRunning(state: string, node: string, launcher: strin
   await assertCaptureRuntime(state, installation); const expected = installation.runtime;
   let current = await askRuntime(state, 'supervisor');
   let scheduled = false;
-  const launch = () => {
-    const child = spawn(node, [launcher, 'background', '--state', state], { detached: true, windowsHide: true, stdio: 'ignore', env: { ...process.env, SKYNET_KEY: undefined } });
-    child.on('error', () => undefined); child.unref();
-  };
   if (!current) {
     scheduled = await startAutostart(state);
-    if (!scheduled) launch();
+    if (!scheduled) await launchCurrentSession(state, installation);
   }
   for (let attempt = 0; attempt < 160; attempt++) {
     current = await askRuntime(state, 'supervisor');
@@ -90,7 +106,7 @@ export async function ensureRunning(state: string, node: string, launcher: strin
       if (current.runtime && resolve(current.runtime) !== resolve(expected)) throw new Error('An authenticated previous release is still running; stop it before activating a newer runtime');
       return current;
     }
-    if (attempt === 60 && scheduled && !current) { await markAutostartDelayed(state); launch(); }
+    if (attempt === 60 && scheduled && !current) { await markAutostartDelayed(state); await launchCurrentSession(state, installation); }
     await setTimeout(100);
   }
   throw new Error('Background ownership could not be established. State and pending evidence were retained; inspect skynet status, Node/runtime paths and user task policy.');

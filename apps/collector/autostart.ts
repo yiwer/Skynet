@@ -1,4 +1,4 @@
-import { execFile } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
 import { join } from 'node:path';
 import { createHash } from 'node:crypto';
@@ -11,6 +11,20 @@ const lifecycle = { login: 'not-verified', reboot: 'not-verified', sleepResume: 
 type Registration = { state: string; adapter: string; taskName?: string; command?: string; arguments?: string; description?: string; checkedAt: string; error?: string; lifecycle: typeof lifecycle;
   fallback?: { observedAt: string; notice: string } };
 function powershell() { return join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe'); }
+function supervisorAction(installation: Installation, canonical: string) {
+  const quote = (value: string) => `'${value.replaceAll("'", "''")}'`;
+  // Keep the task action alive across a supervisor crash. An authenticated
+  // normal stop ends the action; no PID recovered from a file is authority.
+  const script = `$ErrorActionPreference='Stop'; Remove-Item Env:SKYNET_KEY -ErrorAction SilentlyContinue; $delay=1; while($true){$started=[DateTime]::UtcNow; & ${quote(installation.node)} ${quote(installation.launcher)} 'background' '--state' ${quote(canonical)}; if($LASTEXITCODE -eq 0){exit 0}; if(([DateTime]::UtcNow-$started).TotalSeconds -ge 30){$delay=1}; Start-Sleep -Seconds $delay; $delay=[Math]::Min(30,$delay*2)}`;
+  return { command: powershell(), arguments: `-NoProfile -NonInteractive -WindowStyle Hidden -EncodedCommand ${Buffer.from(script, 'utf16le').toString('base64')}` };
+}
+export async function launchCurrentSession(state: string, installation: Installation) {
+  // Node's hidden guardian survives the setup shell without PowerShell console
+  // creation semantics, and retries only the ChildProcess it actually starts.
+  const child = spawn(installation.node, [installation.launcher, process.platform === 'win32' ? 'background-guardian' : 'background', '--state', state],
+    { detached: true, windowsHide: true, stdio: 'ignore', env: { ...process.env, SKYNET_KEY: undefined } });
+  child.on('error', () => undefined); child.unref();
+}
 async function windowsTask(state: string, mode: 'register' | 'start' | 'inspect' | 'remove', registration: Registration) {
   // All task fields are JSON data. No path or identifier is interpolated into shell code.
   const script = `$ErrorActionPreference='Stop'; $r=Get-Content -LiteralPath $env:SKYNET_AUTOSTART_FILE -Raw | ConvertFrom-Json; $sid=[System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value;
@@ -34,13 +48,9 @@ export async function installAutostart(state: string, installation: Installation
     await atomicJson(join(state, 'autostart.json'), value); return value;
   }
   const canonical = await realpath(state); const tag = createHash('sha256').update(canonical.toLowerCase()).digest('hex').slice(0, 24);
-  const quote = (value: string) => `'${value.replaceAll("'", "''")}'`;
-  // Task Scheduler's restart policy is not proof that a launched process's
-  // nonzero exit is retried. Keep its action alive across supervisor crashes;
-  // an authenticated normal stop returns zero and ends the action normally.
-  const script = `$ErrorActionPreference='Stop'; Remove-Item Env:SKYNET_KEY -ErrorAction SilentlyContinue; $delay=1; while($true){$started=[DateTime]::UtcNow; & ${quote(installation.node)} ${quote(installation.launcher)} 'background' '--state' ${quote(canonical)}; if($LASTEXITCODE -eq 0){exit 0}; if(([DateTime]::UtcNow-$started).TotalSeconds -ge 30){$delay=1}; Start-Sleep -Seconds $delay; $delay=[Math]::Min(30,$delay*2)}`;
+  const action = supervisorAction(installation, canonical);
   const value: Registration = { state: 'registering', adapter: 'windows-user-task', taskName: `Skynet-${tag}`, command: powershell(),
-    arguments: `-NoProfile -NonInteractive -WindowStyle Hidden -EncodedCommand ${Buffer.from(script, 'utf16le').toString('base64')}`,
+    arguments: action.arguments,
     description: `Skynet current-user collector ${tag}`, checkedAt: new Date().toISOString(), lifecycle };
   if (previous && previous.taskName === value.taskName && previous.command === value.command && previous.arguments === value.arguments) value.fallback = previous.fallback;
   await atomicJson(join(state, 'autostart.json'), value);

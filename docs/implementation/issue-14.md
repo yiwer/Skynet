@@ -102,3 +102,23 @@ Remove-Item Env:SKYNET_TEST_BASE_PACK_CLI
 环境 Windows 11 x64、Node 24.12.0；版本环境记录沿用外部 `environment-resumed.json`。测量开始时上述本票回归已经结束，没有暂停其他 Agent / 系统工作，未控制主机全局并发负载。样本及最大值全部保存，没有用重复选择更快结果替换故障条件。
 
 **仍未验证**：真实 Windows 登录 / 重启 / 休眠、Desktop 市场 UI / 图标启动 / UI 原生续聊、其他 OS 生命周期；此前高并发 1500 ms 控制超时根因。G1 与 V1 完整发布门槛继续开放。尚未冻结或无法访问的原件不能称为完整备份。
+
+## 主线集成（2026-09-30）
+
+`d725e48` 经 `14e29a8` 无冲突合入 `implement/v1`，保留 G0 精确附件行重建、参数化 native 场景及 #19 的逐事件 origin / sourceEmployee / restoredFrom。在 `F:/GenCode/Skynet` 重新构建，维护测试的新包和恢复包都使用该主线 dist；实际旧输入仍来自已校验的仓库外 a4 目录。typecheck / build / diffcheck 通过，无源码冲突，因此没有无依据重复真实 Claude 回归。
+
+完整 Windows `npm test` 一次结果为 **24 项：23 pass、0 assertion fail、1 cancelled，总 252.02 秒**。唯一取消是新 maintenance tracer 超过其 240 秒预算；该 body 随后仍完成 Web/字节/配置/身份断言及截图，写出 `%TEMP%/skynet-test-HAcu6h/maintenance-evidence.json`，没有 `maintenance-failure.json`。完成证据不能把已取消的整套测试记为通过；没有改大预算或放宽断言。安装 `%TEMP%/skynet-test-DDLGnM` 与插件 `%TEMP%/skynet-test-U60jX2` 通过，任务实际 Ready/Running 与独立认证的后台状态仍分别验证；本轮未再现此前未知控制超时，也不证明其根因消除。
+
+同一主线实际 a4 升级/禁采/回退专项 **6/6 pass，219.53 秒**，证据 `%TEMP%/skynet-test-hhKb1W/maintenance-evidence.json`，`legacyPerSourceFence=true`。两条命令并行执行，完整套件使用 Node 默认测试并发，未暂停其他 Agent/系统负载。日志 `%TEMP%/skynet-v1-implementation/issue14-main-windows-full.log`、`issue14-main-actual-a4.log`，元数据 `issue14-main-test-observation.json` 保存 buildSourceRoot、预算、证据时间和测量条件。此前 `1665d08` Linux CI 的 19/19 是合入 #14 前的证据，不能替代本次 Windows 或未运行的新版 Linux 全套。
+
+## Windows 恢复与输入修订
+
+随后主线完整套件单独复验（无额外 a4 heavy 并跑）为 **24 项：22 pass、1 fail、1 cancelled，250.47 秒**，日志 `issue14-main-windows-normal-suite.log`。maintenance 再次超过 240 秒预算，`tArEYQ` 仍写出完整行为证据；只读时间线为 switched 在 134 秒附近、禁采 rollback 在 179 秒附近、完整停用在 219 秒附近。安装 `Pc2fU9` 则在监督器崩溃后未恢复：此前 delayed task 已启动直接 Node fallback，晚到的 Task Scheduler action 发现已有认证 owner 后退出，Ready 任务不能恢复这个直接进程。这一原因与 1500ms 控制超时分开处理。
+
+修订在独立 `implement/v1-issue-14-recovery` / `F:/GenCode/Skynet-wt-issue14-recovery` 实施。Windows current-session fallback 使用隐藏 Node guardian；guardian 保留实际 ChildProcess handle，非零退出有界退避重试，正常 stop 或已有认证 owner 返回零则退出，不从诊断 PID 取得权限。guardian 与监督器都验证维护版本和 capture fence；完整停用后 guardian 入口也拒绝。真实登录/重启仍未验证。试用同一 PowerShell retry action 的两个版本未通过（detached minimal-env 启动直接退出、non-detached 崩溃路径未恢复），日志 `issue14-main-fallback-utf8.log`、`issue14-recovery-fallback-utf8.log` 保留；没有将这些尝试写为成功。
+
+CLI stdin 采用 Node streaming UTF8 解码，原输入上限保持不变；公开 hook 把中文原件路径中“中”的三个字节分开发送，队列 path 逐字相同，并实际采集/upload/API/Web。维护测试以已选版本正常 setup 重接，去掉重复第二次成功 upgrade；两个真实升级崩溃窗口、第一次异版本成功 upgrade、rollback、禁采、卸载、冻结 drain 全部断言及 240 秒预算保留，新增 `maintenance-progress.json` 阶段时间和禁用 guardian 的断言。
+
+guardian + UTF8 定向 **2/2 pass，88.24 秒**：安装 `%TEMP%/skynet-test-f0UkAT` 明确强制 Disabled task→fallback→强杀 worker / supervisor 后自动恢复并保留身份，`runtime-evidence.json` 的 `disabledTaskFallbackCrashRecovery=true`；中文 path `%TEMP%/skynet-test-1sIMS6`。恢复支线完整套件 **24 项：23 pass、1 fail、0 cancelled，143.18 秒**；安装 `%TEMP%/skynet-test-P4dELG`（142.43 秒）和 UTF8 `%TEMP%/skynet-test-yPXgsd` 通过。唯一失败为 `%TEMP%/skynet-test-iNiFOW` 的 maintenance initial-install：1500ms runtime unresponsive 再现，根因未确认，日志 `issue14-recovery-windows-suite.log` 与脱敏诊断 `issue14-recovery-iNiFOW-diagnostic.json` 保留。最后 stopping/code0 是 cleanup，不能推断失败前从未 healthy 或具体失败 role/action。
+
+该全量没有执行到新维护路径，随后只对该路径定向验证 **1/1 pass，171.24 秒**，证据 `%TEMP%/skynet-test-D4Ti4B`；阶段文件显示完整断言在 168.32 秒完成。此 pass 不覆盖全量失败。所有 throwaway probe 留在仓库外命名诊断目录；正式产品无 debug 日志。类型检查、构建与 diffcheck 通过。后续控制端点诊断交接 `%TEMP%/skynet-v1-implementation/runtime-control-diagnosis-readiness.md` 明确 tight red-capable loop 尚未完成，不先假设 CPU 或放大 timeout。

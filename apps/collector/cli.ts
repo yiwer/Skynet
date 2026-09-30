@@ -18,6 +18,7 @@ if (!['setup', 'status', 'start', 'stop', 'autostart-remove', 'restore', 'pack-a
 const state = values.state ? resolve(values.state) : ['setup', 'status', 'start', 'stop', 'autostart-remove', 'entry-remove', ...maintenance].includes(command ?? '') ? (await import('./install-state.js')).defaultState() : '';
 async function stdin() {
   let input = '';
+  process.stdin.setEncoding('utf8');
   for await (const part of process.stdin) {
     input += part;
     if (input.length > 64 * 1024) throw new Error('Input exceeds limit');
@@ -62,6 +63,8 @@ if (maintenance.includes(command ?? '')) {
   } else console.log(JSON.stringify(await (await import('./installer.js')).install(state)));
 } else if (command === 'background') {
   await (await import('./supervisor.js')).runSupervisor(state);
+} else if (command === 'background-guardian') {
+  await (await import('./supervisor.js')).runGuardian(state);
 } else if (command === 'background-worker') {
   await (await import('./runtime.js')).runInstalled(state);
 } else if (command === 'start') {
