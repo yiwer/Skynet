@@ -11,6 +11,7 @@
 | [Codex CLI 存档与恢复](docs/implementation/issue-6.md) | 正常 hook 信任、两个项目自动采集、公开导出及服务器包原生续聊；支持范围与 hook 延迟实测 |
 | [Claude Code CLI 链路](docs/implementation/issue-7.md) | 普通 hooks、多项目采集、完整导出与服务器包原生续聊；单原件范围与未验证条件 |
 | [旧会话续用与来源日期](docs/implementation/issue-8.md) | 仅同步宿主登记的旧会话、校验增量上传、历史上下文及来源日期；三来源公开流程与真实验收边界 |
+| [G0 可持续回归与剩余验收](docs/implementation/issue-10.md) | 两个 CLI 旧会话、实际 Claude 代码/子会话、两版 Codex 附件行精确恢复；Desktop UI 与普通沙箱待补齐 |
 | [npm 单授权值接入](docs/implementation/issue-11.md) | 内部离线 npm 包、自动检测与配置、私有共享身份/后台、真实 CLI 安装链；完整 G1 与 Desktop 仍待验收 |
 | [当前用户后台与崩溃恢复](docs/implementation/issue-12.md) | 认证独占控制、共享后台、Windows 隐藏用户任务、真实 Claude 崩溃后自动采集；登录/重启/休眠及 Desktop 仍待验收 |
 | [内部插件入口与共享后台](docs/implementation/issue-13.md) | 两个真实 CLI marketplace 接入、与 npm 共存、入口所有权和冻结材料补传；完整 G1 与 Desktop 市场 UI 仍待验收 |

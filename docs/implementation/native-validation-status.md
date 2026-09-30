@@ -1,6 +1,6 @@
 # 原生客户端验收状态
 
-日期：2026-09-28。对应 [V1 #1](https://github.com/yiwer/Skynet/issues/1)、[#4](https://github.com/yiwer/Skynet/issues/4)、[#5](https://github.com/yiwer/Skynet/issues/5) 与 G0。本文记录实际观察；**没有任何原生客户端支持组合通过验收**。
+日期：2026-09-30。对应 [V1 #1](https://github.com/yiwer/Skynet/issues/1)、[#4](https://github.com/yiwer/Skynet/issues/4)、[#5](https://github.com/yiwer/Skynet/issues/5) 与 G0。本文记录实际观察；**没有任何原生客户端支持组合通过验收**。
 
 ## 实测环境
 
@@ -38,3 +38,7 @@
 #5 后续还需从服务器包独立恢复至第二个隔离环境，在真实 Desktop 中打开并继续对话，核查历史上下文及工具记录。原设备 resume、复制文本和后端诊断均不能替代。三客户端的支持矩阵、G0 其他场景及 G1–G4 也保持待验证。
 
 宿主行为依据：[官方 hooks 文档](https://learn.chatgpt.com/docs/hooks)、[官方 app-server 文档](https://learn.chatgpt.com/docs/app-server)。文档说明机制，Skynet 支持能力仍取决于上述实际产品验收。
+
+## 2026-09-30 可持续回归与附件行恢复
+
+此前 CLI 旧会话、Claude Write/Read、general-purpose 子会话恢复诊断已纳入 `tests/native-claude.test.ts` / `tests/native-codex-cli.test.ts`；`npm run test:g0-native` 运行六项增补回归。产品已补齐两版 Codex 新目标原生 DB 的不透明附件行回填，严格验证版本、schema、owner 和唯一性，关闭 native 进程后事务写入原 ID/时间；原件字节和原生 list readback 已测。未知 payload 语义、外部资源与 Desktop UI仍待验证；此前“尚未集成”的独立附件诊断属于历史记录。当前全局 Codex 0.159.2 未据此声明支持；当前提升权限环境的原生 apply_patch 被宿主 read-only 沙箱拒绝，保持未通过。详细矩阵、复现命令与运行时失败边界见 [G0 增补记录](issue-10.md)。

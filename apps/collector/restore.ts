@@ -8,6 +8,8 @@ import { z } from 'zod';
 import { syncDirectory } from '../../packages/filesystem.js';
 import type { Material } from '../../packages/contracts/materials.js';
 
+import { attachmentRows, reconstructAttachments } from './codex-attachments.js';
+
 const execute = promisify(execFile);
 
 async function newTarget(path: string) {
@@ -106,6 +108,8 @@ export async function restorePackage(options: { packagePath: string; target: str
     } else if (material.placement === 'portable' && material.name.startsWith('inline-')) mapping = 'inline bytes also preserved in original transcript';
     outputs.push({ material, bytes, parts: destination, mapping });
   }
+  const attachmentOwners = new Set([...outputs.filter(item => item.mapping === 'native-rollout').map(item => item.material.sourceSessionId!), bundle.manifest.sourceSessionId]);
+  const rows = isClaude ? [] : attachmentRows(bundle.materials, attachmentOwners);
   if (!isClaude) {
     const available = new Set([bundle.manifest.sourceSessionId, ...outputs.filter(item => item.mapping === 'native-rollout').map(item => item.material.sourceSessionId!)]);
     for (const bytes of [bundle.bytes, ...outputs.filter(item => item.mapping === 'native-rollout').map(item => item.bytes)]) {
@@ -134,14 +138,18 @@ export async function restorePackage(options: { packagePath: string; target: str
     await durableFile(path, item.bytes); await syncDirectory(dirname(path));
     restoredMaterials.push({ ...item.material, path, mapping: item.mapping });
   }
-  const result = { state: isClaude ? 'prepared-claude-unverified' : isCodexCli ? 'prepared-cli' : 'prepared-desktop-unverified', snapshotId: bundle.snapshot.id, sourceEmployee: bundle.snapshot.employee,
+  if (rows.length) {
+    await reconstructAttachments(target, options.runtime, rows, attachmentOwners);
+    for (const material of restoredMaterials) if (material.placement === 'codex-attachments') material.mapping = 'native-attachment-rows; opaque payload semantics and external resources unverified';
+  }
+  const result = { attachmentRowsReconstructed: rows.length, attachmentPayloadSemantics: 'unverified', state: isClaude ? 'prepared-claude-unverified' : isCodexCli ? 'prepared-cli' : 'prepared-desktop-unverified', snapshotId: bundle.snapshot.id, sourceEmployee: bundle.snapshot.employee,
     sourceSessionId: bundle.manifest.sourceSessionId, nativeHome: target, rolloutPath,
     sha256: bundle.manifest.hash, byteLength: bundle.manifest.byteLength,
     sourceVersion: bundle.manifest.sourceVersion, runtimeVersion, os: process.platform,
     materials: restoredMaterials, gaps: bundle.manifest.capture?.gaps ?? [], lineage: bundle.manifest.capture?.lineage ?? [],
     desktopUi: isClaude || isCodexCli ? 'not-applicable' : 'unverified', nativeBackend: 'fixture-tested', source: bundle.manifest.source,
     limitation: isClaude ? 'Archived transcript and captured associated bytes were restored. Set CLAUDE_CONFIG_DIR to nativeHome and inspect material mapping/gaps before resuming. Workspace and credentials are not restored; associated-material and live-model continuation remain unverified.'
-      : 'Archived rollout and captured associated bytes were restored. Parent rollouts retain exact native boundaries. Inspect mapping/gaps: attachment database rebuild, workspace, credentials and Desktop UI continuation are not restored or verified.' };
+      : 'Archived rollout and captured associated bytes were restored. Parent rollouts retain exact native boundaries. Inspect mapping/gaps: opaque attachment payload semantics, external resources, workspace, credentials and Desktop UI continuation remain unverified.' };
   await durableFile(join(target, 'restore-receipt.json'), JSON.stringify(result, null, 2));
   await unlink(join(target, '.skynet-restore-incomplete'));
   await syncDirectory(target); await syncDirectory(dirname(target));

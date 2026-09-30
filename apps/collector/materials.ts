@@ -179,7 +179,7 @@ export async function discoverMaterials(input: { source: Source; nativeRoot: str
             if (rows.length > 128) { gap('size-limit', `附件索引 ${id}`); continue; }
             if (rows.length) {
               add('attachment', 'codex-attachments', `${id}.json`, Buffer.from(JSON.stringify(rows)), id);
-              gap('native-mapping-unverified', `独立附件 ${id} 已存档；原生数据库重建仍未验证`);
+              gap('native-mapping-unverified', `独立附件 ${id} 原始行已存档；未知 payload 语义及外部资源恢复仍未验证`);
             }
           }
         }
