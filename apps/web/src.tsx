@@ -13,6 +13,7 @@ import { ArchiveSearch } from './ArchiveSearch.js';
 import { EvidenceReader, selectedEvidence } from './EvidenceReader.js';
 import { SessionAnalysis } from './SessionAnalysis.js';
 import { ActivityStatistics } from './ActivityStatistics.js';
+import { AnalysisOperations } from './AnalysisOperations.js';
 import type { Provenance } from '../../packages/contracts/provenance.js';
 import { DailyReports } from './DailyReports.js';
 
@@ -29,7 +30,7 @@ function App() {
   const [name, setName] = useState('');
   const [employeeId, setEmployeeId] = useState('');
   const [canManageIdentities, setCanManageIdentities] = useState(false);
-  const [view, setView] = useState<'archive' | 'identities' | 'delivery' | 'daily'>('archive');
+  const [view, setView] = useState<'archive' | 'identities' | 'delivery' | 'daily' | 'analysis'>('archive');
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
   const [sessionCursor, setSessionCursor] = useState<string | null>(null);
   const [nextSessionCursor, setNextSessionCursor] = useState<string | null>(null);
@@ -121,9 +122,10 @@ function App() {
         <button className="primary" disabled={busy || !credential}>{busy ? '正在验证…' : '进入存档'}</button></form></section> : <>
       <nav className="view-nav" aria-label="平台页面"><button aria-current={view === 'archive' ? 'page' : undefined} onClick={() => setView('archive')}>会话存档</button>
         <button aria-current={view === 'delivery' ? 'page' : undefined} onClick={() => setView('delivery')}>设备同步</button>
+        <button aria-current={view === 'analysis' ? 'page' : undefined} onClick={() => setView('analysis')}>分析队列</button>
         <button aria-current={view === 'daily' ? 'page' : undefined} onClick={() => setView('daily')}>日工作</button>
         {canManageIdentities && <button aria-current={view === 'identities' ? 'page' : undefined} onClick={() => setView('identities')}>接入与设备</button>}</nav>
-      {view === 'daily' ? <DailyReports currentEmployeeId={employeeId} request={(path, signal, method) => request(path, token, signal, method)} onEvidence={() => setView('archive')} /> : view === 'delivery' ? <DeviceDelivery token={token} onUnauthorized={() => logout('身份已停用或凭据失效，请重新登录。')} /> : view === 'identities' && canManageIdentities ? <IdentityManagement token={token} currentEmployeeId={employeeId}
+      {view === 'analysis' ? <AnalysisOperations request={(path, signal) => request(path, token, signal)} /> : view === 'daily' ? <DailyReports currentEmployeeId={employeeId} request={(path, signal, method) => request(path, token, signal, method)} onEvidence={() => setView('archive')} /> : view === 'delivery' ? <DeviceDelivery token={token} onUnauthorized={() => logout('身份已停用或凭据失效，请重新登录。')} /> : view === 'identities' && canManageIdentities ? <IdentityManagement token={token} currentEmployeeId={employeeId}
         onUnauthorized={() => logout('身份已停用或凭据失效，请重新登录。')} /> : <>
       <div className="heading"><div><p className="eyebrow">共享存档 · 北京时间</p><h1>会话原件</h1></div><button disabled={busy} onClick={() => { setSessionCursor(null); setRefresh(value => value + 1); }}>{busy ? '正在刷新…' : '刷新存档'}</button></div>
       <p className="notice">当前保存单副本。原件已提交与原生恢复已验证是不同状态；Desktop 原生能力待验证。</p>

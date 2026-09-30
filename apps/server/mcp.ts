@@ -62,6 +62,8 @@ export async function registerMcp(app: FastifyInstance, db: Database, archive: A
     mcp.registerTool('read_daily_report', { description: '读取同一日报版本，按项目和跨会话主题组织本来源日期已确认活动；历史引用仅作背景，未知统计不等于零。翻页时固定 revision。',
       annotations, inputSchema: { employeeId: z.uuid(), date: reportDate, revision: z.number().int().min(1).optional(), offset } },
     input => result(() => reports.read(input.employeeId, input.date, input.offset, input.revision)));
+    mcp.registerTool('read_analysis_operations', { description: '读取与 Web 相同的分析队列、有限尝试、输入版本、运行时配置与预算预留；未知账单不填零，不返还未知预留。',
+      annotations, inputSchema: { offset: offset.refine(value => value <= 100000) } }, input => result(() => analysis.operations(input.offset)));
     return mcp;
   }
   app.post('/mcp', { bodyLimit: 64 * 1024, onRequest: guard }, async (request, reply) => {
