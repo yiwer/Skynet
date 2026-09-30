@@ -1,6 +1,6 @@
 # Skynet
 
-内部 Coding Agent 工作观察与会话存档平台。已实现认证存档、历史增量、关联材料与恢复、npm/插件共享后台、维护、故障缺口、HTTPS MCP、组合搜索和跨设备事件归属，并接通隔离 Claude Code 短会话分析准备。V1 已恢复实施，生命周期、工作视图和完整发布验收继续推进；真实千问 PAYG 与 Desktop UI 尚未验收，V1 仍为草稿。进度、验证与恢复入口见 [V1 实施记录](docs/planning/v1-implementation.md)。
+内部 Coding Agent 工作观察与会话存档平台。#4–#33 的代码与验收准备已集成至主线 `594fec8`，该源码 Linux CI 61/61 通过；最终评审修订保留独立分支证据。真实 Desktop、完整 Windows 生命周期、千问 PAYG、第二位操作者与连续五个工作日试点尚未验收，V1 与 PR #55 仍为草稿。验收入口见 [V1 验收台账](docs/implementation/v1-acceptance-ledger.md)，实现进度见 [V1 实施记录](docs/planning/v1-implementation.md)。
 
 ## 文档入口
 
@@ -27,6 +27,9 @@
 | [周工作与项目准备](docs/implementation/issue-29.md) | 周一09:00自动入队、跨日主题及参与者、固定日报与项目计数、Web/MCP同版及原句；真实G3和运营验收仍开放 |
 | [更正与迟到输入准备](docs/implementation/issue-30.md) | 说明、主题/显示项目归类和重算审计，日周项目自动新版、旧固定版与原件不变；真实运营验收仍开放 |
 | [团队覆盖与来源统计准备](docs/implementation/issue-31.md) | 员工×日期覆盖、历史故障与当前连接、固定Token/文件/时间点区间及Web/MCP下钻；未知保留，真实门槛仍开放 |
+| [服务器一致备份与独立恢复](docs/implementation/issue-32.md) | SQL 与全部原件同边界、fresh 服务器与冻结读者、两实际 CLI 合成续聊；异机/第二位操作者仍待验收 |
+| [V1 验收台账与运营准备](docs/implementation/v1-acceptance-ledger.md) | #33 唯一 AC/G0–G4 验收索引、环境、复跑与原始 RED；准备不等于发布签收 |
+| [最终评审修订](docs/implementation/v1-review-fixes.md) | 原字节完整性、冻结来源统计、固定读者竞态、响应式深色、载荷复用与有界测量；各阶段固定源码和真实验证边界 |
 | [长会话分段与原件引用](docs/implementation/issue-23.md) | 有界提取与汇总、原 UTF-16 引用、失败和未处理范围；实际 Claude Code 的合成服务验证与真实千问验收分开 |
 | [Agent 内授权读取](docs/implementation/issue-26.md) | HTTPS MCP / OAuth、共享原文与材料分页、完整导出；两个真实 CLI 正常授权与查询已测，完整发布门槛仍待验收 |
 | [组合搜索与稳定证据定位](docs/implementation/issue-27.md) | Web/MCP 共用员工、日期、项目、来源及内容搜索，历史快照与未知项目可查；命中回到固定原件行与文字位置 |

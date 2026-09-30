@@ -2,6 +2,8 @@
 
 日期：2026-09-30。对应 [V1 #1](https://github.com/yiwer/Skynet/issues/1)、[#4](https://github.com/yiwer/Skynet/issues/4)、[#5](https://github.com/yiwer/Skynet/issues/5) 与 G0。本文记录实际观察；**没有任何原生客户端支持组合通过验收**。
 
+当前实现主线 `594fec8` 已集成#4–#33，Linux普通CI61/61通过；这不新增任何 Desktop/Task/真实千问支持声明。#32独立支线的两实际CLI从恢复服务器包续聊已验证1/1、13366.7888ms，使用隔离home与loopback合成模型；真实Desktop normal UI、信任、自动存档和服务器恢复续聊，以及普通Windows workspace-write、实际登录/重启/休眠完整链仍开放。最终评审修订仅跑隐藏非Task公开fixture、无头Web、冻结载荷导入与合成测量工具契约，未重复原生/Task/setup/maintenance/fullWindows或压力试验。所有门槛与现存/失效原件的准确索引见[唯一验收台账](v1-acceptance-ledger.md)，代码修订与对应固定源码测试见[修订记录](v1-review-fixes.md)。下文保留原诊断环境与历史限制，后续段落仅在明确验证的范围内更新。
+
 ## 实测环境
 
 | 项目 | 观察到的版本 |

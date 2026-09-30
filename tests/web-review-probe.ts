@@ -14,7 +14,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import assert from 'node:assert/strict';
 
 test('public authenticated Web states remain readable at320–1920 in both palettes', {timeout:600000}, async()=>{
-const repo=resolve('.');const smoke=process.env.SKYNET_WEB_PROFILE==='smoke';
+const repo=resolve('.');const profile=process.env.SKYNET_WEB_PROFILE;const smoke=profile==='smoke',controlsOnly=profile==='controls';
 const evidence=resolve(process.env.SKYNET_WEB_EVIDENCE??`../Skynet-evidence/v1-2026-09-30/web-review-${randomUUID()}`);
 const execute=(file:string,args:string[],options:{cwd:string;windowsHide?:boolean})=>command(file,args,process.env,'',{cwd:options.cwd,timeoutMs:10000});
 const {stdout:sourceHead}=await execute('git',['rev-parse','HEAD'],{cwd:repo});
@@ -56,7 +56,11 @@ async function measurements(page: any) {
         texts.push({ selector: selector(el), text: text.slice(0, 120), foreground: css.color, background: bg, fontSize: size, fontWeight: css.fontWeight,
           ratio, minimum: large ? 3 : 4.5, disabled, simplified: css.opacity !== '1' || css.backgroundImage !== 'none' }); }
       if (['SELECT', 'INPUT', 'BUTTON', 'TEXTAREA'].includes(el.tagName) && !(el as HTMLInputElement).hidden) {
-        names.push({ selector: selector(el), tag: el.tagName, label: (el as HTMLInputElement).labels ? Array.from((el as HTMLInputElement).labels!).map(label => label.innerText.slice(0, 120)).join(' / ') : el.getAttribute('aria-label'), text: el.textContent?.slice(0, 100) });
+        const bg=background(el),fg=blend(rgba(css.color),bg),a=luminance(fg),b=luminance(bg);
+        names.push({ selector: selector(el), tag: el.tagName, label: (el as HTMLInputElement).labels ? Array.from((el as HTMLInputElement).labels!).map(label => label.innerText.slice(0, 120)).join(' / ') : el.getAttribute('aria-label'), text: el.textContent?.slice(0, 100),
+          value:el.tagName==='INPUT'&&(el as HTMLInputElement).type==='password'?'[synthetic password glyphs]':(el as HTMLInputElement).value?.slice(0,120),
+          foreground:css.color,background:bg,colorScheme:css.colorScheme,disabled:!!(el as HTMLButtonElement).disabled,focused:document.activeElement===el,
+          ratio:(Math.max(a,b)+.05)/(Math.min(a,b)+.05),minimum:4.5,geometry:{left:rect.left,right:rect.right,width:rect.width,height:rect.height} });
       }
     }
     const root = getComputedStyle(document.documentElement); const body = getComputedStyle(document.body);
@@ -117,7 +121,11 @@ try {
           assert.deepEqual(bytes,raw,'Web binary original export must preserve every source byte');exportsChecked.push({sha256:digest(bytes),bytes:bytes.length,filename});}
       }
       if(entry.id==='corrections'){await page.getByText('全部更正历史（当前记录，不改写本版）',{exact:true}).click();await page.getByRole('button',{name:'读取更多更正历史'}).click();}
-      if (outage) await page.getByRole('alert').first().waitFor();
+      if(controlsOnly&&entry.id==='corrections'){
+        await page.getByLabel('更正原因',{exact:true}).fill('合成控件对比度读取');await page.getByLabel('追加说明',{exact:true}).fill('合成输入与textarea文本；没有提交更正。');
+        await page.getByLabel('追加说明',{exact:true}).focus();
+      }
+      if (outage){await page.getByRole('alert').first().waitFor();if(entry.id==='analysis')await expect(page.getByText('读取状态…',{exact:true})).toHaveCount(0);}
       else await page.waitForTimeout(250);
       if (entry.id === 'archive') await page.getByText('接入设备 · npm / 插件安装说明', { exact: true }).click();
       const measurement = await measurements(page);
@@ -129,17 +137,18 @@ try {
     } catch (error) { errors.push({ phase, page: entry.id, width, color, outage, error: String(error) }); console.log(`CAPTURE FAILED ${phase}/${entry.id}: ${String(error)}`); }
     finally { await context.close(); }
   }
-  if(!smoke&&process.env.SKYNET_WEB_PROFILE!=='race')for(const phase of ['empty','populated','error'])for(const width of [320,375,760,1280,1920])for(const color of ['light','dark']){
+  if(!smoke&&profile!=='race')for(const phase of controlsOnly?['empty','populated']:['empty','populated','error'])for(const width of controlsOnly?[320]:[320,375,760,1280,1920])for(const color of ['light','dark']){
     const context=await browser.newContext({viewport:{width,height:900},colorScheme:color,ignoreHTTPSErrors:true});const page=await context.newPage();
     await page.addInitScript('globalThis.__name = (target) => target;');
     try{await page.goto(s.origin);if(phase!=='empty')await page.getByLabel('个人读取凭据').fill('explicit-synthetic-invalid-credential-'.repeat(20));
+      if(controlsOnly)await page.getByLabel('个人读取凭据').focus();
       if(phase==='error'){await page.getByRole('button',{name:'进入存档',exact:true}).click();await page.getByRole('alert').waitFor();}
       const measurement=await measurements(page);const filename=`${phase}-login-${width}-${color}.png`;await page.screenshot({path:join(evidence,filename),fullPage:true});
       records.push({phase,page:'login',width,color,outage:phase==='error',screenshot:filename,pageErrors:[],...measurement});
     }finally{await context.close();}
   }
   // Empty-state screenshots are real public reads with a bound but idle device.
-  if(!smoke&&process.env.SKYNET_WEB_PROFILE!=='race')for(const entry of pages())for(const width of [320,375,760,1280,1920])for(const color of ['light','dark'])await capture('empty',entry,width,color);
+  if(!smoke&&profile!=='race'&&!controlsOnly)for(const entry of pages())for(const width of [320,375,760,1280,1920])for(const color of ['light','dark'])await capture('empty',entry,width,color);
   phases.push({ phase: 'empty', boundary: 'Public authentication, managed synthetic employee/device, no archived activity or reports yet.' });
   const timestamp = new Date(Date.now() + 60000).toISOString(); const sessionId = randomUUID();
   const output = `SYNTHETIC_OUTPUT_${'NoWhitespaceText'.repeat(20000)}`;
@@ -175,7 +184,7 @@ try {
       }); assert.equal(await queue.finish(job, result), true); }
     const daily = await (await api(`/api/daily-reports/${manager.employeeId}/${day}`)).json();
     const views = await Promise.all(selections.map(selection => api(`/api/work-view?${new URLSearchParams(selection)}`).then((response: Response) => response.json())));
-    if (daily.items.length && views.every(view => view.items.length && !view.refreshPending)) { dailyRevision = daily.revision; break; }
+    if (daily.items.length && !daily.refreshPending && views.every(view => view.items.length && !view.refreshPending)) { dailyRevision = daily.revision; break; }
     await new Promise(resolve => setTimeout(resolve, 250));
   }
   assert.ok(dailyRevision, 'Owned synthetic reports did not become readable; no provider fallback allowed');
@@ -202,18 +211,20 @@ try {
     }finally{release();await context.close();}
     return;
   }
-  for(const entry of pages().filter(entry=>!smoke||['daily','archive'].includes(entry.id)))for(const width of smoke?[320]:[320,375,760,1280,1920])for(const color of smoke?['dark']:['light','dark'])await capture('populated',entry,width,color);
-  if(!smoke&&process.env.SKYNET_WEB_PROFILE!=='race')for(const entry of pages())for(const width of [320,375,760,1280,1920])for(const color of ['light','dark'])await capture('error',entry,width,color,true);
+  for(const entry of pages().filter(entry=>controlsOnly?['corrections','daily','server'].includes(entry.id):!smoke||['daily','archive'].includes(entry.id)))for(const width of smoke||controlsOnly?[320]:[320,375,760,1280,1920])for(const color of smoke?['dark']:['light','dark'])await capture('populated',entry,width,color);
+  if(controlsOnly)for(const width of [320,375,760,1280,1920])for(const color of ['light','dark'])await capture('error',pages().find(entry=>entry.id==='analysis'),width,color,true);
+  if(!smoke&&profile!=='race'&&!controlsOnly)for(const entry of pages())for(const width of [320,375,760,1280,1920])for(const color of ['light','dark'])await capture('error',entry,width,color,true);
   const { stdout: finalHead } = await execute('git', ['rev-parse', 'HEAD'], { cwd: repo, windowsHide: true });
   const compiledHashes = await assetHash();
   await writeFile(join(evidence, 'result.json'), JSON.stringify({ startedSourceHead: sourceHead.trim(), finishedSourceHead: finalHead.trim(), compiledHashes,
     startedCompiledHashes,
-    sourceDiffHash:digest(sourceDiff),profile:smoke?'smoke':'all-widths-all-states',checkedAt: new Date().toISOString(), records, phases, errors,exportsChecked, boundary: 'Public UI fixture includes synthetic correction history and operations; simulated reading failures only, no paid model/Task,  G4 second operator/performance/5-day trial remain open. Simplified DOM contrast does not prove complete accessibility compliance.' }, null, 2));
+    sourceDiffHash:digest(sourceDiff),profile:profile??'all-widths-all-states',checkedAt: new Date().toISOString(), records, phases, errors,exportsChecked, boundary: 'Public UI fixture includes synthetic correction history and operations; simulated reading failures only, no paid model/Task,  G4 second operator/performance/5-day trial remain open. Native control CSS text contrast includes values and selected labels, backgrounds and focus; OS-painted glyphs, popups, disabled opacity and full accessibility conformance remain outside this simplified calculation.' }, null, 2));
   console.log(`FINISHED: ${records.length} captures; ${records.filter(record => record.horizontalOverflow).length} horizontal overflows; ${errors.length} capture errors.`);
   assert.equal(errors.length, 0, 'Capture errors are probe failures; see durable result.json');
   assert.equal(records.filter(record=>record.horizontalOverflow).length,0,'Horizontal reading overflow; see screenshots');
   assert.equal(records.filter(record=>record.color==='dark'&&record.theme.colorScheme!=='dark').length,0,'Dark mode must change real surfaces/native controls');
   assert.equal(records.reduce((count,record)=>count+record.contrastFailures.length,0),0,'Computed visible text contrast below threshold');
+  assert.equal(records.flatMap(record=>record.controls).filter(control=>!control.disabled&&control.ratio+.01<control.minimum).length,0,'Native control computed text contrast below4.5');
   assert.deepEqual(compiledHashes, startedCompiledHashes, 'Compiled assets changed during the probe; repeat on a stable checkout');
 } finally { await cleanupOwned([()=>browser?.close()??Promise.resolve(),()=>s.close()]); }
 });
