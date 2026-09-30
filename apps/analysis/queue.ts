@@ -40,6 +40,8 @@ export async function migrateQueue(client: PoolClient) {
     CREATE TABLE IF NOT EXISTS analysis_actions(id uuid PRIMARY KEY,job_id uuid NOT NULL REFERENCES analysis_jobs(id),
       actor_id uuid NOT NULL REFERENCES employees(id),action text NOT NULL,created_at timestamptz NOT NULL DEFAULT now());
     CREATE INDEX IF NOT EXISTS analysis_due ON analysis_jobs(next_attempt_at,created_at) WHERE state IN ('queued','retry-wait');`);
+  await client.query(`CREATE TABLE IF NOT EXISTS analysis_recomputations(target_id uuid NOT NULL REFERENCES analysis_targets(id),request_id uuid NOT NULL,
+    created_at timestamptz NOT NULL DEFAULT now(),PRIMARY KEY(target_id,request_id));`);
   for (const table of ['analysis_jobs', 'analysis_targets', 'analysis_actions']) {
     await client.query(`ALTER TABLE ${table} ALTER COLUMN actor_id DROP NOT NULL;
       ALTER TABLE ${table} ADD COLUMN IF NOT EXISTS actor_kind text NOT NULL DEFAULT 'user'`);

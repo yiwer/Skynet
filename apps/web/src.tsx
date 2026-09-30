@@ -63,8 +63,8 @@ function App() {
     return () => window.removeEventListener('hashchange', change);
   }, []);
 
-  async function request(path: string, access = token, signal?: AbortSignal, method?: 'POST') {
-    const response = await fetch(path, { method, headers: { Authorization: `Bearer ${access}`, ...(method ? { 'Content-Type': 'application/json' } : {}) }, signal, ...(method ? { body: '{}' } : {}) });
+  async function request(path: string, access = token, signal?: AbortSignal, method?: 'POST',body?:unknown) {
+    const response = await fetch(path, { method, headers: { Authorization: `Bearer ${access}`, ...(method ? { 'Content-Type': 'application/json' } : {}) }, signal, ...(method ? { body: JSON.stringify(body??{}) } : {}) });
     if (response.status === 401 && token && access === token) logout('凭据无效或已停用，请重新登录。');
     if (!response.ok) {
       const body = await response.json().catch(() => null);
@@ -129,7 +129,7 @@ function App() {
         <button aria-current={view === 'daily' ? 'page' : undefined} onClick={() => setView('daily')}>日工作</button>
         <button aria-current={view === 'work' ? 'page' : undefined} onClick={() => setView('work')}>周工作与项目</button>
         {canManageIdentities && <button aria-current={view === 'identities' ? 'page' : undefined} onClick={() => setView('identities')}>接入与设备</button>}</nav>
-      {view === 'analysis' ? <AnalysisOperations request={(path, signal) => request(path, token, signal)} /> : view === 'work' ? <WorkViews currentEmployeeId={employeeId} request={(path, signal, method) => request(path, token, signal, method)} onEvidence={() => setView('archive')} /> : view === 'daily' ? <DailyReports currentEmployeeId={employeeId} request={(path, signal, method) => request(path, token, signal, method)} onEvidence={() => setView('archive')} /> : view === 'delivery' ? <DeviceDelivery token={token} onUnauthorized={() => logout('身份已停用或凭据失效，请重新登录。')} /> : view === 'identities' && canManageIdentities ? <IdentityManagement token={token} currentEmployeeId={employeeId}
+      {view === 'analysis' ? <AnalysisOperations request={(path, signal) => request(path, token, signal)} /> : view === 'work' ? <WorkViews currentEmployeeId={employeeId} request={(path, signal, method) => request(path, token, signal, method)} onEvidence={() => setView('archive')} /> : view === 'daily' ? <DailyReports currentEmployeeId={employeeId} request={(path, signal, method,body) => request(path, token, signal, method,body)} onEvidence={() => setView('archive')} /> : view === 'delivery' ? <DeviceDelivery token={token} onUnauthorized={() => logout('身份已停用或凭据失效，请重新登录。')} /> : view === 'identities' && canManageIdentities ? <IdentityManagement token={token} currentEmployeeId={employeeId}
         onUnauthorized={() => logout('身份已停用或凭据失效，请重新登录。')} /> : <>
       <div className="heading"><div><p className="eyebrow">共享存档 · 北京时间</p><h1>会话原件</h1></div><button disabled={busy} onClick={() => { setSessionCursor(null); setRefresh(value => value + 1); }}>{busy ? '正在刷新…' : '刷新存档'}</button></div>
       <p className="notice">当前保存单副本。原件已提交与原生恢复已验证是不同状态；Desktop 原生能力待验证。</p>

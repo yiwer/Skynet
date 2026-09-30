@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { beijingDate, reportDate, type DailyItem, type DailyReport } from './reports.js';
+import { beijingDate, reportDate, type DailyItem, type DailyReport,type ReportCorrection } from './reports.js';
 
 export function addDays(date: string, days: number) { return beijingDate(new Date(new Date(`${date}T00:00:00+08:00`).getTime() + days * 86400_000)); }
 export function monday(date: string) { const day = new Date(`${date}T00:00:00Z`).getUTCDay(); return addDays(date, -(day + 6) % 7); }
@@ -18,6 +18,7 @@ export type WorkViewItem = DailyItem & { employeeId: string; employee: string; s
   continuation: 'inferred-theme-match' | 'unassigned' };
 export type WorkView = WorkViewSelection & { subjectLabel: string; timeZone: 'Asia/Shanghai'; revision: number; version: string | null; createdAt: string | null;
   state: DailyReport['state']; refreshPending: boolean; items: WorkViewItem[]; nextOffset: number | null;
+  corrections?:(ReportCorrection&{employeeId:string;sourceDate:string;dailyPath:string})[];
   participants: { employeeId: string; employee: string; dates: string[] }[];
   statistics: { records: number | null; userTurns: number | null; toolCalls: number | null; complete: boolean; files: null; tokens: null; activityIntervals: null; humanWorkHours: null; definition: string } | null;
   coverage: { messages: string[]; fixture: boolean; complete: boolean; omittedItems: number; boundedInputs: boolean;

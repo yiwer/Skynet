@@ -6,6 +6,7 @@ import type { ReportService } from './reports.js';
 import { beijingDate, type DailyReport } from '../../packages/contracts/reports.js';
 import { addDays, dailyPath, dueWeek, weekDate, workViewQuery, type WorkView, type WorkViewSelection, type WorkViewItem } from '../../packages/contracts/work-views.js';
 import { qualificationDaySql } from './qualification.js';
+import {displayProjectSql} from './reports.js';
 
 export async function migrateWorkViews(db: Database) {
   const client = await db.connect();
@@ -23,10 +24,12 @@ export async function migrateWorkViews(db: Database) {
 const identity = (selection: WorkViewSelection) => digest(JSON.stringify([selection.kind, selection.subject, selection.from, selection.to]));
 const qualificationForView = `(SELECT COALESCE(MAX(c.revision),0) FROM archive_event_origins qo JOIN event_qualifications c ON c.event_id=qo.event_id
   WHERE qo.source_date BETWEEN p.selection->>'from' AND p.selection->>'to' AND CASE WHEN p.selection->>'kind'='weekly'
-    THEN qo.employee_id::text=p.selection->>'subject' ELSE qo.project=p.selection->>'subject' END)`;
+    THEN qo.employee_id::text=p.selection->>'subject' ELSE ${displayProjectSql('qo')}=p.selection->>'subject' END)`;
 const changedDays = `EXISTS(SELECT 1 FROM jsonb_array_elements(r.payload->'coverage'->'days') day JOIN daily_report_revisions newer
-  ON newer.employee_id=(day->>'employeeId')::uuid AND newer.date=day->>'date' AND newer.revision>(day->>'revision')::integer)`;
-const definition = '已确认记录、用户轮次和工具调用按原员工、原项目、来源日期及不可变 eventId 统计。周报引用固定日报版本；项目仅计该项目的原活动。主题文字相同只表示推断关联。未归类项目保留。文件、原生 token、活动区间、人工工时未知；无已确认记录不证明无工作。';
+  ON newer.employee_id=(day->>'employeeId')::uuid AND newer.date=day->>'date' AND newer.revision>(day->>'revision')::integer)
+  OR EXISTS(SELECT 1 FROM jsonb_array_elements(r.payload->'coverage'->'days') day JOIN daily_report_periods pending
+    ON pending.employee_id=(day->>'employeeId')::uuid AND pending.date=day->>'date' WHERE pending.refresh_pending)`;
+const definition = '已确认记录、用户轮次和工具调用按原员工、来源日期及不可变 eventId 统计。周报引用固定日报版本；项目计数按该日报版本的显示归类唯一分配原事件，人工项目归类另保留来源项目和审计记录。同一原件行涉及多项目时，项目用户轮次可能重叠，不能相加当员工总轮次。主题文字相同只表示推断关联。未归类项目保留。文件、原生 token、活动区间、人工工时未知；无已确认记录不证明无工作。';
 
 export function workItems(days: DailyReport[], project?: string): WorkViewItem[] {
   return days.flatMap(day => day.items.filter(item => project === undefined || item.project === project).map(item => ({ ...item,
@@ -88,7 +91,7 @@ export function workViewService(db: Database, daily: ReportService, clock: () =>
         FROM employees e CROSS JOIN generate_series($2::date,$3::date,interval '1 day') day WHERE e.id=$1 ORDER BY day`, [selection.subject, selection.from, selection.to])).rows
         : (await client.query(`SELECT DISTINCT o.employee_id,e.name,o.source_date AS date,true AS managed,
           ${qualificationDaySql('o.employee_id', 'o.source_date')} AS qualification_revision FROM effective_event_origins o
-          JOIN employees e ON e.id=o.employee_id WHERE o.project=$1 AND o.source_date BETWEEN $2 AND $3 AND o.context='after-enrollment'
+          JOIN employees e ON e.id=o.employee_id WHERE ${displayProjectSql('o')}=$1 AND o.source_date BETWEEN $2 AND $3 AND o.context='after-enrollment'
           ORDER BY date,o.employee_id LIMIT 51`, [selection.subject, selection.from, selection.to])).rows;
       let pairs = await loadPairs(); const days: DailyReport[] = []; const refs: NonNullable<WorkView['coverage']>['days'] = [];
       let omittedItems = 0; let inputBytes = 0;
@@ -144,6 +147,7 @@ export function workViewService(db: Database, daily: ReportService, clock: () =>
         dates: [...new Set(participatingDays.filter(day => day.employeeId === employeeId).map(day => day.date))] }));
       const payload: WorkView = { ...selection, subjectLabel: (await validate(selection)).label, timeZone: 'Asia/Shanghai', revision: 0, version: null, createdAt: null,
         state, refreshPending: false, items, nextOffset: null, participants,
+        corrections:days.flatMap(day=>(day.corrections??[]).map(value=>({...value,employeeId:day.employeeId,sourceDate:day.date,dailyPath:dailyPath(day.employeeId,day.date,day.revision)}))).slice(0,32),
         statistics: { records: count('records'), userTurns: count('userTurns'), toolCalls: count('toolCalls'), complete: complete && statisticsKnown,
           files: null, tokens: null, activityIntervals: null, humanWorkHours: null, definition },
         coverage: { days: refs, complete, boundedInputs, omittedItems, fixture: days.some(day => day.coverage?.fixture), messages: [
@@ -190,7 +194,8 @@ export function workViewService(db: Database, daily: ReportService, clock: () =>
     for (const period of periods) await refresh(period.selection);
   }
   async function projects(offset = 0) {
-    const rows = (await db.query(`SELECT DISTINCT manifest->>'project' AS project FROM snapshots ORDER BY project LIMIT 101 OFFSET $1`, [offset])).rows;
+    const rows = (await db.query(`SELECT manifest->>'project' AS project FROM snapshots UNION SELECT payload->'input'->>'project' AS project FROM report_corrections
+      WHERE payload->'input'->>'kind'='project' ORDER BY project LIMIT 101 OFFSET $1`, [offset])).rows;
     const projects: { project: string; label: string }[] = []; let bytes = 0;
     for (const row of rows.slice(0, 100)) { const value = { project: row.project as string, label: (row.project || '未归类项目') as string };
       const size = Buffer.byteLength(JSON.stringify(value)); if (projects.length && bytes + size > 48 * 1024) break; projects.push(value); bytes += size; }

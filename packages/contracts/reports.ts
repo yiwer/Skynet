@@ -11,15 +11,25 @@ export function previousDate(date: string) { return beijingDate(new Date(new Dat
 export function dueReportDate(now = new Date()) {
   return new Date(now.getTime() + 8 * 3600_000).getUTCHours() >= 9 ? previousDate(beijingDate(now)) : null;
 }
-export type DailyItem = AnalysisItem & { project: string; theme: string; themeAssociation: 'topic-record' | 'inferred-single-topic' | 'unassigned'; analysisId: string;
+export type DailyItem = AnalysisItem & { project: string;originalProject?:string;projectCorrectionId?:string; theme: string; themeAssociation: 'topic-record' | 'inferred-single-topic' | 'unassigned' | 'manual-correction'; analysisId: string;originalTheme?:string;correctionId?:string;
   activityEventIds: string[]; backgroundCitations: AnalysisItem['citations']; fixture: boolean };
+const correctionBase={requestId:z.uuid(),expectedRevision:z.number().int().min(1),reason:z.string().trim().min(1).max(1000)};
+export const correctionInput = z.discriminatedUnion('kind',[
+  z.object({...correctionBase,kind:z.literal('note'),note:z.string().trim().min(1).max(2000)}).strict(),
+  z.object({...correctionBase,kind:z.literal('theme'),theme:z.string().trim().min(1).max(500),eventIds:z.array(z.string().min(1).max(128)).min(1).max(50)}).strict(),
+  z.object({...correctionBase,kind:z.literal('project'),project:z.string().trim().max(1024),eventIds:z.array(z.string().min(1).max(128)).min(1).max(50)}).strict(),
+  z.object({...correctionBase,kind:z.literal('reanalyze')}).strict()
+]);
+export type ReportCorrection = z.infer<typeof correctionInput> & {id:string;sequence:number;actorId:string;actor:string;createdAt:string};
 export type DailyReport = { employeeId: string; employee: string; date: string; timeZone: 'Asia/Shanghai';
   revision: number; version: string | null; state: 'not-scheduled' | 'queued' | 'waiting-analysis' | 'ready' | 'partial' | 'unavailable';
   createdAt: string | null; items: DailyItem[]; nextOffset: number | null;
   refreshPending: boolean;
+  corrections?: ReportCorrection[];
+  correctionCount?: number;
   statistics: { records: number; userTurns: number; toolCalls: number; historicalRecords: number; unknownRecords: number;
     files: null; tokens: null; activityIntervals: null; humanWorkHours: null; definition: string } | null;
-  coverage: { messages: string[]; qualificationRevision?: string; inputs: { snapshotId: string; hash: string; analysisId: string | null; state: string;
+  coverage: { messages: string[]; qualificationRevision?: string;sourceRevision?:string; inputs: { snapshotId: string; hash: string; analysisId: string | null; state: string;
       applicable?: boolean; generation?: number; configurationHash?: string; parserVersion?: string;
       attributionRevision?: string;
       processingScope?: { version: string; complete: boolean; aggregation: string; omittedFindings: number;
