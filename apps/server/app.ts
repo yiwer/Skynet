@@ -20,6 +20,9 @@ import { analysisService, migrateAnalysis } from './analysis.js';
 import { backfillOrigins, reconcileOriginalQualifications } from './provenance.js';
 import { migrateReports, reportService } from './reports.js';
 import { reportDate } from '../../packages/contracts/reports.js';
+import { coverageQuerySchema, installationObservationSchema } from '../../packages/contracts/coverage.js';
+import { migrateCoverage, observeCoverage, coverageService } from './team-coverage.js';
+import { workStatisticsService } from './work-statistics.js';
 import { migrateWorkViews, workViewService } from './work-views.js';
 import { workViewQuery } from '../../packages/contracts/work-views.js';
 
@@ -29,6 +32,7 @@ export async function createApp(options: { db: Database; rawDirectory: string; w
   await migrateArchiveSearch(db);
   await migrateAnalysis(db);
   await migrateReports(db);
+  await migrateCoverage(db);
   await migrateWorkViews(db);
   const raw = new RawStore(options.rawDirectory);
   await backfillOrigins(db, raw);
@@ -55,6 +59,8 @@ export async function createApp(options: { db: Database; rawDirectory: string; w
 
   const identity = identities(db);
   const { reader, device } = identity;
+  const coverage = coverageService(db);
+  const workStatistics = workStatisticsService(db, raw);
   const readerGuard = async (request: { headers: { authorization?: string } }) => { await reader(request.headers.authorization); };
   const deviceGuard = async (request: { headers: { authorization?: string } }) => { await device(request.headers.authorization); };
   const managerGuard = async (request: { headers: { authorization?: string } }) => { await identity.manager(request.headers.authorization); };
@@ -78,13 +84,26 @@ export async function createApp(options: { db: Database; rawDirectory: string; w
   app.get('/health', async () => ({ status: 'ok' }));
   app.post('/api/devices/health', { onRequest: deviceGuard }, async request => {
     const owner = await device(request.headers.authorization);
-    const { nonce, source, delivery, capture } = z.object({ nonce: z.uuid(), source: sourceSchema.optional(), delivery: deliveryHealthSchema.optional(), capture: captureHealthSchema.optional() }).strict()
+    const { nonce, source, delivery, capture, installation } = z.object({ nonce: z.uuid(), source: sourceSchema.optional(), delivery: deliveryHealthSchema.optional(), capture: captureHealthSchema.optional(), installation: installationObservationSchema.optional() }).strict()
       .refine(value => Boolean(value.source) === Boolean(value.delivery || value.capture), 'Source and report must be provided together').parse(request.body);
     await db.query(`INSERT INTO device_health(device_id) VALUES($1) ON CONFLICT(device_id) DO UPDATE SET received_at=now()`, [owner.id]);
     if (source && delivery) await db.query(`INSERT INTO device_delivery_health(device_id,source,report) VALUES($1,$2,$3)
       ON CONFLICT(device_id,source) DO UPDATE SET report=EXCLUDED.report,received_at=now()`, [owner.id, source, delivery]);
     if (source && capture) await saveCaptureHealth(db, owner.id, source, capture);
+    await observeCoverage(db, owner.id, { source, capture, delivery, installation });
     return { deviceId: owner.id, nonce, checkedAt: new Date().toISOString(), state: 'connected' };
+  });
+  app.get('/api/team-coverage', { onRequest: readerGuard }, async request => {
+    const { date, offset } = coverageQuerySchema.parse(request.query); return coverage.matrix(date, offset);
+  });
+  app.get('/api/team-coverage/:employeeId/observations', { onRequest: readerGuard }, async request => {
+    const employeeId = z.uuid().parse((request.params as { employeeId: string }).employeeId);
+    const { date, offset } = coverageQuerySchema.parse(request.query); return coverage.observations(employeeId, date, offset);
+  });
+  app.get('/api/work-statistics/:employeeId', { onRequest: readerGuard }, async request => {
+    const employeeId = z.uuid().parse((request.params as { employeeId: string }).employeeId);
+    const { date, offset, revision } = coverageQuerySchema.extend({ revision: z.coerce.number().int().min(1).optional() }).parse(request.query);
+    return workStatistics.read(employeeId, date, offset, revision);
   });
   app.get('/api/devices/status', { onRequest: readerGuard }, async request => {
     const { offset } = z.object({ offset: z.coerce.number().int().min(0).default(0) }).parse(request.query);
@@ -283,7 +302,7 @@ export async function createApp(options: { db: Database; rawDirectory: string; w
     const file = await archive.exported((request.params as { id: string }).id, format);
     return reply.header('Content-Disposition', `attachment; filename="${file.filename}"`).type(file.contentType).send(file.bytes);
   });
-  if (options.publicOrigin) await registerMcp(app, db, archive, options.publicOrigin, analysis, reports, workViews);
+  if (options.publicOrigin) await registerMcp(app, db, archive, options.publicOrigin, analysis, reports, coverage, workStatistics, workViews);
   if (options.webDirectory) {
     await app.register(fastifyStatic, { root: resolve(options.webDirectory), wildcard: false });
   }

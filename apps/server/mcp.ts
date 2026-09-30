@@ -10,10 +10,12 @@ import { searchSchema, locationSchema } from '../../packages/contracts/search.js
 import type { AnalysisService } from './analysis.js';
 import type { ReportService } from './reports.js';
 import { reportDate } from '../../packages/contracts/reports.js';
+import type { CoverageService } from './team-coverage.js';
+import type { WorkStatisticsService } from './work-statistics.js';
 import type { WorkViewService } from './work-views.js';
 import { workViewQuery } from '../../packages/contracts/work-views.js';
 
-export async function registerMcp(app: FastifyInstance, db: Database, archive: ArchiveQuery, publicOrigin: string, analysis: AnalysisService, reports: ReportService, workViews: WorkViewService) {
+export async function registerMcp(app: FastifyInstance, db: Database, archive: ArchiveQuery, publicOrigin: string, analysis: AnalysisService, reports: ReportService, coverage: CoverageService, workStatistics: WorkStatisticsService, workViews: WorkViewService) {
   const { guard } = await registerMcpAuth(app, db, publicOrigin);
   const offset = z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).default(0);
   const snapshotId = z.uuid().describe('Immutable snapshot ID from list_sessions, never a mutable session ID');
@@ -36,6 +38,13 @@ export async function registerMcp(app: FastifyInstance, db: Database, archive: A
     input => result(() => archive.sessions(input.cursor, input.limit)));
     mcp.registerTool('read_activity_statistics', { description: '分页读取按原始员工及北京时间来源日期去重的记录、用户轮次及工具调用。确认恢复保留历史归属，未知谱系保持分离；不是工时、评分或排名。',
       annotations, inputSchema: { offset } }, input => result(() => archive.statistics(input.offset)));
+    mcp.registerTool('read_team_coverage', { description: '读取与 Web 相同的员工×北京时间日期覆盖矩阵。服务器实际收到的按日观测不由当前设备健康回填；无已观察活动不证明没有工作。',
+      annotations, inputSchema: { date: reportDate, offset } }, input => result(() => coverage.matrix(input.date, input.offset)));
+    mcp.registerTool('read_coverage_observations', { description: '分页读取该员工该日服务器实际收到的设备与来源观测。宿主首次事件待确认不等于已证实未信任，历史没有观测为未知。',
+      annotations, inputSchema: { employeeId: z.uuid(), date: reportDate, offset } }, input => result(() => coverage.observations(input.employeeId, input.date, input.offset)));
+    mcp.registerTool('read_work_statistics', { description: '读取原员工来源日期的不可变统计版本与逐字原件引用，分页时固定 revision。仅统计来源记录的文件参数、Token 与活动点，未知不填零，区间不是工时。',
+      annotations, inputSchema: { employeeId: z.uuid(), date: reportDate, offset, revision: z.number().int().min(1).optional() } },
+      input => result(() => workStatistics.read(input.employeeId, input.date, input.offset, input.revision)));
     mcp.registerTool('search_sessions', { description: '按员工、项目、Agent、北京时间来源日期与字面内容组合检索。每个匹配快照返回首个命中位置；history=all 查历史快照。即使 hits 为空也必须沿 nextCursor 继续，complete 才表示全部扫描完毕。',
       annotations, inputSchema: searchSchema }, input => result(() => archive.search(input)));
     mcp.registerTool('read_location', { description: '打开 search_sessions 返回的固定快照证据位置，读取原文、未知原件行或关联文本。next 继续读取上下文，位置按 UTF-16 字符计数。',

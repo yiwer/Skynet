@@ -14,11 +14,11 @@
 | AC-06 仅接管被继续的旧会话 | [#8](issue-8.md)、[#10](issue-10.md)：两个真实 CLI 旧会话已纳入持续回归，目录 mtime 不触发上传、仅继续一条、来源日期保留 | Desktop 实测 |
 | AC-07 文件代次与关联材料 | [#9](issue-9.md)、[#18](issue-18.md)、[#10](issue-10.md)：原件代次、Claude 原位子续用与 Codex 附件精确回填；[#19](issue-19.md) 主件及可独立资格材料的完整前缀、原材料行锚点与改写不确定性 | Claude 子代理不伪装独立主件；未知 payload/外部资源、Desktop UI、完整支持矩阵与 G0 |
 | AC-08 离线与确认语义 | [#16](issue-16.md)、[#17](issue-17.md)：退避、ACK 丢失、崩溃窗口及幂等快照；[#19](issue-19.md) 快照与材料资格事件映射同事务提交，重试、较晚独立采集和再次恢复保持 eventId 不重复计活动 | 已通过安装前置的三客户端完整 G2 故障矩阵 |
-| AC-09 本地故障与缺口 | [#18](issue-18.md)：真实 Linux ENOSPC/EACCES/ENOENT、动态故障与未核实范围 | Windows 等价场景、无法落盘且离线的边界实测 |
+| AC-09 本地故障与缺口 | [#18](issue-18.md)：真实 Linux ENOSPC/EACCES/ENOENT、动态故障与未核实范围；[#31](issue-31.md) 服务器收到日/小时的覆盖观测保留故障，当前连接与历史未知分开 | Windows 等价场景、无法落盘且离线的边界实测 |
 | AC-10 服务器独立原生续聊 | [#5](issue-5.md)、[#6](issue-6.md)、[#7](issue-7.md)：新 home、源材料不可用、同 ID 续聊 | Desktop 正常 UI 恢复续聊；完整材料兼容性 |
 | AC-11 恢复校验与归属 | [#5](issue-5.md)、[#9](issue-9.md)、[#19](issue-19.md)：A→B→C 主件及正常独立资格的 Codex 材料恢复，原员工/设备/项目/日期、冻结来源映射、Web/MCP 统计和再次完整导出；真实 CLI 正常 hook 支线实测 | Desktop UI、完整支持组合与 G2 验收；未资格材料始终 context-only |
 | AC-12 日周项目与证据 | [#27](issue-27.md)：搜索、稳定原件位置、跨页完整读取；[#28](issue-28.md) 日报准备；[#29](issue-29.md) 周/项目公开准备：跨周、2员工/3项目、固定日报与原句，有效资格修订自动传播至既有期间、旧固定响应逐字不变；主线8/8及Linux49/49通过 | 实际 G3/运营、完整范围；#30迟到/更正 |
-| AC-13 证据分级与统计 | [#8](issue-8.md)、[#19](issue-19.md)：唯一事件及来源员工/项目/日期、历史或关联上下文与未知分类；[#22](issue-22.md) 四级结论、逐字引用及原材料锚点与输入语义位置区分 | 真实模型质量验收；#28/#31 完整统计与未知值，不把 context-only 捕获计活动 |
+| AC-13 证据分级与统计 | [#8](issue-8.md)、[#19](issue-19.md)：唯一事件及来源员工/项目/日期、历史或关联上下文与未知分类；[#22](issue-22.md) 四级结论与独立raw/input语义锚点；[#31](issue-31.md) 固定来源统计版本、已测Token基线/结构化文件/时间点区间、原材料资格及Web/MCP原句，主线12/12通过 | 真实模型质量与完整来源支持组合；统计缺项保持未知、不把context-only计活动；通用证据非法UTF8缺口仍待修 |
 | AC-14 北京时间归期 | [#8](issue-8.md)：来源日期和可信接入边界；[#28](issue-28.md) 每日09:00；[#29](issue-29.md) 周一09:00前一周及跨周，可信内部clock公开fixture；#19有效资格仍按原来源日更新新报告 | 实际运营时点；#30 迟到数据和受管理期间 |
 | AC-15 更正与版本隔离 | 原始快照不可变；[#24](issue-24.md) 持久 generation、parser/配置、失效租约、迟到旧 token、新输入去抖与非适用历史结果公开回归 | #30 更正和历史报告；真实运行验收 |
 | AC-16 认证撤销与共享读 | [#20](issue-20.md)：逐请求校验、共享读取、维护权限、审计 | 新增分析/报告/更正接口沿用边界并复验 |
@@ -118,3 +118,9 @@ G0–G4、#21/G2、#22/#24 的真实 PAYG/G3均开放。#23长会话、#28日报
 `d89c5c6` 组合 `1c41d21` 后无冲突合入 `bc00a97`，保留原运行时源码与诊断。主线自身typecheck/build/diffcheck及材料资格、大型旧件核查、周/项目、日报和OAuth MCP **8/8 PASS（31.94s）**；`zSGfJk`、`5unazv`、`Wq1MBU`、`gUPwf4`，日志 `F:/GenCode/Skynet-evidence/v1-2026-09-30/main-29-qualification-integration.log`。可信独立来源资格修订使当前分类/分析适用性/报告引用更新，旧固定报告全文、原员工/项目/日期/原件/eventId保留。原件支持64MiB，实际大型旧件为17,826,999 bytes；分析输入8MiB上限不放宽。
 
 实际Claude2.1.281周/项目loopback1/1为组合支线证据 `1hfWI0`，不是本次主线原生复跑。没有Task/maintenance/完整Windows，既有31/33、23/24、取消与性能失败不被本次定向通过覆盖。通用解析器单个0xFF公开RED仍错误产生替换文字、gap0及额外活动；合法U+FFFD与原件hash对照通过，durable `public-utf8-red-result.json`，待独立统一修订。G0–G4、G2/G3、Desktop、PAYG质量/预算、第二人/五日试点及#32独立灾备均开放。
+
+## 团队覆盖 / 来源统计主线集成
+
+clean `519d59f` 无冲突合入 `eb69a46`，保留Linux49/49与运行时/资格/周项目旧证据。主线自身typecheck/build/diffcheck及source/day/MCP/material/work/coverage定向 **12/12 PASS（31.43s）**。公开fixture `5LAcc5` 验证收到时的缺口保留、历史未知、原材料资格/辅助计数基线、固定统计/日报及员工项目只读下钻；safe JSON与五宽截图已存 `F:/GenCode/Skynet-evidence/v1-2026-09-30/coverage-f611dad8-9b43-4b47-81a1-706c3231c67d/`，日志 `main-31-integration.log`。
+
+不复跑实际native、Task/maintenance或完整Windows；历史失败与所有门槛不变。来源Token不是账单，时间点区间不是工时，部署前覆盖未知；辅助统计strictUTF8不表示一般证据解析非法字节已修。#30迟到/更正与#32一致灾备仍待独立交付。
