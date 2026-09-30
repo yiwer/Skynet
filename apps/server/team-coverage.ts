@@ -72,7 +72,7 @@ export function coverageService(db: Database) {
         bool_or(o.host_event='observed') AS host_observed,bool_or(o.host_event='not-observed' AND o.configured=true) AS pending
         FROM device_coverage_observations o JOIN devices d ON d.id=o.device_id
         WHERE d.employee_id=ANY($1::uuid[]) AND o.date=ANY($2::text[]) GROUP BY d.employee_id,o.date`, [ids, dates]),
-      db.query(`SELECT d.employee_id,bool_or(d.active AND e.active AND h.received_at>now()-interval '90 seconds') AS connected,
+      db.query(`SELECT d.employee_id,bool_or(d.active AND e.active AND h.live_valid AND h.received_at>now()-interval '90 seconds') AS connected,
         bool_or(h.received_at IS NOT NULL) AS seen FROM devices d JOIN employees e ON e.id=d.employee_id
         LEFT JOIN device_health h ON h.device_id=d.id WHERE d.employee_id=ANY($1::uuid[]) GROUP BY d.employee_id`, [ids]),
       db.query(`SELECT p.employee_id,p.date,r.payload->>'state' AS state,p.refresh_pending FROM daily_report_periods p

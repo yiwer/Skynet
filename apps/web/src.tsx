@@ -19,6 +19,7 @@ import { DailyReports } from './DailyReports.js';
 import { TeamCoverage } from './TeamCoverage.js';
 import { WorkViews } from './WorkViews.js';
 import { QualificationProof } from './QualificationProof.js';
+import { ServerOperations } from './ServerOperations.js';
 
 type Detail = { snapshotId: string; employee: string; manifest: Manifest; committedAt: string; events: ActivityEvent[]; activity: ActivitySummary;
   unrecognizedLines: number; partialLine: boolean; nextOffset: number | null; total: number; captureHealth: Coverage; provenance: Provenance;
@@ -34,7 +35,7 @@ function App() {
   const [employeeId, setEmployeeId] = useState('');
   const [canManageIdentities, setCanManageIdentities] = useState(false);
   const hashView = () => location.hash.startsWith('#daily?') ? 'daily' as const : location.hash.startsWith('#work?') ? 'work' as const : 'archive' as const;
-  const [view, setView] = useState<'archive' | 'identities' | 'delivery' | 'daily' | 'analysis' | 'work' | 'coverage'>(hashView);
+  const [view, setView] = useState<'archive' | 'identities' | 'delivery' | 'daily' | 'analysis' | 'work' | 'coverage' | 'server'>(hashView);
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
   const [sessionCursor, setSessionCursor] = useState<string | null>(null);
   const [nextSessionCursor, setNextSessionCursor] = useState<string | null>(null);
@@ -128,10 +129,11 @@ function App() {
         <button aria-current={view === 'coverage' ? 'page' : undefined} onClick={() => setView('coverage')}>团队覆盖</button>
         <button aria-current={view === 'delivery' ? 'page' : undefined} onClick={() => setView('delivery')}>设备同步</button>
         <button aria-current={view === 'analysis' ? 'page' : undefined} onClick={() => setView('analysis')}>分析队列</button>
+        <button aria-current={view === 'server' ? 'page' : undefined} onClick={() => setView('server')}>运行与备份</button>
         <button aria-current={view === 'daily' ? 'page' : undefined} onClick={() => setView('daily')}>日工作</button>
         <button aria-current={view === 'work' ? 'page' : undefined} onClick={() => setView('work')}>周工作与项目</button>
         {canManageIdentities && <button aria-current={view === 'identities' ? 'page' : undefined} onClick={() => setView('identities')}>接入与设备</button>}</nav>
-      {view === 'coverage' ? <TeamCoverage currentEmployeeId={employeeId} request={(path, signal) => request(path, token, signal)} onEvidence={() => setView('archive')} /> : view === 'analysis' ? <AnalysisOperations request={(path, signal) => request(path, token, signal)} /> : view === 'work' ? <WorkViews currentEmployeeId={employeeId} request={(path, signal, method) => request(path, token, signal, method)} onEvidence={() => setView('archive')} /> : view === 'daily' ? <DailyReports currentEmployeeId={employeeId} request={(path, signal, method,body) => request(path, token, signal, method,body)} onEvidence={() => setView('archive')} /> : view === 'delivery' ? <DeviceDelivery token={token} onUnauthorized={() => logout('身份已停用或凭据失效，请重新登录。')} /> : view === 'identities' && canManageIdentities ? <IdentityManagement token={token} currentEmployeeId={employeeId}
+      {view === 'server' ? <ServerOperations request={(path,signal)=>request(path,token,signal)} /> : view === 'coverage' ? <TeamCoverage currentEmployeeId={employeeId} request={(path, signal) => request(path, token, signal)} onEvidence={() => setView('archive')} /> : view === 'analysis' ? <AnalysisOperations request={(path, signal) => request(path, token, signal)} /> : view === 'work' ? <WorkViews currentEmployeeId={employeeId} request={(path, signal, method) => request(path, token, signal, method)} onEvidence={() => setView('archive')} /> : view === 'daily' ? <DailyReports currentEmployeeId={employeeId} request={(path, signal, method,body) => request(path, token, signal, method,body)} onEvidence={() => setView('archive')} /> : view === 'delivery' ? <DeviceDelivery token={token} onUnauthorized={() => logout('身份已停用或凭据失效，请重新登录。')} /> : view === 'identities' && canManageIdentities ? <IdentityManagement token={token} currentEmployeeId={employeeId}
         onUnauthorized={() => logout('身份已停用或凭据失效，请重新登录。')} /> : <>
       <div className="heading"><div><p className="eyebrow">共享存档 · 北京时间</p><h1>会话原件</h1></div><button disabled={busy} onClick={() => { setSessionCursor(null); setRefresh(value => value + 1); }}>{busy ? '正在刷新…' : '刷新存档'}</button></div>
       <p className="notice">当前保存单副本。原件已提交与原生恢复已验证是不同状态；Desktop 原生能力待验证。</p>

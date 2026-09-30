@@ -1,6 +1,6 @@
 # V1 验收证据台账
 
-V1 尚未完成，AC-01…AC-22 与 G0…G4 均未整体签收。本台账是唯一验收索引；各票文档保留实验过程。本检查点整理材料，未执行新的产品测试。产品源码 `68ee347605db0a23578b62560c4df8f97057025a`，文档基线 `15021a40244d811887486173289376099eb87009`（2026-09-30）；#32 在独立树实施，尚未合入。
+V1 尚未完成，AC-01…AC-22 与 G0…G4 均未整体签收。本台账是唯一验收索引；各票文档保留实验过程。主线基线产品 `68ee347605db0a23578b62560c4df8f97057025a`、文档 `017c391d6becdcb1654a44fade7ee8126d67ff42`（2026-09-30）；#32 支线 `e366814`→`55308ae9` 已完成下述本地灾备链，尚未合入主线。
 
 依据：[PRD](../requirements/PRD.md)、[V1 验收标准](../requirements/v1-acceptance.md)、[实施记录](../planning/v1-implementation.md)、[原生支持矩阵](native-validation-status.md)。[PRD v2 适用规则](../requirements/PRD-v2.md#与既有文档的关系) 已确认：使用能力评估与报表守则以 V2 为准，其余以 V1 为准。因此不能继续把全部自动评估写成永久禁止；本票不提前实现 V2 AC-23…38。V1 统计与四级证据仍须可追溯，Token 不是账单，事件区间不是工时；名次、榜单、按指数排序人员及自动人事动作仍在范围外。
 
@@ -15,7 +15,7 @@ V1 尚未完成，AC-01…AC-22 与 G0…G4 均未整体签收。本台账是唯
 | X | W + Codex CLI0.157.1 | 实际hooks/exec/history/fork/图片/附件行重建、独立材料资格；本机workspace-write被宿主退化为read-only，实际apply_patch未通过 |
 | D | W + Desktop26.924.2738.0 / bundled backend0.158.0-alpha.2.1 | 仅实际backend app-server恢复；创建renderer不等于可用UI，正常UI采集/信任/恢复未测 |
 | L | GitHub Ubuntu CI、Node24、自有PG容器，固定源码见各轮日志 | typecheck/build/普通回归，不覆盖Windows Task/Desktop/PAYG。Linux UID1000实际Claude短分析worker和ENOSPC/EACCES/ENOENT是独立实验 |
-| B | #32支线Linux/amd64 helper Node24.21.0、PG工具17.11；W调用、PG17-alpine fresh target | 两原件对象（含ACK未成快照staged chunk）新库恢复；same-host/integrity-only，未合主线/未验收灾备 |
+| B | #32支线Linux/amd64 helper Node24.21.0、PG工具17.11；W调用、PG17-alpine fresh target | ALL对象含ACK staged新库恢复、冻结报告/导出/OAuth MCP、两实际CLI续聊；same-host，运行状态仍标integrity-only，未合主线/未整体签收 |
 
 当前全局Codex0.159.2、其他版本/macOS/WSL/SSH/员工容器未由这些固定实验覆盖。Agent×版本×OS×能力的每格状态以原生支持矩阵为准。
 
@@ -34,7 +34,7 @@ V1 尚未完成，AC-01…AC-22 与 G0…G4 均未整体签收。本台账是唯
 | AC-07 代次材料 | C/X/D，R1/R3；[#9](issue-9.md)/[#18](issue-18.md)/[#19](issue-19.md) child/fork/附件/资格 | 原件代次、Claude原位子续用、Codex附件ID/time/type/key/payload回填、原材料前缀锚点；E2/E4 | 全材料/未知payload/外部资源/D；非法UTF8活动缺口修订 |
 | AC-08 离线ACK | W/L、三来源，R1；[#16](issue-16.md)/[#17](issue-17.md) 丢ACK/崩溃/重试 | 幂等快照/退避，同事务原事件与材料资格映射，跨恢复不重复活动；E2 | G1后完整三来源G2矩阵 |
 | AC-09 本地故障 | L/W，R5/R1；[#18](issue-18.md) 故障、[#31](issue-31.md) 覆盖观测 | UID1000实际ENOSPC/EACCES/ENOENT；收到日/小时故障保留，当前连接不填历史；E2 | Windows等价、无法落盘且离线边界 |
-| AC-10 独立续聊 | C/X/D，R3；[#5](issue-5.md) server包→new home→same ID | 两CLI源材料不可用时恢复上下文/工具；E4 | D正常UI/完整材料；#32恢复服务器后的native链 |
+| AC-10 独立续聊 | C/X/D，R3；[#5](issue-5.md) server包→new home→same ID | 两CLI源材料不可用时恢复上下文/工具；#32恢复服务器后两actual CLI各3 loopback请求；E4/E7 | D正常UI/完整材料、正常安装与外部条件 |
 | AC-11 校验归属 | W/C/X，R1/R3；[#5](issue-5.md)/[#9](issue-9.md)/[#19](issue-19.md) A→B→C | 损坏/非空目标拒绝，原owner/device/project/date/eventId/材料原锚点及完整导出；E2/E4 | D/G2组合；未资格材料仍context-only |
 | AC-12 日周项目证据 | W/L/C，R1/R4/R6；[#27](issue-27.md)/[#28](issue-28.md)/[#29](issue-29.md)/[#30](issue-30.md) | HTTP/Web/OAuth MCP固定版本、分页、员工/项目下钻；主线#30及#31各12/12；E1/E2 | 真实模型质量/运营来源、Web溢出/深色修订 |
 | AC-13 分级统计 | W/L/C，R1/R4；[#22](issue-22.md)/[#19](issue-19.md)/[#31](issue-31.md) 引用/资格/固定统计 | 四级结论，来源event去重、记录Token/基线/缓存、文件参数/时间点区间，缺项未知；E2 | PAYG抽检；通用0xFF/既存账本计数；V2守则按本文依据适用 |
@@ -45,7 +45,7 @@ V1 尚未完成，AC-01…AC-22 与 G0…G4 均未整体签收。本台账是唯
 | AC-18 实际长分析 | C/L，R4；[#22](issue-22.md)/[#23](issue-23.md)/[#24](issue-24.md) 独立CLI分段聚合 | Claude2.1.281 loopback短长公开链、原UTF16引用/全job请求预算；E4 | G2前置、指定千问PAYG真实长质量 |
 | AC-19 分析故障 | W/L/C，R1/R4；[#24](issue-24.md) 领取/租约/重启/新输入/超时 | 有限总attempts、并发/时间/输入/请求/预算caps、未知不退款；CLI两次停止，原件查导可用；E4 | 真计费上界/账单/G2/G3；#32旧claims fencing |
 | AC-20 指令隔离 | C/L，R4；[#22](issue-22.md) Bash/外发/伪造引用 | 实际CLI只有StructuredOutput、无副作用、不继承hooks/auth/MCP、不回流采集；E4 | 指定PAYG模型、完整G3抽检 |
-| AC-21 服务器灾备 | B，R8；[票#32](https://github.com/yiwer/Skynet/issues/32) 支线bbcb37b→70c3034 | fresh restore1/1，用例9.16s/总9.82s；stage3 paths/public/fault/Linuxvolumes4/4、总37.59s；两对象含staged ACK、restore-before-migrate；E7 | 未合入；完整冻结报告/OAuthMCP/实际双CLI续聊与最终组合灾备 |
+| AC-21 服务器灾备 | B/W/C/X，R8；[#32](issue-32.md) 支线e366814→55308ae9 | ALL staged/SQL同边界、fresh恢复、崩溃/claims/heartbeat fencing；冻结日周项目/更正/原件/导出exact；两实际CLI续聊1/1、13.37s；最终窄回归3/3、12.18s；E7 | 待distinct merge/最终review；off-host/第二位操作者/实际部署灾备签收 |
 | AC-22 性能运营 | W/L，R5/R7；[#11](issue-11.md)/[#12](issue-12.md)/[#14](issue-14.md)/[#18](issue-18.md) | ROOT200hook P50 52.53/P95 67.17/max137.34ms；另公开200原文可见P95 1161.15ms；E5 | 压力P95 111.35ms红；支持客户端/登记负载的安装≤2min和原文≤60s分布；第二人/五日 |
 
 ## G0…G4
@@ -130,7 +130,7 @@ node node_modules/tsx/dist/cli.mjs F:/GenCode/Skynet-evidence/v1-2026-09-30/web-
 
 E5正常hook的外部`performance/hook-baseline.mjs`固定main路径/产品68compiled；先审阅并登记实际source/build，再`node F:/GenCode/Skynet-evidence/v1-2026-09-30/performance/hook-baseline.mjs`。原文可见入口为`node F:/GenCode/Skynet-evidence/v1-2026-09-30/performance/raw-visibility-probe.mjs`，同样先核对固定own30源码/环境；独立核查脚本是`performance/verify-raw-visibility.mjs`。它们不装Task，不代表支持客户端或旧Linux满盘重测。完整Linux`npm test`依CI workflow执行，不推断Windows全量。
 
-**R8：#32尚未合入。** 合入后取真实文档/CLI/hash再执行，不引用当前仓库不存在的入口。覆盖SQL exported snapshot+全部ACK staged chunks、raw/导出/报告引用、fresh PG restore-before-migrate、complete marker/receipt崩溃窗口、损坏拒绝、claims/预算fencing、恢复服务器独立native包、HTTP/Web/MCP容量/备份状态，区分same-host/off-host/未知故障域。
+**R8：#32支线已完成，待合入。** [运行手册](../operations/server-backup.md)提供helper镜像/profile、private UID卷与stdin JSON CLI命令。支线可跑 `node --import tsx --test tests/backup-paths.test.ts tests/server-backup.test.ts tests/server-backup-fault.test.ts tests/server-backup-volumes.test.ts tests/server-backup-readers.test.ts`；实际双CLI单独以 `SKYNET_CODEX_CLI`=durable官方0.157.1路径、`SKYNET_CLAUDE_RUNTIME`=实测2.1.281路径运行 `node --import tsx --test tests/native-server-backup.test.ts`（本次已通过，不重复）。覆盖SQL exported snapshot+全部ACK staged chunks、raw/导出/固定报告、fresh PG restore-before-migrate、publication/receipt崩溃窗口、损坏拒绝、claims/预算/heartbeat fencing与HTTP/Web/MCP；same-host结果不等于off-host或第二人演练。
 
 ## 精简证据索引
 
@@ -145,7 +145,7 @@ E5正常hook的外部`performance/hook-baseline.mjs`固定main路径/产品68com
 | E5 性能新实测 | `performance/hook-db721967-432e-4b2a-9f4f-cf7030ac2fb8/result.json`/`performance/hook-baseline.mjs`：W/product68，200/200唯一样本入spool，P50 **52.53**/P95 **67.17**/max **137.34ms**；无gap/原件读取/网络，Task0/provider0、hidden child≤3s。另`performance/raw-2c49f95d-db2e-444c-8e4d-a5d53195bd03/result.json`与`independent-verification.json`：own30 c5d23c5公开CLI hook→collector→服务器200/200可见，P50 **678.0862**/P95 **1161.1511**/max **1217.4754ms**、poll100ms、0missing/fail/timeout；总13.918s含准备cleanup。ROOT独立重算分布、200nonce/prefixSHA及11raw hash全部true；collector/server/packages与main68 relevant源码diff空，不是main执行。1员工/设备/会话、loopback服务器/PG512MiB1CPU、未配置分析、主机并发不控、Task/native/paid0；不代表登记试点/支持客户端AC22签收 |
 | E5 故障路径新增 | `performance/enospc-result.md`、`performance/enospc-d320a115-3b17-4a86-98c3-b7f54f324c82/host.json`/`output/result.json`：product68冻结载荷，Linux WSL2/Node24.21/UID1000、1CPU/128MiB/pids64/networknone/root只读，自有2MiB tmpfs实际ENOSPC、前后free0。200/200顺序child exit0且精确storage诊断；P50 **52.027888**/P95 **72.561423**/max **106.325139ms**，spool0/gap无法落盘；sample SHA256 `0202523324d4343905aa9aefe3b1737f3225f4b3ce394daba94521d68107f60b`。owned容器已不存在；无产品优化/Task/setup/native/paid。不是旧四任务并行111.35ms条件，不能覆盖其红。复跑入口 `node F:/GenCode/Skynet-evidence/v1-2026-09-30/performance/hook-enospc-probe.mjs` |
 | E6 当前Web/UTF8红 | `web-audit/run-2/result.json`/`web-audit/summary.json`/`web-audit/audit-handoff.md`：producta458、112captures、58overflow、0capture/page exceptions；56dark仍亮色。简化直接文字contrast min5.436/0fail非完整无障碍证明；21代表PNG人工核对+ROOT两张。`public-utf8-red-result.json`/`public-utf8-red.mjs`/`evidence-utf8-probe-result.json`：FF产生U+FFFD/gap0/额外活动；合法encoded U+FFFD控制与下载原hash通过；通用parser/既存origin待修 |
-| E7 #32支线阶段 | bbcb37b `issue-32-backup-stage2-green.log`1/1，用例9.16s/总9.82s、4eBW26；`issue-32-stage2-public.json`：两对象296bytes/dump89662bytes/PG17.11/Node24.21/same-host/integrity-only/stagedSubmission200，`issue-32-stage2-helper-image.json`。随后heartbeat修订 `issue-32-heartbeat-reconcile-green.log`2/2、总19.81s：restore live_valid=false/真实heartbeat再true，历史观测不改。`backup-permission-preflight-result.json` UID1000访问1001私有0700/0600 EACCES→匹配1001读写成功；未放宽product权限。stage3 clean70c3034 `issue-32-stage3-green.log`4/4、总37.59s，paths/public/fault/Linuxvolumes；`issue-32-stage3-fault-public.json`/`issue-32-stage3-heartbeat-public.json`/`issue-32-stage3-linux-volumes.json`；named-volume app/helper UID1000保持目录0700/文件0600。加严格SQLerror枚举与raw非空目标拒绝后 `issue-32-crash-fence-final.log`1/1，用例32.09s/总32.74s。未合main，完整report/OAuthMCP/实际双CLI续聊未完 |
+| E7 #32支线阶段 | bbcb37b `issue-32-backup-stage2-green.log`1/1，用例9.16s/总9.82s、4eBW26；`issue-32-stage2-public.json`：两对象296bytes/dump89662bytes/PG17.11/Node24.21/same-host/integrity-only/stagedSubmission200，`issue-32-stage2-helper-image.json`。随后heartbeat修订 `issue-32-heartbeat-reconcile-green.log`2/2、总19.81s：restore live_valid=false/真实heartbeat再true，历史观测不改。`backup-permission-preflight-result.json` UID1000访问1001私有0700/0600 EACCES→匹配1001读写成功；未放宽product权限。stage3 clean70c3034 `issue-32-stage3-green.log`4/4、总37.59s，paths/public/fault/Linuxvolumes；`issue-32-stage3-fault-public.json`/`issue-32-stage3-heartbeat-public.json`/`issue-32-stage3-linux-volumes.json`；named-volume app/helper UID1000保持目录0700/文件0600。加严格SQLerror枚举与raw非空目标拒绝后 `issue-32-crash-fence-final.log`1/1，用例32.09s/总32.74s。stage4 e04df968 `issue-32-readers-boundary-visual.log`1/1、20.32s，dump后/ALL枚举前sourceC public提交而restoreC404，冻结报告/更正/原件/导出exact，12运行页截图。stage5 e366814 `issue-32-native-first.log`1/1、13.37s，VlcMls两实际CLI各3loopback请求、上下文/工具完整；`issue-32-native-public.json` SHA b2aa1f2396cd7123c951dd0202c7870ff5313c9e9649b1355472579d6ffb1e0b，witnesses保留六份原件/续聊/包哈希，request bodies仅本次内存断言未落盘。55308ae9吸收017台账，type/build/diff和 `issue-32-final-narrow.log`3/3、12.18s通过；未合main、非off-host/第二人 |
 | E8 历史与失效 | 原inventory44份durable、main30/31收据SHA一致，17条旧TEMP不存在。`ci-9b90e7a-linux.log`红；`ci-0743d4d-linux.log`36/36、`ci-6089062-linux.log`45/45、`ci-0dc863a-linux.log`49/49、`ci-a4588a6-linux.log`53/53只证明各源码。早期基线17/17、1665d08的19/19、f6ccbca的28/28（100.38s）仍保留各票/CI记录 |
 
 旧TEMP17条精确路径保留原inventory：native research/code-change/subagent/attachment、runtime diagnosis/reporting readiness、六G0原记录am35Jw/T5UcDo/iKyW27/fXHp3P/Frh0VR/TTEPSP、runtime summary ySaGHQ/main rw1nib、hook qZM0lv、local-fault txjgno、UTF8 finding。原因未知，不重造原日志。票据历史值保留，但失效原文件不能作为现存附件；新复跑不倒填旧run。

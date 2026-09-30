@@ -7,6 +7,7 @@ import { RawStore } from './raw-store.js';
 import { deliveryHealthSchema } from '../../packages/contracts/delivery.js';
 import { archiveQuery, exportFormat } from './archive-query.js';
 import { registerMcp } from './mcp.js';
+import { migrateServerOperations,serverOperations } from './server-operations.js';
 import { assembleSchema, CHUNK_BYTES } from '../../packages/contracts/materials.js';
 import { appendSnapshotSchema, hashSchema, manifestSchema, sourceSchema } from '../../packages/contracts/archive.js';
 import { HttpError, identities } from './identities.js';
@@ -25,13 +26,16 @@ import { migrateCoverage, observeCoverage, coverageService } from './team-covera
 import { workStatisticsService } from './work-statistics.js';
 import { migrateWorkViews, workViewService } from './work-views.js';
 import { workViewQuery } from '../../packages/contracts/work-views.js';
+import { assertRestoreReady } from './backup-files.js';
 
 export async function createApp(options: { db: Database; rawDirectory: string; webDirectory?: string; publicOrigin?: string; reportClock?: () => Date }) {
   const { db } = options;
+  await assertRestoreReady(options.rawDirectory);
   await migrate(db);
   await migrateArchiveSearch(db);
   await migrateAnalysis(db);
   await migrateReports(db);
+  await migrateServerOperations(db);
   await migrateCoverage(db);
   await migrateWorkViews(db);
   const raw = new RawStore(options.rawDirectory);
@@ -62,6 +66,8 @@ export async function createApp(options: { db: Database; rawDirectory: string; w
   const coverage = coverageService(db);
   const workStatistics = workStatisticsService(db, raw);
   const readerGuard = async (request: { headers: { authorization?: string } }) => { await reader(request.headers.authorization); };
+  const operations=serverOperations(db,options.rawDirectory);
+  app.get('/api/server/operations',{onRequest:readerGuard},()=>operations.read());
   const deviceGuard = async (request: { headers: { authorization?: string } }) => { await device(request.headers.authorization); };
   const managerGuard = async (request: { headers: { authorization?: string } }) => { await identity.manager(request.headers.authorization); };
 
@@ -86,7 +92,7 @@ export async function createApp(options: { db: Database; rawDirectory: string; w
     const owner = await device(request.headers.authorization);
     const { nonce, source, delivery, capture, installation } = z.object({ nonce: z.uuid(), source: sourceSchema.optional(), delivery: deliveryHealthSchema.optional(), capture: captureHealthSchema.optional(), installation: installationObservationSchema.optional() }).strict()
       .refine(value => Boolean(value.source) === Boolean(value.delivery || value.capture), 'Source and report must be provided together').parse(request.body);
-    await db.query(`INSERT INTO device_health(device_id) VALUES($1) ON CONFLICT(device_id) DO UPDATE SET received_at=now()`, [owner.id]);
+    await db.query(`INSERT INTO device_health(device_id) VALUES($1) ON CONFLICT(device_id) DO UPDATE SET received_at=now(),live_valid=true`, [owner.id]);
     if (source && delivery) await db.query(`INSERT INTO device_delivery_health(device_id,source,report) VALUES($1,$2,$3)
       ON CONFLICT(device_id,source) DO UPDATE SET report=EXCLUDED.report,received_at=now()`, [owner.id, source, delivery]);
     if (source && capture) await saveCaptureHealth(db, owner.id, source, capture);
@@ -108,7 +114,7 @@ export async function createApp(options: { db: Database; rawDirectory: string; w
   app.get('/api/devices/status', { onRequest: readerGuard }, async request => {
     const { offset } = z.object({ offset: z.coerce.number().int().min(0).default(0) }).parse(request.query);
     const result = await db.query(`SELECT d.id,d.name,e.name AS employee,d.active AND e.active AS active,h.received_at AS "lastSeenAt",
-      h.received_at > now()-interval '90 seconds' AS connected
+      h.live_valid AND h.received_at > now()-interval '90 seconds' AS connected
       FROM devices d JOIN employees e ON e.id=d.employee_id LEFT JOIN device_health h ON h.device_id=d.id ORDER BY e.name,d.name,d.id LIMIT 51 OFFSET $1`, [offset]);
     const devices = result.rows.slice(0, 50);
     const reports = await db.query(`SELECT device_id AS "deviceId",source,report,received_at AS "receivedAt" FROM device_delivery_health WHERE device_id=ANY($1::uuid[]) ORDER BY source`, [devices.map(item => item.id)]);
@@ -310,7 +316,7 @@ export async function createApp(options: { db: Database; rawDirectory: string; w
     const file = await archive.exported((request.params as { id: string }).id, format);
     return reply.header('Content-Disposition', `attachment; filename="${file.filename}"`).type(file.contentType).send(file.bytes);
   });
-  if (options.publicOrigin) await registerMcp(app, db, archive, options.publicOrigin, analysis, reports, coverage, workStatistics, workViews);
+  if (options.publicOrigin) await registerMcp(app, db, archive, options.publicOrigin, analysis, reports, coverage, workStatistics, workViews,operations);
   if (options.webDirectory) {
     await app.register(fastifyStatic, { root: resolve(options.webDirectory), wildcard: false });
   }
