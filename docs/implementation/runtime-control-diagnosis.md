@@ -99,9 +99,14 @@ The supervisor retains its authenticated OS lease, instance, selected
 runtime and capture fences. During child creation it can answer status and
 accept stop. A stop queued before the child exists is applied after its
 normal handshake; the existing 10-second fallback kills only the actual
-ChildProcess created in that thread. Thread completion waits for owned
-resources before the supervisor releases its lease. Crash exit, selected
-payload restart and bounded backoff retain their previous behavior.
+ChildProcess created in that thread. Normal thread completion follows actual
+child exit. An unexpected thread fault reports `fault=launch-thread`; thread
+exit alone does not prove the native child's asynchronous drain has finished.
+Before restart or final stop, the supervisor authenticates the worker,
+requires its own supervisor instance, requests stop and waits for the actual
+worker endpoint to release. A different instance or ambiguous control result
+fails closed. Crash exit, selected payload restart and bounded backoff retain
+their previous behavior.
 
 The maintained regression uses a trusted private `NODE_OPTIONS --require`
 shim to wrap the actual `child_process.spawn` call for `background-worker`.
@@ -122,7 +127,7 @@ node --test dist/tests/control-spawn.test.js dist/tests/runtime-control.test.js 
 git diff --check
 ```
 
-All **12/12 pass**, 4.15 seconds. Fixture
+The initial **12/12 pass**, 4.15 seconds. Fixture
 `%TEMP%/skynet-control-spawn-9eULd3/control-spawn-evidence.json` records status
 **6.82 ms**, stop **1.93 ms**, both acknowledged during the 2200 ms synchronous
 spawn block. The control registration remains byte-identical; actual child
@@ -131,6 +136,22 @@ exit is zero and both role listeners release. Fixture
 17 followed by the actual selected CLI worker, two owned child exits and
 normal final exit zero. Existing timeout/500/503/non-HTTP fail-closed
 regressions and all five Task migration orchestration cases pass.
+
+Review identified the thread-fault drain interval as a separate boundary.
+A regression throws in the launch thread only after the real native worker
+is ready, then delays that worker's actual `Server.close` by 2500 ms while
+its authenticated lease remains live. Before reconciliation,
+`%TEMP%/skynet-control-spawn-DrNWY9` was **RED**: three child launches instead
+of two because restart raced the old native lease. After reconciliation,
+the focused suite is **14/14 pass**, 11.32 seconds. Fixture
+`%TEMP%/skynet-control-spawn-3EHayK/spawn-events.jsonl` records one replacement
+strictly after the old lease releases. Fixture
+`%TEMP%/skynet-control-spawn-pgqdYS/spawn-events.jsonl` verifies status/stop
+remain available during that drain, no replacement is launched, and the
+supervisor exits zero only after native lease release. The retained actual
+`a4ca34c` compiled `runtime.js` has IPC-disconnect abort at line 84 and
+finally releases its lease at lines 173–177; that is static compatibility
+evidence, not a new old-payload execution claim.
 
 Temporary diagnostic sources and compiled artifacts are retained only in
 `%TEMP%/skynet-v1-implementation/runtime-control-temporary-instrumentation`;

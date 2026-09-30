@@ -13,7 +13,7 @@ async function until<T>(read: () => Promise<T | null | false>, message: string, 
   throw new Error(message);
 }
 async function text(path: string) { return readFile(path, 'utf8').catch(error => { if (error.code === 'ENOENT') return ''; throw error; }); }
-async function fixture(mode: 'block' | 'crash') {
+async function fixture(mode: 'block' | 'crash' | 'thread-fault') {
   const state = await mkdtemp(join(tmpdir(), 'skynet-control-spawn-'));
   await initializeControl(state);
   const controlBefore = await readFile(join(state, 'runtime-control.json'));
@@ -25,10 +25,14 @@ async function fixture(mode: 'block' | 'crash') {
   const trace = join(state, 'spawn-events.jsonl'); const shim = join(state, 'spawn-shim.cjs');
   await writeFile(shim, `const cp=require('node:child_process'),fs=require('node:fs'),threads=require('node:worker_threads');
 const original=cp.spawn; let calls=0; const record=row=>fs.appendFileSync(${JSON.stringify(trace)},JSON.stringify({wall:Date.now(),threadId:threads.threadId,...row})+'\\n');
+${mode === 'thread-fault' ? `if(process.argv.includes('background-worker')){const call=fs.readFileSync(${JSON.stringify(trace)},'utf8').split('\\n').filter(row=>row.includes('spawn-enter')).length;
+if(call===1){const http=require('node:http'),close=http.Server.prototype.close;http.Server.prototype.close=function(callback){const server=this;record({event:'worker-lease-release-start',call});setTimeout(()=>close.call(server,error=>{record({event:'worker-lease-released',call});callback?.(error);}),2500);return this;};}}` : ''}
 cp.spawn=function(file,args,options){if(!Array.isArray(args)||!args.includes('background-worker'))return original.call(this,file,args,options);
 calls=fs.existsSync(${JSON.stringify(trace)})?fs.readFileSync(${JSON.stringify(trace)},'utf8').split('\\n').filter(row=>row.includes('spawn-enter')).length+1:1;record({event:'spawn-enter',call:calls});
-${mode === 'block' ? "Atomics.wait(new Int32Array(new SharedArrayBuffer(4)),0,0,2200);" : "if(calls===1)args=['--eval',\"process.stderr.write('synthetic worker crash');process.exit(17)\"]"}
-const child=original.call(this,file,args,options);record({event:'spawn-return',call:calls});child.once('exit',(code)=>record({event:'owned-child-exit',call:calls,code}));return child;};
+${mode === 'block' ? "Atomics.wait(new Int32Array(new SharedArrayBuffer(4)),0,0,2200);" : mode === 'crash' ? "if(calls===1)args=['--eval',\"process.stderr.write('synthetic worker crash');process.exit(17)\"]" : ''}
+const child=original.call(this,file,args,options);record({event:'spawn-return',call:calls});child.once('exit',(code)=>record({event:'owned-child-exit',call:calls,code}));
+${mode === 'thread-fault' ? "if(calls===1)child.on('message',message=>{if(message?.type==='ready')setTimeout(()=>{record({event:'thread-fault'});throw new Error('synthetic launch-thread fault');},20);});" : ''}
+return child;};
 require('node:module').syncBuiltinESMExports();`);
   const env: NodeJS.ProcessEnv = { ...Object.fromEntries(['SystemRoot', 'WINDIR', 'COMSPEC', 'PATHEXT', 'PATH'].map(key => [key, process.env[key]])),
     HOME: state, USERPROFILE: state, LOCALAPPDATA: join(state, 'local'), APPDATA: join(state, 'roaming'),
@@ -89,5 +93,46 @@ test('a worker crash restarts the actual selected payload and normal stop reaps 
     assert.equal(rows.at(-1).code, 0); assert.equal(await askRuntime(f.state, 'supervisor'), null); assert.equal(await askRuntime(f.state, 'worker'), null);
     console.log(JSON.stringify({ fixture: f.state, crashedExitCode: 17, restartedSelectedPayload: true,
       actualOwnedChildExits: 2, normalExitCode: rows.at(-1).code }));
+  } finally { await cleanup(f); }
+});
+
+test('launch-thread failure waits for the authenticated native worker lease before restart', { timeout: 20_000 }, async () => {
+  const f = await fixture('thread-fault');
+  console.log(JSON.stringify({ fixture: f.state, nativeLeaseReleaseDelayMs: 2500 }));
+  try {
+    await until(async () => (await text(f.trace)).includes('thread-fault'), 'Launch thread did not fail after native ready');
+    await until(async () => (await text(f.trace)).includes('worker-lease-released'), 'Disconnected native worker did not release its actual lease');
+    const status = await until(async () => {
+      const value = await askRuntime(f.state, 'supervisor'); const worker = await askRuntime(f.state, 'worker');
+      return value?.worker && worker?.state === 'running' ? value : null;
+    }, 'Native worker did not recover after thread failure');
+    const rows = (await text(f.trace)).trim().split('\n').map(row => JSON.parse(row));
+    const released = rows.find(row => row.event === 'worker-lease-released');
+    const launches = rows.filter(row => row.event === 'spawn-enter');
+    assert.equal(launches.length, 2, 'one fault should cause exactly one replacement, not EADDRINUSE churn');
+    assert.ok(launches[1].wall >= released.wall, 'do not launch a replacement while the old native worker holds its lease');
+    assert.equal(status.restarts, 1);
+    assert.equal(status.lastExit.fault, 'launch-thread');
+    await askRuntime(f.state, 'supervisor', 'stop'); assert.equal(await f.exited, 0, f.diagnostic());
+    assert.equal(await askRuntime(f.state, 'worker'), null);
+  } finally { await cleanup(f); }
+});
+
+test('stop during launch-thread failure retains its controller until the native lease releases', { timeout: 20_000 }, async () => {
+  const f = await fixture('thread-fault');
+  try {
+    await until(async () => (await text(f.trace)).includes('worker-lease-release-start'), 'Disconnected native worker did not begin drain');
+    const controller = await until(async () => { const value = await askRuntime(f.state, 'supervisor');
+      return value?.lastExit?.fault === 'launch-thread' ? value : null; }, 'Controller did not publish its thread fault');
+    const native = await askRuntime(f.state, 'worker'); assert.equal(native.state, 'stopping');
+    assert.equal(native.supervisorInstance, controller.instance);
+    await askRuntime(f.state, 'supervisor', 'stop');
+    assert.equal(f.child.exitCode, null, 'stop ACK cannot imply drain/lease completion');
+    assert.equal(await f.exited, 0, f.diagnostic());
+    assert.equal(await askRuntime(f.state, 'worker'), null); assert.equal(await askRuntime(f.state, 'supervisor'), null);
+    const rows = (await text(f.trace)).trim().split('\n').map(row => JSON.parse(row));
+    assert.ok(rows.some(row => row.event === 'worker-lease-released'));
+    assert.equal(rows.filter(row => row.event === 'spawn-enter').length, 1, 'stop must not replace the draining native worker');
+    console.log(JSON.stringify({ fixture: f.state, threadFaultStopWaitedForNativeLease: true, replacementLaunches: 0 }));
   } finally { await cleanup(f); }
 });

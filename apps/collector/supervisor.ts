@@ -8,7 +8,7 @@ import { launchCurrentSession, markAutostartDelayed, startAutostart } from './au
 import { atomicJson } from '../../packages/filesystem.js';
 import { payloadRoot } from './release.js';
 import { assertCaptureFences } from './capture-fence.js';
-import { startWorkerProcess, type OwnedWorkerProcess } from './worker-process.js';
+import { startWorkerProcess, type OwnedWorkerProcess, type WorkerExit, type WorkerReady } from './worker-process.js';
 
 export async function runGuardian(state: string) {
   const installation = installationSchema.parse(await jsonFile(join(state, 'installation.json')));
@@ -35,7 +35,8 @@ export async function runSupervisor(state: string) {
   if (resolve(payloadRoot) !== resolve(installation.maintenanceRuntime ?? installation.runtime)) throw new Error('This supervisor is no longer the registered maintenance release; use the stable launcher');
   await assertCaptureRuntime(state, installation);
   const instance = randomUUID(); const startedAt = new Date().toISOString();
-  let child: OwnedWorkerProcess | undefined; let worker: any = null; let restarts = 0; let failures = 0; let lastExit: unknown = null;
+  let child: OwnedWorkerProcess | undefined; let worker: (WorkerReady & { startedAt: string }) | null = null;
+  let restarts = 0; let failures = 0; let lastExit: WorkerExit | null = null;
   const stop = new AbortController();
   const snapshot = () => ({ pid: process.pid, instance, runtime: installation.runtime, toolingRuntime: payloadRoot, startedAt, checkedAt: new Date().toISOString(), worker, restarts, lastExit, state: stop.signal.aborted ? 'stopping' : 'running' });
   let lease;
@@ -47,6 +48,7 @@ export async function runSupervisor(state: string) {
   process.once('SIGINT', () => stop.abort()); process.once('SIGTERM', () => stop.abort());
   const finishChild = async () => {
     await child?.stop();
+    if ((await child?.result)?.fault === 'launch-thread') await releaseFaultedWorker(state, instance);
   };
   try {
     // A previous supervisor may have died while its worker finishes a durable
@@ -63,15 +65,32 @@ export async function runSupervisor(state: string) {
         cli: join(installation.runtime, 'dist', 'apps', 'collector', 'cli.js'), state, supervisorInstance: instance }, ready => {
         worker = { ...ready, startedAt: new Date().toISOString() };
       });
-      const abort = () => { void finishChild(); }; stop.signal.addEventListener('abort', abort, { once: true });
-      lastExit = await child.result; worker = null; stop.signal.removeEventListener('abort', abort);
+      const abort = () => { void child?.stop(); }; stop.signal.addEventListener('abort', abort, { once: true });
+      lastExit = await child.result;
+      if (lastExit.fault === 'launch-thread') {
+        await atomicJson(join(state, 'supervisor.json'), snapshot());
+        await finishChild();
+      }
+      worker = null; stop.signal.removeEventListener('abort', abort);
       await atomicJson(join(state, 'supervisor.json'), snapshot());
       if (!stop.signal.aborted) {
         restarts++; failures = Date.now() - launchedAt > 30_000 ? 0 : failures + 1;
         await setTimeout(Math.min(30_000, 500 * 2 ** Math.min(failures, 6)), undefined, { signal: stop.signal }).catch(() => undefined);
       }
     }
-  } finally { await finishChild(); await releaseRuntime(lease); }
+  } finally { try { await finishChild(); } finally { await releaseRuntime(lease); } }
+}
+async function releaseFaultedWorker(state: string, instance: string) {
+  const check = async () => {
+    const current = await askRuntime(state, 'worker');
+    if (current && current.supervisorInstance !== instance) throw new Error('Authenticated worker belongs to a different supervisor; its lease and state retained');
+    return current;
+  };
+  if (await check()) await askRuntime(state, 'worker', 'stop');
+  // Thread failure can disconnect a real worker before its async drain has
+  // released the OS lease. Never substitute thread exit or a recorded PID for
+  // authenticated endpoint absence, and never start a competing replacement.
+  while (await check()) await setTimeout(200);
 }
 export async function ensureRunning(state: string, node: string, launcher: string) {
   const installation = installationSchema.parse(await jsonFile(join(state, 'installation.json')));
