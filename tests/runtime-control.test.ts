@@ -4,7 +4,8 @@ import { mkdtemp, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { createServer } from 'node:http';
-import { askRuntime, initializeControl, ownRuntime, releaseRuntime } from '../apps/collector/runtime-control.js';
+import { createServer as createTcpServer } from 'node:net';
+import { askRuntime, initializeControl, ownRuntime, releaseRuntime, repairControl } from '../apps/collector/runtime-control.js';
 
 test('an owned endpoint drains authenticated stop and in-flight status before releasing its lease', async () => {
   let state = '';
@@ -34,4 +35,37 @@ test('an owned endpoint drains authenticated stop and in-flight status before re
     await assert.rejects(askRuntime(state, 'worker'), { code: 'ECONNRESET' });
     assert.equal(attempts, 4, 'a persistently resetting endpoint is unavailable, never interpreted as stopped');
   } finally { await new Promise<void>(resolve => broken.close(() => resolve())); }
+});
+test('repair never abandons an ambiguous listener or replaces registration after timeout', async () => {
+  const state = await mkdtemp(join(tmpdir(), 'skynet-control-ambiguous-')); await initializeControl(state);
+  const before = await readFile(join(state, 'runtime-control.json'));
+  const config = JSON.parse(before.toString());
+  const unresponsive = createServer(() => {});
+  await new Promise<void>(resolve => unresponsive.listen(config.supervisorPort, '127.0.0.1', resolve));
+  try {
+    await assert.rejects(repairControl(state), /unresponsive/);
+    assert.deepEqual(await readFile(join(state, 'runtime-control.json')), before);
+    assert.ok(unresponsive.listening);
+  } finally { unresponsive.closeAllConnections(); await new Promise<void>(resolve => unresponsive.close(() => resolve())); }
+});
+for (const code of [500, 503]) test(`repair retains registration for an ambiguous ${code} endpoint`, async () => {
+  const state = await mkdtemp(join(tmpdir(), 'skynet-control-http-ambiguous-')); await initializeControl(state);
+  const before = await readFile(join(state, 'runtime-control.json')); const config = JSON.parse(before.toString()); let stops = 0;
+  const unknown = createServer((req, res) => { if (req.url === '/stop') stops++; res.writeHead(code); res.end(); });
+  await new Promise<void>(resolve => unknown.listen(config.supervisorPort, '127.0.0.1', resolve));
+  try {
+    await assert.rejects(repairControl(state), { code: 'SKYNET_ENDPOINT_AMBIGUOUS' });
+    assert.deepEqual(await readFile(join(state, 'runtime-control.json')), before); assert.equal(stops, 0); assert.ok(unknown.listening);
+  } finally { unknown.closeAllConnections(); await new Promise<void>(resolve => unknown.close(() => resolve())); }
+});
+test('a foreign non-HTTP listener is retained and its raw response never appears in control errors', async () => {
+  const state = await mkdtemp(join(tmpdir(), 'skynet-control-protocol-')); await initializeControl(state);
+  const before = await readFile(join(state, 'runtime-control.json')); const config = JSON.parse(before.toString());
+  const sockets = new Set<import('node:net').Socket>();
+  const unknown = createTcpServer(socket => { sockets.add(socket); socket.on('close', () => sockets.delete(socket)); socket.resume(); socket.end('ACK\n'); });
+  await new Promise<void>(resolve => unknown.listen(config.supervisorPort, '127.0.0.1', resolve));
+  try {
+    await assert.rejects(repairControl(state), (error: any) => error.code === 'SKYNET_ENDPOINT_AMBIGUOUS' && !error.rawPacket && !error.message.includes('ACK'));
+    assert.deepEqual(await readFile(join(state, 'runtime-control.json')), before); assert.ok(unknown.listening);
+  } finally { for (const socket of sockets) socket.destroy(); await new Promise<void>(resolve => unknown.close(() => resolve())); }
 });

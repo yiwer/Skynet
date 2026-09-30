@@ -1,22 +1,60 @@
 import { createServer, request, type Server } from 'node:http';
-import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
-import { realpath, writeFile } from 'node:fs/promises';
+import { randomBytes, randomInt, timingSafeEqual } from 'node:crypto';
 import { join } from 'node:path';
 import { optionalJson, jsonFile } from './install-state.js';
 import { setTimeout as delay } from 'node:timers/promises';
+import { atomicJson } from '../../packages/filesystem.js';
 
 type Role = 'supervisor' | 'worker';
 type Control = { token: string; supervisorPort: number; workerPort: number };
 export async function initializeControl(state: string) {
   const path = join(state, 'runtime-control.json');
   if (await optionalJson(path)) return;
-  const canonical = await realpath(state);
-  const hash = createHash('sha256').update(process.platform === 'win32' ? canonical.toLowerCase() : canonical).digest();
-  // The OS listener, not a PID or heartbeat file, owns the single-writer lease.
-  // A rare port collision fails visibly; never replace or kill the other listener.
-  const value: Control = { token: randomBytes(32).toString('hex'),
-    supervisorPort: 20000 + hash.readUInt16BE(0) % 20000, workerPort: 40000 + hash.readUInt16BE(2) % 20000 };
-  await writeFile(path, JSON.stringify(value), { flag: 'wx', mode: 0o600 });
+  await allocateControl(state);
+}
+async function allocateControl(state: string) {
+  // Bind-validate candidates with the OS, retaining the historical role ranges
+  // so an actual older payload can read the registration after rollback.
+  // Windows excluded/occupied candidates are skipped, never altered or killed.
+  const leases: Server[] = [];
+  try {
+    const ports: number[] = [];
+    for (let index = 0; index < 2; index++) {
+      const lower = index === 0 ? 20000 : 40000;
+      // Keep the worker below the OS dynamic-client range as well as within the
+      // old protocol's accepted range; still bind-validate every candidate.
+      const width = index === 0 ? 20_000 : 9_152; const offset = randomInt(width);
+      let bound = false;
+      for (let attempt = 0; attempt < 256; attempt++) {
+        const server = createServer(); const port = lower + (offset + attempt * 97) % width;
+        try {
+          await new Promise<void>((resolve, reject) => { server.once('error', reject); server.listen({ host: '127.0.0.1', port, exclusive: true }, resolve); });
+          leases.push(server); ports.push(port); bound = true; break;
+        } catch (error) { if (!['EACCES', 'EADDRINUSE'].includes((error as NodeJS.ErrnoException).code ?? '')) throw error; }
+      }
+      if (!bound) throw new Error('No compatible local control endpoint was available; existing registration and evidence retained');
+    }
+    await atomicJson(join(state, 'runtime-control.json'), { token: randomBytes(32).toString('hex'), supervisorPort: ports[0], workerPort: ports[1] });
+  } finally { for (const server of leases) if (server.listening) await releaseRuntime(server); }
+}
+export async function repairControl(state: string) {
+  if (!await optionalJson(join(state, 'runtime-control.json'))) { await initializeControl(state); return; }
+  const probe = async (role: Role, action: 'status' | 'stop' = 'status') => {
+    try { return await askRuntime(state, role, action); }
+    catch (error) { if ((error as NodeJS.ErrnoException).code === 'SKYNET_ENDPOINT_OCCUPIED') return null; throw error; }
+  };
+  // Never abandon a known writer or infer ownership from a PID. Authentication
+  // rejection proves this listener cannot be our registered endpoint. Timeouts,
+  // resets and malformed responses are ambiguous and stop repair instead.
+  for (const role of ['supervisor', 'worker'] as const) if (await probe(role)) await probe(role, 'stop');
+  for (let attempt = 0; attempt < 200; attempt++) {
+    if (!await probe('supervisor') && !await probe('worker')) {
+      await allocateControl(state);
+      return;
+    }
+    await delay(100);
+  }
+  throw new Error('Owned runtime is still stopping; repair retained the existing endpoints and evidence');
 }
 async function control(state: string): Promise<Control> {
   const value = await jsonFile(join(state, 'runtime-control.json'));
@@ -47,12 +85,19 @@ async function askOnce(state: string, role: Role, action: 'status' | 'stop'): Pr
       response.on('data', part => { body += part; if (body.length > 16_384) response.destroy(new Error('Oversized runtime response')); });
       response.on('error', reject);
       response.on('end', () => {
-        if (response.statusCode !== 200) { reject(new Error('Local control endpoint is occupied or rejected authentication; no process was changed')); return; }
-        try { const result = JSON.parse(body); if (result.role !== role) throw new Error('Runtime role mismatch'); resolve(result); } catch (error) { reject(error); }
+        if (response.statusCode !== 200) { reject(Object.assign(new Error('Local control endpoint is occupied or rejected authentication; no process was changed'),
+          { code: [401, 403].includes(response.statusCode ?? 0) ? 'SKYNET_ENDPOINT_OCCUPIED' : 'SKYNET_ENDPOINT_AMBIGUOUS' })); return; }
+        try { const result = JSON.parse(body); if (result.role !== role) throw new Error('Runtime role mismatch'); resolve(result); }
+        catch { reject(Object.assign(new Error('Local runtime returned an invalid control response; registration and processes retained'), { code: 'SKYNET_ENDPOINT_AMBIGUOUS' })); }
       });
     });
     req.on('timeout', () => req.destroy(new Error('Local runtime is unresponsive; no replacement writer was started')));
-    req.on('error', error => (error as NodeJS.ErrnoException).code === 'ECONNREFUSED' ? resolve(null) : reject(error));
+    req.on('error', error => {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code === 'ECONNREFUSED') resolve(null);
+      else if (code?.startsWith('HPE_')) reject(Object.assign(new Error('Local runtime returned an invalid control protocol; registration and processes retained'), { code: 'SKYNET_ENDPOINT_AMBIGUOUS' }));
+      else reject(error);
+    });
     req.end();
   });
 }

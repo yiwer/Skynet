@@ -2,9 +2,9 @@ import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { command } from './support.js';
 import { mkdir, readFile } from 'node:fs/promises';
 
-export async function installAgent(directory: string, origin: string, env: NodeJS.ProcessEnv, key: string) {
+export async function installAgent(directory: string, origin: string, env: NodeJS.ProcessEnv, key: string, options?: { packCli?: string }) {
   const started = Date.now();
-  const packed = JSON.parse(await command(process.execPath, ['dist/apps/collector/cli.js', 'pack-agent', '--output', join(directory, 'release'),
+  const packed = JSON.parse(await command(process.execPath, [options?.packCli ?? 'dist/apps/collector/cli.js', 'pack-agent', '--output', join(directory, 'release'),
     '--origin', origin, '--deployment', 'isolated-acceptance'], process.env));
   const prefix = join(directory, 'npm prefix with spaces');
   await mkdir(prefix);
@@ -23,10 +23,30 @@ export async function installAgent(directory: string, origin: string, env: NodeJ
     const candidate = resolve(process.platform === 'win32' ? env.LOCALAPPDATA! : process.platform === 'darwin'
       ? join(env.HOME!, 'Library', 'Application Support') : env.XDG_STATE_HOME ?? join(env.HOME!, '.local', 'state'), 'Skynet');
     const within = relative(resolve(directory), candidate);
-    if (within && within !== '..' && !within.startsWith(`..${sep}`) && !isAbsolute(within)) await stopInstalled(candidate);
+    if (within && within !== '..' && !within.startsWith(`..${sep}`) && !isAbsolute(within)) {
+      try { await stopInstalled(candidate); }
+      catch { console.error('Isolated installer cleanup unavailable; original setup failure retained.'); }
+    }
     throw error;
   }
-  const status = JSON.parse(stdout);
+  let status = JSON.parse(stdout);
+  if (process.env.SKYNET_TEST_MAINTENANCE) {
+    try {
+      const before = status.deviceId;
+      status = JSON.parse(await command(process.execPath, [cli, 'repair'], { ...env, SKYNET_KEY: undefined }));
+      const upgraded = JSON.parse(await command(process.execPath, ['dist/apps/collector/cli.js', 'pack-agent', '--output', join(directory, 'native upgrade release'),
+        '--origin', origin, '--deployment', 'isolated-acceptance', '--version', '0.2.0'], process.env));
+      const nextCli = join(dirname(upgraded.package), 'dist', 'apps', 'collector', 'cli.js');
+      status = JSON.parse(await command(process.execPath, [nextCli, 'upgrade'], { ...env, SKYNET_KEY: undefined }));
+      if (status.deviceId !== before || status.runtimeVersion !== '0.2.0' || status.background !== 'running') throw new Error('Native setup repair/upgrade did not retain a running shared identity');
+      await (await import('node:fs/promises')).writeFile(join(directory, 'native-maintenance-evidence.json'), JSON.stringify({ repair: true, upgrade: true,
+        deviceId: status.deviceId, version: status.runtimeVersion, phase: status.upgrade.phase }, null, 2));
+    } catch (error) {
+      try { await stopInstalled(status.stateDirectory); }
+      catch { console.error('Isolated maintenance cleanup unavailable; original failure retained.'); }
+      throw error;
+    }
+  }
   return { cli, prefix, status, setupMs: Date.now() - start, packInstallAndSetupMs: Date.now() - started, output: installed + stdout,
     run };
 }

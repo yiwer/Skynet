@@ -4,6 +4,7 @@ import { hostname } from 'node:os';
 import { join } from 'node:path';
 import { realpath } from 'node:fs/promises';
 import { z } from 'zod';
+import { setTimeout } from 'node:timers/promises';
 import { atomicJson } from '../../packages/filesystem.js';
 import { identitySchema, optionalJson, serverOrigin } from './install-state.js';
 
@@ -25,6 +26,16 @@ export async function setupLock(state: string, purpose = 'setup') {
   } catch { throw new Error(`Another ${purpose} or local service holds this installation lock; retry after it exits`); }
   server.unref();
   return () => new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
+}
+export async function waitForSetupLock(state: string) {
+  const deadline = Date.now() + 20_000;
+  for (;;) {
+    try { return await setupLock(state); }
+    catch (error) {
+      if (!(error instanceof Error) || !error.message.startsWith('Another setup or local service') || Date.now() >= deadline) throw error;
+      await setTimeout(100);
+    }
+  }
 }
 
 export async function enroll(state: string, origin: string, personalKey: string) {
