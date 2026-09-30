@@ -3,6 +3,7 @@ import { analysisLabels, assessmentLabels } from '../../packages/contracts/analy
 import { beijingDate, previousDate, type DailyReport, type DailyItem } from '../../packages/contracts/reports.js';
 import {ReportCorrections} from './ReportCorrections.js';
 import {FrozenStatistics} from './FrozenStatistics.js';
+import {useFixedRevisionReader} from './useFixedRevisionReader.js';
 
 export function DailyReports({ request, currentEmployeeId, onEvidence }: {
   request: (path: string, signal?: AbortSignal, method?: 'POST',body?:unknown) => Promise<Response>;
@@ -11,7 +12,6 @@ export function DailyReports({ request, currentEmployeeId, onEvidence }: {
   const selection = () => new URLSearchParams(location.hash.startsWith('#daily?') ? location.hash.slice(7) : '');
   const [employeeId, setEmployeeId] = useState(selection().get('employeeId') ?? currentEmployeeId);
   const [date, setDate] = useState(selection().get('date') ?? previousDate(beijingDate()));
-  const [report, setReport] = useState<DailyReport | null>(null);
   const [periods, setPeriods] = useState<{ employeeId: string; employee: string; date: string; state: string; revision: number }[]>([]);
   const [periodOffset, setPeriodOffset] = useState<number | null>(0);
   const [employees, setEmployees] = useState<{ id: string; name: string }[]>([]);
@@ -22,14 +22,11 @@ export function DailyReports({ request, currentEmployeeId, onEvidence }: {
       setEmployeeId(query.get('employeeId') ?? currentEmployeeId); setDate(query.get('date') ?? previousDate(beijingDate())); setRevision(query.get('revision') ?? ''); };
     window.addEventListener('hashchange', change); return () => window.removeEventListener('hashchange', change);
   }, [currentEmployeeId]);
-  const [busy, setBusy] = useState(false); const [error, setError] = useState(''); const [refresh, setRefresh] = useState(0);
+  const [listError, setError] = useState(''); const [refresh, setRefresh] = useState(0);
   const path = `/api/daily-reports/${employeeId}/${date}`;
-  useEffect(() => {
-    const abort = new AbortController(); setBusy(true); setError(''); setReport(null);
-    request(`${path}${revision ? `?revision=${revision}` : ''}`, abort.signal).then(response => response.json()).then(value => { if (!abort.signal.aborted) setReport(value); })
-      .catch(failure => { if (!abort.signal.aborted) setError(failure.message); }).finally(() => { if (!abort.signal.aborted) setBusy(false); });
-    return () => abort.abort();
-  }, [path, refresh, revision]);
+  const reader=useFixedRevisionReader<DailyReport>({identity:`${path}/${revision}`,load:async signal=>(await request(`${path}${revision ? `?revision=${revision}` : ''}`,signal)).json(),
+    poll:value=>!revision&&(!!value.refreshPending||['queued','waiting-analysis'].includes(value.state))});
+  const report=reader.data,busy=reader.loading,error=reader.error||listError;
   useEffect(() => {
     const abort = new AbortController();
     request('/api/daily-reports', abort.signal).then(response => response.json()).then(value => {
@@ -40,21 +37,13 @@ export function DailyReports({ request, currentEmployeeId, onEvidence }: {
     }).catch(failure => { if (!abort.signal.aborted) setError(failure.message); });
     return () => abort.abort();
   }, [refresh]);
-  useEffect(() => {
-    if (revision || !report || !report.refreshPending && !['queued', 'waiting-analysis'].includes(report.state)) return;
-    const timer = setTimeout(() => setRefresh(value => value + 1), 5000); return () => clearTimeout(timer);
-  }, [report]);
   async function generate() {
-    setBusy(true); setError('');
-      try { setRevision(''); setReport(await (await request(path, undefined, 'POST')).json()); setRefresh(value => value + 1); }
-    catch (failure) { setError((failure as Error).message); } finally { setBusy(false); }
+    if(await reader.run(async signal=>(await request(path,signal,'POST')).json())){setRevision('');reader.retry();setRefresh(value=>value+1);}
   }
   async function more() {
-    if (!report || report.nextOffset === null) return; setBusy(true);
-    try {
-      const next: DailyReport = await (await request(`${path}?offset=${report.nextOffset}&revision=${report.revision}`)).json();
-      setReport({ ...next, items: [...report.items, ...next.items] });
-    } catch (failure) { setError((failure as Error).message); } finally { setBusy(false); }
+    if (!report || report.nextOffset === null) return;
+    await reader.run(async signal=>{const next:DailyReport=await (await request(`${path}?offset=${report.nextOffset}&revision=${report.revision}`,signal)).json();
+      if(next.version!==report.version||next.revision!==report.revision)throw new Error('固定日报版本不匹配，请重试本版');return {...next,items:[...report.items,...next.items]};});
   }
   const states: Record<DailyReport['state'], string> = { 'not-scheduled': '尚未入队', queued: '已入队', 'waiting-analysis': '等待分析',
     ready: '本版已生成', partial: '材料或分析不完整', unavailable: '尚无法生成主题' };
@@ -67,7 +56,7 @@ export function DailyReports({ request, currentEmployeeId, onEvidence }: {
     {employeeOffset !== null && <button onClick={async () => { try { const value = await (await request(`/api/daily-report-employees?offset=${employeeOffset}`)).json(); setEmployees(previous => [...previous, ...value.employees]); setEmployeeOffset(value.nextOffset); } catch (failure) { setError((failure as Error).message); } }}>更多员工</button>}
     <label>来源日期<input type="date" value={date} max={beijingDate()} onChange={event => { setDate(event.target.value); setRevision(''); }} /></label>
     <label>历史版本（留空读取最新）<input type="number" min="1" value={revision} onChange={event => setRevision(event.target.value)} /></label>
-    <button disabled={busy} onClick={() => setRefresh(value => value + 1)}>刷新日报</button>
+    <button disabled={busy} onClick={() => {reader.retry();setRefresh(value => value + 1);}}>刷新日报</button>
     <button disabled={busy} onClick={generate}>请求本日生成</button>
     <details><summary>已入队日报</summary>{periods.map(period => <button key={`${period.employeeId}/${period.date}`} onClick={() => { setEmployeeId(period.employeeId); setDate(period.date); }}>{period.employee} · {period.date} · v{period.revision}</button>)}
       {periodOffset !== null && <button onClick={async () => { try { const value = await (await request(`/api/daily-reports?offset=${periodOffset}`)).json(); setPeriods(previous => [...previous, ...value.reports]); setPeriodOffset(value.nextOffset); } catch (failure) { setError((failure as Error).message); } }}>更多日报</button>}</details>
@@ -82,7 +71,7 @@ export function DailyReports({ request, currentEmployeeId, onEvidence }: {
         <p>人工工时未知；文件为来源路径观测，Token 为来源记录量，区间是已记录活动点。</p><p className="muted">{report.statistics.definition}</p></>}
       {report.coverage?.workStatistics?<FrozenStatistics key={report.coverage.workStatistics.version} reference={report.coverage.workStatistics} request={request} onEvidence={onEvidence}/>:report.version&&<p>旧版未绑定固定统计；保留该版本的未知值。</p>}
       {report.coverage?.messages.map(message => <p className="notice" key={message}>{message}</p>)}
-      <ReportCorrections report={report} fixed={!!revision} request={request} onChanged={value=>{setReport(value);setRefresh(current=>current+1);}} />
+      <ReportCorrections report={report} fixed={!!revision} request={request} onChanged={value=>{reader.replace(value);setRefresh(current=>current+1);}} />
       {[...groups].map(([key, items]) => <section key={key} aria-label={`${items[0]!.project} · ${items[0]!.theme}`}><h3>{items[0]!.project || '未归类项目'} · {items[0]!.theme}</h3>
         {items.map((item, index) => <div key={`${item.analysisId}/${index}`}><h4>{analysisLabels[item.category]} · {assessmentLabels[item.assessment]}</h4><p>{item.text}</p>
           {item.projectCorrectionId&&<p>人工显示项目归类；来源项目：{item.originalProject||'未归类项目'}。原句与原员工、日期不变。</p>}

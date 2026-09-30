@@ -3,6 +3,7 @@ import { analysisLabels, assessmentLabels } from '../../packages/contracts/analy
 import { beijingDate } from '../../packages/contracts/reports.js';
 import { addDays, dueWeek, monday, type WorkView, type WorkViewItem } from '../../packages/contracts/work-views.js';
 import {FrozenStatistics} from './FrozenStatistics.js';
+import {useFixedRevisionReader} from './useFixedRevisionReader.js';
 
 export function WorkViews({ request, currentEmployeeId, onEvidence }: {
   request: (path: string, signal?: AbortSignal, method?: 'POST') => Promise<Response>; currentEmployeeId: string; onEvidence: () => void;
@@ -16,8 +17,11 @@ export function WorkViews({ request, currentEmployeeId, onEvidence }: {
   const [revision, setRevision] = useState(query().get('revision') ?? '');
   const [employees, setEmployees] = useState<{ id: string; name: string }[]>([]); const [employeeOffset, setEmployeeOffset] = useState<number | null>(null);
   const [projects, setProjects] = useState<{ project: string; label: string }[]>([]); const [projectOffset, setProjectOffset] = useState<number | null>(null);
-  const [view, setView] = useState<WorkView | null>(null); const [busy, setBusy] = useState(false); const [error, setError] = useState(''); const [refresh, setRefresh] = useState(0);
+  const [listError, setError] = useState('');
   const params = new URLSearchParams({ kind, subject: kind === 'weekly' ? employeeId : project, from, to }); const path = `/api/work-view?${params}`;
+  const reader=useFixedRevisionReader<WorkView>({identity:`${path}/${revision}`,load:async signal=>(await request(`${path}${revision ? `&revision=${revision}` : ''}`,signal)).json(),
+    poll:value=>!revision&&(!!value.refreshPending||['queued','waiting-analysis'].includes(value.state))});
+  const view=reader.data,busy=reader.loading,error=reader.error||listError;
   useEffect(() => {
     const change = () => { if (!location.hash.startsWith('#work?')) return; const value = query(); const next = value.get('kind') === 'project' ? 'project' : 'weekly';
       setKind(next); if (next === 'weekly') setEmployeeId(value.get('subject') ?? currentEmployeeId); else setProject(value.get('subject') ?? '');
@@ -30,19 +34,10 @@ export function WorkViews({ request, currentEmployeeId, onEvidence }: {
     request('/api/work-projects', abort.signal).then(response => response.json()).then(value => { if (!abort.signal.aborted) { setProjects(value.projects); setProjectOffset(value.nextOffset); } }).catch(failure => { if (!abort.signal.aborted) setError(failure.message); });
     return () => abort.abort();
   }, []);
-  useEffect(() => {
-    const abort = new AbortController(); setBusy(true); setError(''); setView(null);
-    request(`${path}${revision ? `&revision=${revision}` : ''}`, abort.signal).then(response => response.json()).then(value => { if (!abort.signal.aborted) setView(value); })
-      .catch(failure => { if (!abort.signal.aborted) setError(failure.message); }).finally(() => { if (!abort.signal.aborted) setBusy(false); });
-    return () => abort.abort();
-  }, [path, revision, refresh]);
-  useEffect(() => { if (revision || !view || !view.refreshPending && !['queued', 'waiting-analysis'].includes(view.state)) return;
-    const timer = setTimeout(() => setRefresh(value => value + 1), 5000); return () => clearTimeout(timer); }, [view]);
-  async function generate() { setBusy(true); setError(''); try { setRevision(''); setView(await (await request(path, undefined, 'POST')).json()); }
-    catch (failure) { setError((failure as Error).message); } finally { setBusy(false); } }
-  async function more() { if (!view || view.nextOffset === null) return; setBusy(true); try {
-    const next: WorkView = await (await request(`${path}&revision=${view.revision}&offset=${view.nextOffset}`)).json(); setView({ ...next, items: [...view.items, ...next.items] });
-  } catch (failure) { setError((failure as Error).message); } finally { setBusy(false); } }
+  async function generate(){if(await reader.run(async signal=>(await request(path,signal,'POST')).json())){setRevision('');reader.retry();}}
+  async function more(){if(!view||view.nextOffset===null)return;
+    await reader.run(async signal=>{const next:WorkView=await (await request(`${path}&revision=${view.revision}&offset=${view.nextOffset}`,signal)).json();
+      if(next.version!==view.version||next.revision!==view.revision)throw new Error('固定工作视图版本不匹配，请重试本版');return {...next,items:[...view.items,...next.items]};});}
   const groups = new Map<string, WorkViewItem[]>();
   for (const item of view?.items ?? []) {
     const key = JSON.stringify([item.project, item.theme, ...(item.continuation === 'unassigned' ? [item.employeeId, item.sourceDate, item.analysisId, item.text] : [])]);
@@ -59,7 +54,7 @@ export function WorkViews({ request, currentEmployeeId, onEvidence }: {
     <label>{kind === 'weekly' ? '周起始日期（周一）' : '起始来源日期'}<input type="date" value={from} max={beijingDate()} onChange={event => { if (!event.target.value) return; const date = kind === 'weekly' ? monday(event.target.value) : event.target.value; setFrom(date); if (kind === 'weekly') setTo(addDays(date, 6)); setRevision(''); }} /></label>
     <label>结束来源日期<input type="date" value={to} disabled={kind === 'weekly'} onChange={event => { setTo(event.target.value); setRevision(''); }} /></label>
     <label>历史版本（留空读取最新）<input type="number" min="1" value={revision} onChange={event => setRevision(event.target.value)} /></label>
-    <button disabled={busy} onClick={() => setRefresh(value => value + 1)}>刷新视图</button><button disabled={busy} onClick={generate}>请求区间生成</button>
+    <button disabled={busy} onClick={reader.retry}>刷新视图</button><button disabled={busy} onClick={generate}>请求区间生成</button>
     {busy && <p role="status">正在读取…</p>}{error && <p role="alert">{error}</p>}
     {view && <><h2>{view.subjectLabel} · {view.from} 至 {view.to}</h2><p role="status">{states[view.state]} · 版本 {view.revision}</p>
       {view.refreshPending && <p>刷新已入队，当前显示已保存版本。</p>}{view.coverage?.fixture && <p className="notice">合成演示，非正式验收；没有调用真实千问。</p>}
