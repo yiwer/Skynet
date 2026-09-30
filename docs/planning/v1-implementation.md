@@ -85,6 +85,8 @@ AC-01…AC-22 的已有证据和缺口集中列于 [V1 验收证据台账](../im
 
 ## 周/项目与后资格材料组合集成（2026-09-30）
 
+集成节点 `0dc863a` 的 [Linux CI](https://github.com/yiwer/Skynet/actions/runs/36691871149/job/109810712884) 已通过类型检查、构建和 **49/49（126.43秒，0 fail / 0 cancelled）**，包含材料资格与周/项目公开回归。
+
 clean `d89c5c6`（#29 + 材料资格 `1c41d21`）无冲突合入 `bc00a97`，运行时线程/静默编排及诊断文档与合并前一致。原始 eventId、owner、project、sourceDate、raw 和旧报告保持不变；可信原设备正常来源证明追加资格修订，当前有效分类、缓存、分析输入代次及日报/周/项目引用同步变化。后台旧数据核查每批2快照、每页1000事件，原件允许范围仍64MiB；实测17,826,999 bytes 首尾事件与重启幂等，不把允许上限写成已测样本。分析8MiB输入边界独立保留。
 
 主线自身 `npm run typecheck`、`npm run build`、`git diff --check` 与 `node --import tsx --test tests/material-qualification.test.ts tests/work-views.test.ts tests/daily-reports.test.ts tests/mcp.test.ts` **8/8 PASS（31.94秒，0 fail / 0 cancelled）**。fixture：材料 `zSGfJk`、大型旧件 `5unazv`、周/项目 `Wq1MBU`、OAuth MCP `gUPwf4`；安全日志 `F:/GenCode/Skynet-evidence/v1-2026-09-30/main-29-qualification-integration.log`。实际Claude周/项目loopback1/1来自 `d89c5c6` 支线 `1hfWI0`，本次未复跑原生、Task、maintenance 或完整Windows，全部历史红结果与G0–G4保留。
