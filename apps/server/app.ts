@@ -26,9 +26,11 @@ import { migrateCoverage, observeCoverage, coverageService } from './team-covera
 import { workStatisticsService } from './work-statistics.js';
 import { migrateWorkViews, workViewService } from './work-views.js';
 import { workViewQuery } from '../../packages/contracts/work-views.js';
+import { assertRestoreReady } from './backup-files.js';
 
 export async function createApp(options: { db: Database; rawDirectory: string; webDirectory?: string; publicOrigin?: string; reportClock?: () => Date }) {
   const { db } = options;
+  await assertRestoreReady(options.rawDirectory);
   await migrate(db);
   await migrateArchiveSearch(db);
   await migrateAnalysis(db);
