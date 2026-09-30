@@ -1,7 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {command} from './support.js';
-import {removeOwnedContainer} from './owned-command.js';
+import {removeOwnedContainer,ownedReady,stopOwnedChild,cleanupOwned} from './owned-command.js';
+import {spawn} from 'node:child_process';
 import {mkdtemp,readFile,writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
@@ -26,4 +27,23 @@ test('container cleanup refuses unknown ownership or failed inspection and remov
   await assert.rejects(removeOwnedContainer('exact-owned','expected-owner',cli('mismatch')),/owner mismatch/);
   await removeOwnedContainer('exact-owned','expected-owner',cli('missing'));await assert.rejects(readFile(marker),{code:'ENOENT'});
   await removeOwnedContainer('exact-owned','expected-owner',cli('owned'));assert.deepEqual(JSON.parse(await readFile(marker,'utf8')),['rm','--force','exact-owned']);
+});
+
+test('startup observation strictly bounds either stream and force closes only its unresponsive child',{timeout:5000},async()=>{
+  for(const stream of ['stdout','stderr']){const child=spawn(process.execPath,['-e',`process.on('SIGTERM',()=>{});process.${stream}.write('x'.repeat(4096));setInterval(()=>{},1000)`],{windowsHide:true,stdio:['ignore','pipe','pipe']});let closed=false;child.once('close',()=>{closed=true;});
+    try{await assert.rejects(ownedReady(child,/ready (.+)/,{timeoutMs:1000,maxOutputBytes:512}),new RegExp(`${stream} limit`));assert.equal(closed,true,'rejection waits for the exact child to close');}finally{await stopOwnedChild(child,true);}}
+  const child=spawn(process.execPath,['-e',"process.on('SIGTERM',()=>{});setInterval(()=>{},1000)"],{windowsHide:true,stdio:['ignore','pipe','pipe']});
+  try{await assert.rejects(ownedReady(child,/ready (.+)/,{timeoutMs:80,maxOutputBytes:512}),/deadline/);}finally{await stopOwnedChild(child,true);}
+});
+
+test('ready server streams keep draining without growing retained startup output or killing a healthy server',{timeout:5000},async()=>{
+  const child=spawn(process.execPath,['-e',"process.stdout.write('ready http://127.0.0.1;');setTimeout(()=>{process.stdout.write('x'.repeat(5*1024*1024));process.stderr.write('y'.repeat(5*1024*1024));},50)"],{windowsHide:true,stdio:['ignore','pipe','pipe']});
+  const close=new Promise<number|null>(resolve=>child.once('close',resolve));
+  try{assert.equal(await ownedReady(child,/ready ([^;]+)/,{timeoutMs:1000,maxOutputBytes:512}),'http://127.0.0.1');assert.equal(await close,0,'post-ready log size does not retain or kill the server');}finally{await stopOwnedChild(child,true);}
+});
+
+test('body failure stays first and every independent owned cleanup is attempted',{timeout:5000},async()=>{
+  const body=new Error('primary synthetic assertion'),cleanup=new Error('owned synthetic cleanup');let second=false;
+  await assert.rejects(cleanupOwned([async()=>{throw cleanup;},async()=>{second=true;}],body),error=>error instanceof AggregateError&&error.errors[0]===body&&error.errors[1]===cleanup&&error.cause===body);
+  assert.equal(second,true);await cleanupOwned([async()=>undefined],body);
 });

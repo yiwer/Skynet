@@ -36,6 +36,31 @@ export async function stopOwnedChild(child?:ChildProcess,force=false){
     const closed=()=>{cleanup();resolve();};child.once('close',closed);child.kill(force?'SIGKILL':'SIGTERM');
   });
 }
+/** Bound startup observation only. After readiness, drain without retaining
+ * either stream; later server logs are not a growing test-output buffer. */
+export async function ownedReady(child:ChildProcess,pattern:RegExp,options:{timeoutMs?:number;maxOutputBytes?:number}={}){
+  const limit=options.maxOutputBytes??1024*1024;
+  return new Promise<string>((resolve,reject)=>{
+    let settled=false,outBytes=0,errBytes=0;const chunks:Buffer[]=[];
+    const failed=(reason:string)=>{if(settled)return;settled=true;clearTimeout(timer);chunks.length=0;
+      void stopOwnedChild(child,true).then(()=>reject(new Error(reason)),cleanup=>reject(new AggregateError([new Error(reason),cleanup],'Server startup failed; owned child close incomplete')));};
+    const timer=setTimeout(()=>failed('Server startup deadline exceeded'),options.timeoutMs??20000);
+    child.stdout!.on('data',(part:Buffer)=>{
+      if(settled)return;if(part.length>limit-outBytes){failed('Server stdout limit exceeded');return;}
+      outBytes+=part.length;chunks.push(part);const match=pattern.exec(Buffer.concat(chunks).toString('utf8'));
+      if(match){settled=true;clearTimeout(timer);chunks.length=0;resolve(match[1]!);}
+    });
+    child.stderr!.on('data',(part:Buffer)=>{if(settled)return;if(part.length>limit-errBytes){failed('Server stderr limit exceeded');return;}errBytes+=part.length;});
+    child.once('error',()=>failed('Server could not start'));child.once('close',code=>failed(`Server exited (${code})`));
+  });
+}
+/** Retain the body failure first while reporting every independent cleanup
+ * failure. One failing close must not prevent the other owned closes. */
+export async function cleanupOwned(actions:Array<()=>Promise<unknown>>,primary?:unknown){
+  const results=await Promise.allSettled(actions.map(action=>Promise.resolve().then(action)));
+  const failures=results.filter(value=>value.status==='rejected').map(value=>(value as PromiseRejectedResult).reason);
+  if(failures.length)throw new AggregateError(primary===undefined?failures:[primary,...failures],primary===undefined?'Owned cleanup incomplete':'Primary failure preserved; owned cleanup incomplete',{cause:primary});
+}
 export async function removeOwnedContainer(name:string,owner:string,cli:{file?:string;prefix?:string[];env?:NodeJS.ProcessEnv}={}){
   const run=(args:string[],timeoutMs=5000)=>ownedCommand(cli.file??'docker',[...(cli.prefix??[]),...args],cli.env??process.env,'',{timeoutMs});
   let info:string;

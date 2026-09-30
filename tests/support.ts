@@ -1,5 +1,5 @@
 import { spawn, type ChildProcess } from 'node:child_process';
-import {ownedCommand,stopOwnedChild,removeOwnedContainer,type CommandOptions} from './owned-command.js';
+import {ownedCommand,ownedReady,stopOwnedChild,removeOwnedContainer,type CommandOptions} from './owned-command.js';
 import { mkdtemp, mkdir, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -39,19 +39,7 @@ export async function createSandbox() {
     }
     async function startServer(portNumber = 0) {
       server = spawn(process.execPath, ['dist/apps/server/main.js'], { env: { ...env, PORT: String(portNumber) }, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
-      return await new Promise<string>((resolveOrigin, reject) => {
-        let output = ''; let stderr = '';
-        const timer = globalThis.setTimeout(() => {server!.kill();reject(new Error('Server startup deadline exceeded'));}, 20_000);
-        server!.stdout!.on('data', part => {
-          output += part;
-          if(Buffer.byteLength(output)>1024*1024){server!.kill();clearTimeout(timer);reject(new Error('Server stdout limit exceeded'));return;}
-          const match = /Skynet listening on (http:\/\/[^;]+)/.exec(output);
-          if (match) { clearTimeout(timer); resolveOrigin(match[1]!); }
-        });
-        server!.stderr!.on('data', part => { stderr += part;if(Buffer.byteLength(stderr)>1024*1024){server!.kill();clearTimeout(timer);reject(new Error('Server stderr limit exceeded'));} });
-        server!.once('error', error => { clearTimeout(timer); reject(error); });
-        server!.once('exit', code => { clearTimeout(timer); reject(new Error(`Server exited (${code})`)); });
-      });
+      return ownedReady(server,/Skynet listening on (http:\/\/[^;]+)/);
     }
     async function provision(employeeName: string, canManageIdentities?: boolean) {
       return JSON.parse(await command(process.execPath, ['dist/apps/server/provision.js'], env, JSON.stringify({ name: employeeName, canManageIdentities })));

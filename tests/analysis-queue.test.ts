@@ -11,9 +11,11 @@ import { analysisService, migrateAnalysis } from '../apps/server/analysis.js';
 import { archiveQuery } from '../apps/server/archive-query.js';
 import { RawStore } from '../apps/server/raw-store.js';
 import { createSandbox } from './support.js';
+import {cleanupOwned} from './owned-command.js';
 
 test('public durable queue fences duplicate leases, late writes, new inputs, retries and unknown billing', {timeout: 90000}, async () => {
   const sandbox = await createSandbox(); const db = connect(sandbox.env.DATABASE_URL!);
+  let primary:unknown;
   try {
     const employee = await sandbox.provision('队列合成员工'); const origin = await sandbox.startServer();
     // Match production lock order: a claimant has targets, then needs jobs. Restart
@@ -142,5 +144,5 @@ test('public durable queue fences duplicate leases, late writes, new inputs, ret
       retainedReservation,
       corruptBytesPreserved:true,inputOverLimitRejected:true},null,2));
     console.log(`Queue evidence: ${sandbox.directory}`);
-  } finally { await db.end(); await sandbox.close(); }
+  } catch(error){primary=error;throw error;} finally { await cleanupOwned([()=>db.end(),()=>sandbox.close()],primary); }
 });
