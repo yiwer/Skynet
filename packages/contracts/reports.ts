@@ -24,5 +24,7 @@ export type DailyReport = { employeeId: string; employee: string; date: string; 
       processingScope?: { version: string; complete: boolean; aggregation: string; omittedFindings: number;
         extractedRanges: number; failedRanges: number; skippedRanges: number } }[];
     originalEventIdsSample: string[]; originalEventCount: number; originalEventHash: string; originalEventHashComplete: boolean;
+    projectStatistics?: { project: string; records: number; userTurns: number; toolCalls: number }[];
+    projectStatisticsComplete?: boolean;
     eligibleInputsComplete: boolean; dailyDeviceCoverage: 'unknown'; fixture: boolean } | null;
 };
