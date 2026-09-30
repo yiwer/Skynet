@@ -73,6 +73,8 @@ export async function registerMcp(app: FastifyInstance, db: Database, archive: A
     mcp.registerTool('read_daily_report', { description: '读取同一日报版本，按项目和跨会话主题组织本来源日期已确认活动；历史引用仅作背景，未知统计不等于零。翻页时固定 revision。',
       annotations, inputSchema: { employeeId: z.uuid(), date: reportDate, revision: z.number().int().min(1).optional(), offset } },
     input => result(() => reports.read(input.employeeId, input.date, input.offset, input.revision)));
+    mcp.registerTool('read_report_corrections',{description:'分页读取日报人工说明、主题归类与重算历史，保留认证操作者、原因和时间。人工说明不改变原件、原项目、归属或活动统计。',annotations,
+      inputSchema:{employeeId:z.uuid(),date:reportDate,offset}},input=>result(()=>reports.correctionHistory(input.employeeId,input.date,input.offset)));
     mcp.registerTool('read_work_view', { description: '读取与 Web 相同的周工作或项目进展固定版本，包括参与者、目标、行动、成果、阻塞、待继续事项和日报证据。跨日同主题仅为推断关联，原始归属不变；翻页固定 revision。',
       annotations, inputSchema: workViewQuery }, input => result(() => workViews.read(input, input.offset, input.revision)));
     mcp.registerTool('list_work_views', { description: '分页列出持久周报和项目视图版本；周一北京时间09:00入队前一周，入队不保证完成。',

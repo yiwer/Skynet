@@ -5,7 +5,7 @@ import { once } from 'node:events';
 import { join } from 'node:path';
 import { writeFile } from 'node:fs/promises';
 import { setTimeout } from 'node:timers/promises';
-import { chromium, expect, type Browser } from '@playwright/test';
+import { chromium, expect, type Browser,type Page } from '@playwright/test';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { mcpSandbox } from './mcp-support.js';
@@ -19,7 +19,7 @@ import type { AnalysisInput } from '../apps/server/analysis.js';
 import { beijingDate } from '../packages/contracts/reports.js';
 import { addDays, monday, type WorkView, type WorkViewSelection } from '../packages/contracts/work-views.js';
 
-function findings(input: AnalysisInput) {
+export function findings(input: AnalysisInput) {
   const categories = ['topic', 'goal', 'activity', 'outcome', 'blocker', 'next'] as const;
   return { items: input.events.flatMap((event, index) => event.text.startsWith('共同主题') ? categories.map(category => ({ category,
     assessment: category === 'activity' || category === 'topic' ? 'inferred' : 'claimed', text: category === 'topic' ? '共同主题跨日延续' : `${category}：${event.text}`,
@@ -32,7 +32,8 @@ function inputFrom(body: any): AnalysisInput {
   }
   throw new Error('Missing archived input');
 }
-export async function workViewsPublic(native: boolean) {
+export type WorkViewsExtension=(context:{sandbox:Awaited<ReturnType<typeof mcpSandbox>>;alpha:{employeeId:string;readerCredential:string};beta:{employeeId:string;readerCredential:string};original:{snapshotId:string;bytes:Buffer};sunday:string;nextMonday:string;tuesday:string;week:string;project:WorkView;previous:WorkView;client:Client;page:Page;drain:()=>Promise<void>;queue:ReturnType<typeof analysisQueue>;config:Awaited<ReturnType<typeof readAnalysisConfig>>;native:boolean})=>Promise<unknown>;
+export async function workViewsPublic(native: boolean,extension?:WorkViewsExtension) {
   const runtime = process.env.SKYNET_CLAUDE_RUNTIME; if (native) assert.ok(runtime, 'Explicit Claude 2.1.281, loopback only');
   const week = addDays(monday(beijingDate()), 7); const sunday = addDays(week, 6); const nextMonday = addDays(week, 7); const tuesday = addDays(week, 8);
   let now = new Date(`${sunday}T12:00:00+08:00`);
@@ -159,7 +160,9 @@ export async function workViewsPublic(native: boolean) {
     const daily = page.getByRole('region', { name: '日工作', exact: true }); await expect(daily.getByLabel('历史版本（留空读取最新）')).not.toHaveValue('');
     await daily.getByRole('link', { name: /核查本日原句/ }).first().click(); await expect(page.getByRole('region', { name: '命中证据', exact: true })).toContainText('共同主题');
     assert.deepEqual(Buffer.from(await (await sandbox.api(`/api/snapshots/${original.snapshotId}/raw`, beta.readerCredential)).arrayBuffer()), original.bytes);
+    const extensionEvidence=await extension?.({sandbox,alpha,beta,original,sunday,nextMonday,tuesday,week,project,previous,client,page,drain,queue,config,native});
     await writeFile(join(sandbox.directory, 'work-view-public-evidence.json'), JSON.stringify({ native, reportingCalendar: 'trusted synthetic Sunday→Monday→next Monday, not real elapsed weeks', offline, previous, next, project, more, empty,
+      extensionEvidence,
       originalBytesUnchanged: true, analysisActors: operations.runs.map((run: any) => ({ actorId: run.actorId, actorKind: run.actorKind })), nativeRequests: fixture.requests.length, logs, errors, provider: 'synthetic loopback only; no Qwen/PAYG' }, null, 2));
     console.log(`Weekly/project public evidence: ${sandbox.directory}`);
   } finally { await client?.close(); await browser?.close(); await stop(worker); fixture.server.closeAllConnections(); if (fixture.server.listening) await new Promise<void>(resolve => fixture.server.close(() => resolve())); await db.end(); await sandbox.close(); }

@@ -50,6 +50,7 @@ AC-01…AC-22 的已有证据和缺口集中列于 [V1 验收证据台账](../im
 - #28 日报准备已集成：北京时间09:00持久入队、自动 system 分析、来源员工/项目/日期的日报与原句、Web/MCP固定分页版本已实现；真实 Claude CLI loopback 的8会话/2项目/24事项整链通过，历史背景不计当天工作，未知及未完整处理标 partial。统计共用原事件账本；原生 token/文件/区间与按日覆盖待 #31，真实 G3 和所有门槛保持开放。见 [#28](../implementation/issue-28.md)，独立实现提交5399481已合入，正式验收仍开放。
 - #29 周工作/项目准备与材料资格修订已集成：周一09:00、跨周固定日报版本、多员工原项目及空项目、逐日已确认计数与原句、Web/MCP分页持久一致已实现；组合支线 `d89c5c6` 有效资格后定向6/6、真实Claude loopback1/1通过，资格变化自动刷新既有周/项目，固定旧响应逐字不变另1/1通过。主线本次定向8/8，未重复原生测试。详见 [#29](../implementation/issue-29.md)。迟到/更正与完整统计接续；真实G3、运营与全部验收门槛仍开放。
 - #31 覆盖矩阵与来源统计准备已集成：员工×日期、按小时保留收到的故障观测、安装/宿主确认/连接/采集/报告分别显示，来源Token、结构化文件与时间点区间保持定义和未知；固定统计版本及日报方向/主题/阻塞，经Web/OAuth MCP下钻员工、项目与原件。clean `519d59f` 主线定向12/12通过，见 [#31](../implementation/issue-31.md)。历史部署前覆盖、真实支持组合、G2/G3/G4不因合成路径通过而关闭。
+- #30 更正/迟到准备已集成：追加说明、主题与未归类项目的人工显示归类、认证审计和幂等重算、已有日周项目首条迟到活动的来源日刷新及固定旧版不变已实现。clean `c5d23c5` 合入 `6d828bf`，主线公开组合12/12通过；实际Claude loopback6请求来自支线实测，受控旧结果晚完成不适用，见 [#30](../implementation/issue-30.md)。正式运营与模型验收仍开放，G0–G4不关闭。
 - #10、#14–#15、#19、#21、#23–#25、#28–#33：尚未完成；依赖与门槛继续按 ticket 图核查。
 
 #23 独立实现准备已基于 #24 最终 `f2b9cf9` 完成有界长会话 public trace，并通过组合主线 `0743d4d` 集成复核：实际 Windows Claude Code 2.1.281 对本地合成服务分段提取/汇总，原 UTF-16 引用、跨段头尾事实、坏段与 skipped 范围、Web/MCP/原件导出定向通过，见 [#23 记录](../implementation/issue-23.md)。全尝试共享请求/租约/deadline/预算，不按段追加额度。支线完整 Windows 33 项为 **31 pass / 2 runtime-control fail / 0 cancel**，237.08s；新长会话/队列通过，维护 236.15s 通过，安装与插件 1500ms 无响应仍红并交接独立诊断。真实千问、质量和 G3 仍开放。
@@ -105,3 +106,11 @@ clean `519d59f` 无冲突合入 `eb69a46`，保留主线Linux49/49记录、后�
 ## 覆盖矩阵主线 Linux CI（2026-09-30）
 
 `a4588a6` 的 [Linux CI](https://github.com/yiwer/Skynet/actions/runs/36694392990/job/109818763622) 已通过类型检查、构建与 **53/53（162.16秒，0 fail / 0 cancelled）**。这是合入 #31 后的主线证据；主线本地定向12/12与独立原生测试来源保持区分。安全日志已保存 `F:/GenCode/Skynet-evidence/v1-2026-09-30/ci-a4588a6-linux.log`。真实Task、完整Windows、旧性能失败与G0–G4未因此关闭。
+
+## 迟到与人工更正主线集成（2026-09-30）
+
+clean `c5d23c5` 无冲突合入 `6d828bf`。保留 #31 矩阵/固定来源统计/只读日与项目下钻、有效资格修订、后台线程/静默编排与诊断；运行时源码无差异。新增日source_revision与周/项目candidate_revision公平巡检发现已有空期间的首条迟到活动，原接入边界、原事件归属和原件不变；更正审计、重新分析generation与旧固定报告分开保存。
+
+主线自身 `npm run typecheck`、`npm run build`、`git diff --check` 与 `node --import tsx --test tests/report-corrections.test.ts tests/report-corrections-workflow.test.ts tests/material-qualification.test.ts tests/source-statistics.test.ts tests/team-coverage.test.ts tests/mcp.test.ts tests/work-views.test.ts` **12/12 PASS（56.26秒，0 fail / 0 cancelled）**。更正公开完整链 `nUxLNy`55.32秒、审计 `bjemQB`、首条迟到 `6G2Ijm`、资格 `jur5EB/rTGOXo`、覆盖 `pl3vSp`、周/项目 `k1YWQn`、OAuth MCP `AkjTV0`。脱敏JSON保存 `F:/GenCode/Skynet-evidence/v1-2026-09-30/main-30/`，覆盖JSON/截图在 `coverage-a1e041b4-99fa-4822-9c9c-6b2e5174429b/`；安全日志 `main-30-integration.log` 与 `main-30-evidence-summary.json` 保留实际计数和SHA。
+
+实际Claude2.1.281六次loopback请求1/1（54.37秒）来自最终支线 `xUlWpY`，本次没有native/Task/setup/maintenance或完整Windows，#30各次RED与既有全量/性能红结果全部保留。既有Linux53/53早于本次#30；通用证据非法UTF8仍待独立修订，PAYG质量/账单、Desktop、真实运营、第二人及G0–G4不关闭。#32可从root确认的clean集成节点新建独立树，继承完整更正/重算/期间巡检schema及固定旧版本，执行真正一致灾备与公开恢复路径。

@@ -25,6 +25,7 @@
 | [短会话公开分析准备](docs/implementation/issue-22.md) | 实际隔离 Claude Code worker、Web/MCP 与原句证据；loopback 实测不替代真实千问 PAYG 或 G3 |
 | [来源日期日报准备](docs/implementation/issue-28.md) | 09:00 自动入队、system 分析、持久分页版本、原员工/项目证据与 Web/MCP 一致；未知与 partial 明示，G3 尚未通过 |
 | [周工作与项目准备](docs/implementation/issue-29.md) | 周一09:00自动入队、跨日主题及参与者、固定日报与项目计数、Web/MCP同版及原句；真实G3和运营验收仍开放 |
+| [更正与迟到输入准备](docs/implementation/issue-30.md) | 说明、主题/显示项目归类和重算审计，日周项目自动新版、旧固定版与原件不变；真实运营验收仍开放 |
 | [团队覆盖与来源统计准备](docs/implementation/issue-31.md) | 员工×日期覆盖、历史故障与当前连接、固定Token/文件/时间点区间及Web/MCP下钻；未知保留，真实门槛仍开放 |
 | [长会话分段与原件引用](docs/implementation/issue-23.md) | 有界提取与汇总、原 UTF-16 引用、失败和未处理范围；实际 Claude Code 的合成服务验证与真实千问验收分开 |
 | [Agent 内授权读取](docs/implementation/issue-26.md) | HTTPS MCP / OAuth、共享原文与材料分页、完整导出；两个真实 CLI 正常授权与查询已测，完整发布门槛仍待验收 |

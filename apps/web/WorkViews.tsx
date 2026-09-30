@@ -66,9 +66,11 @@ export function WorkViews({ request, currentEmployeeId, onEvidence }: {
       {view.statistics && !view.statistics.complete && <p>统计仅为当前已选日报版本的已知计数；未覆盖部分未知。</p>}
       {view.statistics && <><dl><div><dt>已确认记录</dt><dd>{view.statistics.records ?? '未知'}</dd></div><div><dt>用户轮次</dt><dd>{view.statistics.userTurns ?? '未知'}</dd></div><div><dt>工具调用</dt><dd>{view.statistics.toolCalls ?? '未知'}</dd></div></dl><p className="muted">{view.statistics.definition}</p><p>文件数、原生 token、活动区间、人工工时：未知。</p></>}
       {view.coverage?.messages.map(message => <p className="notice" key={message}>{message}</p>)}
+      {!!view.corrections?.length&&<section aria-label="期间人工说明"><h3>引用日报的人工说明与更正</h3><p>说明不是原活动或已核验交付；至多展示32条，完整历史在对应日报查看。</p>{view.corrections.map(value=><p key={value.id}><a href={value.dailyPath}>{value.sourceDate} · 查看固定日报</a> · {value.actor} · {value.reason} · {value.kind==='note'?value.note:value.kind==='theme'?`主题归类：${value.theme}`:value.kind==='project'?`显示项目：${value.project||'未归类项目'}`:'请求重新分析'}</p>)}</section>}
       {[...groups].map(([key, items]) => <section key={key}><h3>{items[0]!.project || '未归类项目'} · {items[0]!.theme}</h3>
         <p className="muted">{items[0]!.continuation === 'unassigned' ? '主题关系未确认，保留独立事项。' : '跨日同主题为推断关联；保留逐日事项与证据。'}</p>
         {items.map((item, index) => <div key={`${item.analysisId}/${index}`}><h4>{item.sourceDate} · {item.employee} · {analysisLabels[item.category]} · {assessmentLabels[item.assessment]}</h4><p>{item.text}</p>
+          {item.projectCorrectionId&&<p>人工显示项目归类；来源项目：{item.originalProject||'未归类项目'}。原员工、日期和原句保留。</p>}
           <p><a href={item.dailyPath}>核查日报 v{item.dailyRevision}</a></p>{item.citations.map((citation, i) => <p key={i}><a href={citation.webPath} onClick={onEvidence}>核查原句 · {citation.origin?.employee} · {citation.origin?.sourceDate}</a><q>{citation.quote}</q></p>)}
           {!!item.backgroundCitations.length && <details><summary>背景引用（不计本项活动）</summary>{item.backgroundCitations.map((citation, i) => <p key={i}><a href={citation.webPath} onClick={onEvidence}>{citation.origin?.employee ?? '归属未知'} · {citation.origin?.sourceDate ?? '日期未知'}</a><q>{citation.quote}</q></p>)}</details>}
         </div>)}</section>)}

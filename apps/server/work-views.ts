@@ -6,6 +6,7 @@ import type { ReportService } from './reports.js';
 import { beijingDate, type DailyReport } from '../../packages/contracts/reports.js';
 import { addDays, dailyPath, dueWeek, weekDate, workViewQuery, type WorkView, type WorkViewSelection, type WorkViewItem } from '../../packages/contracts/work-views.js';
 import { qualificationDaySql } from './qualification.js';
+import {displayProjectSql} from './reports.js';
 
 export async function migrateWorkViews(db: Database) {
   const client = await db.connect();
@@ -14,6 +15,10 @@ export async function migrateWorkViews(db: Database) {
       refresh_pending boolean NOT NULL DEFAULT true,requested_at timestamptz NOT NULL DEFAULT now(),last_checked_at timestamptz);
     ALTER TABLE work_view_periods ADD COLUMN IF NOT EXISTS refresh_daily boolean NOT NULL DEFAULT true;
     ALTER TABLE work_view_periods ADD COLUMN IF NOT EXISTS qualification_revision bigint NOT NULL DEFAULT 0;
+    ALTER TABLE work_view_periods ADD COLUMN IF NOT EXISTS candidate_revision text NOT NULL DEFAULT '';
+    ALTER TABLE work_view_periods ADD COLUMN IF NOT EXISTS last_inspected_at timestamptz;
+    CREATE INDEX IF NOT EXISTS work_view_inspection ON work_view_periods(last_inspected_at,requested_at);
+    CREATE INDEX IF NOT EXISTS report_origin_source_day ON archive_event_origins(source_date,employee_id,event_id);
     CREATE INDEX IF NOT EXISTS report_origin_project_day ON archive_event_origins(project,source_date,event_id);
     CREATE TABLE IF NOT EXISTS work_view_revisions(id uuid PRIMARY KEY,period_id text NOT NULL REFERENCES work_view_periods(id),
       revision integer NOT NULL,version text NOT NULL,payload jsonb NOT NULL,created_at timestamptz NOT NULL DEFAULT now(),UNIQUE(period_id,revision));
@@ -23,10 +28,15 @@ export async function migrateWorkViews(db: Database) {
 const identity = (selection: WorkViewSelection) => digest(JSON.stringify([selection.kind, selection.subject, selection.from, selection.to]));
 const qualificationForView = `(SELECT COALESCE(MAX(c.revision),0) FROM archive_event_origins qo JOIN event_qualifications c ON c.event_id=qo.event_id
   WHERE qo.source_date BETWEEN p.selection->>'from' AND p.selection->>'to' AND CASE WHEN p.selection->>'kind'='weekly'
-    THEN qo.employee_id::text=p.selection->>'subject' ELSE qo.project=p.selection->>'subject' END)`;
+    THEN qo.employee_id::text=p.selection->>'subject' ELSE ${displayProjectSql('qo')}=p.selection->>'subject' END)`;
+const candidateRevisionSql=`(SELECT concat(count(*),'/',count(DISTINCT(o.employee_id,o.source_date))) FROM effective_event_origins o
+  WHERE o.context='after-enrollment' AND o.source_date BETWEEN p.selection->>'from' AND p.selection->>'to' AND CASE WHEN p.selection->>'kind'='weekly'
+    THEN o.employee_id::text=p.selection->>'subject' ELSE ${displayProjectSql('o')}=p.selection->>'subject' END)`;
 const changedDays = `EXISTS(SELECT 1 FROM jsonb_array_elements(r.payload->'coverage'->'days') day JOIN daily_report_revisions newer
-  ON newer.employee_id=(day->>'employeeId')::uuid AND newer.date=day->>'date' AND newer.revision>(day->>'revision')::integer)`;
-const definition = '已确认记录、用户轮次和工具调用按原员工、原项目、来源日期及不可变 eventId 统计。周报引用固定日报版本；项目仅计该项目的原活动。主题文字相同只表示推断关联。未归类项目保留。文件、原生 token、活动区间、人工工时未知；无已确认记录不证明无工作。';
+  ON newer.employee_id=(day->>'employeeId')::uuid AND newer.date=day->>'date' AND newer.revision>(day->>'revision')::integer)
+  OR EXISTS(SELECT 1 FROM jsonb_array_elements(r.payload->'coverage'->'days') day JOIN daily_report_periods pending
+    ON pending.employee_id=(day->>'employeeId')::uuid AND pending.date=day->>'date' WHERE pending.refresh_pending)`;
+const definition = '已确认记录、用户轮次和工具调用按原员工、来源日期及不可变 eventId 统计。周报引用固定日报版本；项目计数按该日报版本的显示归类唯一分配原事件，人工项目归类另保留来源项目和审计记录。同一原件行涉及多项目时，项目用户轮次可能重叠，不能相加当员工总轮次。主题文字相同只表示推断关联。未归类项目保留。文件、原生 token、活动区间、人工工时未知；无已确认记录不证明无工作。';
 
 export function workItems(days: DailyReport[], project?: string): WorkViewItem[] {
   return days.flatMap(day => day.items.filter(item => project === undefined || item.project === project).map(item => ({ ...item,
@@ -51,7 +61,7 @@ export function workViewService(db: Database, daily: ReportService, clock: () =>
   }
   async function read(input: WorkViewSelection, offset = 0, revision?: number): Promise<WorkView> {
     const { selection, label } = await validate(input); const id = identity(selection);
-    const row = (await db.query(`SELECT r.*,(p.refresh_pending OR p.qualification_revision<${qualificationForView} OR ${changedDays}) AS refresh_pending FROM work_view_revisions r JOIN work_view_periods p ON p.id=r.period_id
+    const row = (await db.query(`SELECT r.*,(p.refresh_pending OR p.candidate_revision<>${candidateRevisionSql} OR p.qualification_revision<${qualificationForView} OR ${changedDays}) AS refresh_pending FROM work_view_revisions r JOIN work_view_periods p ON p.id=r.period_id
       WHERE r.period_id=$1 AND ($2::integer IS NULL OR r.revision=$2) ORDER BY r.revision DESC LIMIT 1`, [id, revision ?? null])).rows[0];
     if (!row) {
       if (revision !== undefined) throw new HttpError(404, '工作视图版本不存在');
@@ -88,7 +98,7 @@ export function workViewService(db: Database, daily: ReportService, clock: () =>
         FROM employees e CROSS JOIN generate_series($2::date,$3::date,interval '1 day') day WHERE e.id=$1 ORDER BY day`, [selection.subject, selection.from, selection.to])).rows
         : (await client.query(`SELECT DISTINCT o.employee_id,e.name,o.source_date AS date,true AS managed,
           ${qualificationDaySql('o.employee_id', 'o.source_date')} AS qualification_revision FROM effective_event_origins o
-          JOIN employees e ON e.id=o.employee_id WHERE o.project=$1 AND o.source_date BETWEEN $2 AND $3 AND o.context='after-enrollment'
+          JOIN employees e ON e.id=o.employee_id WHERE ${displayProjectSql('o')}=$1 AND o.source_date BETWEEN $2 AND $3 AND o.context='after-enrollment'
           ORDER BY date,o.employee_id LIMIT 51`, [selection.subject, selection.from, selection.to])).rows;
       let pairs = await loadPairs(); const days: DailyReport[] = []; const refs: NonNullable<WorkView['coverage']>['days'] = [];
       let omittedItems = 0; let inputBytes = 0;
@@ -102,6 +112,7 @@ export function workViewService(db: Database, daily: ReportService, clock: () =>
       await client.query('BEGIN ISOLATION LEVEL REPEATABLE READ');
       if ((await client.query('SELECT generation FROM work_view_periods WHERE id=$1', [id])).rows[0]?.generation !== generation) { await client.query('ROLLBACK'); return; }
       const qualificationRevision = (await client.query(`SELECT ${qualificationForView} AS revision FROM work_view_periods p WHERE id=$1`, [id])).rows[0].revision as string;
+      const candidateRevision=(await client.query(`SELECT ${candidateRevisionSql} AS revision FROM work_view_periods p WHERE id=$1`,[id])).rows[0].revision as string;
       pairs = await loadPairs(); const boundedInputs = pairs.length <= 50;
       for (const pair of pairs.slice(0, 50)) {
         const arrived = pair.date <= beijingDate(clock());
@@ -123,10 +134,11 @@ export function workViewService(db: Database, daily: ReportService, clock: () =>
         }
         days.push({ ...day, items });
         const staleQualification = BigInt(day.coverage?.qualificationRevision ?? '0') < BigInt(pair.qualification_revision);
-        refs.push({ employeeId: day.employeeId, employee: day.employee, date: day.date, state: staleQualification ? 'stale-qualification' : day.state, revision: day.revision, version: day.version,
+        const staleInput=!!day.coverage?.sourceRevision&&day.coverage.sourceRevision!==await daily.inputRevision(client,day.employeeId,day.date);
+        refs.push({ employeeId: day.employeeId, employee: day.employee, date: day.date, state: staleQualification ? 'stale-qualification' : staleInput?'stale-input':day.state, revision: day.revision, version: day.version,
           dailyPath: dailyPath(day.employeeId, day.date, day.revision), originalEventHash: day.coverage?.originalEventHash ?? null,
           originalEventCount: day.coverage?.originalEventCount ?? null, qualificationRevision: day.coverage?.qualificationRevision ?? null,
-          expectedQualificationRevision: pair.qualification_revision, eligibleInputsComplete: !staleQualification && !!day.coverage?.eligibleInputsComplete });
+          expectedQualificationRevision: pair.qualification_revision, eligibleInputsComplete: !staleQualification && !staleInput && !!day.coverage?.eligibleInputsComplete });
       }
       // Counts use only these frozen daily payloads, never the latest live ledger.
       const statisticsKnown = days.length > 0 && days.every(day => selection.kind === 'weekly' ? !!day.statistics : !!day.coverage?.projectStatisticsComplete);
@@ -134,7 +146,7 @@ export function workViewService(db: Database, daily: ReportService, clock: () =>
         ? day.statistics![key] : day.coverage!.projectStatistics!.find(row => row.project === selection.subject)?.[key] ?? 0), 0) : null;
       const totalItems = workItems(days, selection.kind === 'project' ? selection.subject : undefined);
       const items = totalItems.slice(0, 500); omittedItems += Math.max(0, totalItems.length - items.length);
-      const waiting = refs.some(ref => ['queued', 'waiting-analysis', 'stale-qualification'].includes(ref.state));
+      const waiting = refs.some(ref => ['queued', 'waiting-analysis', 'stale-qualification','stale-input'].includes(ref.state));
       const complete = boundedInputs && statisticsKnown && !omittedItems && refs.length > 0 && refs.every(ref => ref.state === 'ready' && ref.eligibleInputsComplete);
       const state: WorkView['state'] = waiting ? 'waiting-analysis' : complete ? 'ready' : 'partial';
       const participatingDays = days.filter(day => ((selection.kind === 'weekly' ? day.statistics?.records
@@ -144,6 +156,7 @@ export function workViewService(db: Database, daily: ReportService, clock: () =>
         dates: [...new Set(participatingDays.filter(day => day.employeeId === employeeId).map(day => day.date))] }));
       const payload: WorkView = { ...selection, subjectLabel: (await validate(selection)).label, timeZone: 'Asia/Shanghai', revision: 0, version: null, createdAt: null,
         state, refreshPending: false, items, nextOffset: null, participants,
+        corrections:days.flatMap(day=>(day.corrections??[]).map(value=>({...value,employeeId:day.employeeId,sourceDate:day.date,dailyPath:dailyPath(day.employeeId,day.date,day.revision)}))).slice(0,32),
         statistics: { records: count('records'), userTurns: count('userTurns'), toolCalls: count('toolCalls'), complete: complete && statisticsKnown,
           files: null, tokens: null, activityIntervals: null, humanWorkHours: null, definition },
         coverage: { days: refs, complete, boundedInputs, omittedItems, fixture: days.some(day => day.coverage?.fixture), messages: [
@@ -159,8 +172,8 @@ export function workViewService(db: Database, daily: ReportService, clock: () =>
       const latest = (await client.query('SELECT revision,version FROM work_view_revisions WHERE period_id=$1 ORDER BY revision DESC LIMIT 1', [id])).rows[0];
       if (latest?.version !== version) await client.query('INSERT INTO work_view_revisions(id,period_id,revision,version,payload) VALUES($1,$2,$3,$4,$5)',
         [randomUUID(), id, (latest?.revision ?? 0) + 1, version, payload]);
-      await client.query(`UPDATE work_view_periods SET last_checked_at=now(),qualification_revision=$3,refresh_pending=CASE WHEN generation=$2 THEN false ELSE refresh_pending END,
-        refresh_daily=CASE WHEN generation=$2 THEN false ELSE refresh_daily END WHERE id=$1`, [id, generation, qualificationRevision]);
+      await client.query(`UPDATE work_view_periods SET last_checked_at=now(),qualification_revision=$3,candidate_revision=$4,refresh_pending=CASE WHEN generation=$2 THEN false ELSE refresh_pending END,
+        refresh_daily=CASE WHEN generation=$2 THEN false ELSE refresh_daily END WHERE id=$1`, [id, generation, qualificationRevision,candidateRevision]);
       await client.query('COMMIT');
     } catch (error) { await client.query('ROLLBACK'); if ((error as { code?: string }).code === '40001') return; throw error; }
     finally { try { if (locked) await client.query('SELECT pg_advisory_unlock(7402131)'); } finally { client.release(); } }
@@ -182,15 +195,19 @@ export function workViewService(db: Database, daily: ReportService, clock: () =>
       }
       await client.query('COMMIT');
     } catch (error) { await client.query('ROLLBACK'); throw error; } finally { client.release(); }
+    const inspected=(await db.query(`SELECT p.id,p.candidate_revision,${candidateRevisionSql} AS current_revision FROM work_view_periods p
+      ORDER BY p.last_inspected_at NULLS FIRST,p.requested_at LIMIT 20`)).rows;
+    for(const period of inspected)await db.query('UPDATE work_view_periods SET last_inspected_at=now(),refresh_pending=refresh_pending OR candidate_revision<>$2 WHERE id=$1',[period.id,period.current_revision]);
     const periods = (await db.query(`SELECT p.selection FROM work_view_periods p LEFT JOIN LATERAL
       (SELECT payload FROM work_view_revisions WHERE period_id=p.id ORDER BY revision DESC LIMIT 1) r ON true
       WHERE p.refresh_pending OR p.qualification_revision<${qualificationForView} OR ${changedDays} OR r.payload IS NULL OR r.payload->>'state' IN ('waiting-analysis','queued','unavailable')
-        OR EXISTS(SELECT 1 FROM jsonb_array_elements(r.payload->'coverage'->'days') day WHERE day->>'state' IN ('queued','waiting-analysis','unavailable','not-arrived','stale-qualification'))
+        OR EXISTS(SELECT 1 FROM jsonb_array_elements(r.payload->'coverage'->'days') day WHERE day->>'state' IN ('queued','waiting-analysis','unavailable','not-arrived','stale-qualification','stale-input'))
       ORDER BY p.last_checked_at NULLS FIRST,p.requested_at LIMIT 2`)).rows;
     for (const period of periods) await refresh(period.selection);
   }
   async function projects(offset = 0) {
-    const rows = (await db.query(`SELECT DISTINCT manifest->>'project' AS project FROM snapshots ORDER BY project LIMIT 101 OFFSET $1`, [offset])).rows;
+    const rows = (await db.query(`SELECT manifest->>'project' AS project FROM snapshots UNION SELECT payload->'input'->>'project' AS project FROM report_corrections
+      WHERE payload->'input'->>'kind'='project' ORDER BY project LIMIT 101 OFFSET $1`, [offset])).rows;
     const projects: { project: string; label: string }[] = []; let bytes = 0;
     for (const row of rows.slice(0, 100)) { const value = { project: row.project as string, label: (row.project || '未归类项目') as string };
       const size = Buffer.byteLength(JSON.stringify(value)); if (projects.length && bytes + size > 48 * 1024) break; projects.push(value); bytes += size; }

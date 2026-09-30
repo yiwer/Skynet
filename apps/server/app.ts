@@ -197,6 +197,14 @@ export async function createApp(options: { db: Database; rawDirectory: string; w
     const { employeeId, date } = z.object({ employeeId: z.uuid(), date: reportDate }).parse(request.params);
     return reply.code(202).send(await reports.request(employeeId, date));
   });
+  app.get('/api/daily-reports/:employeeId/:date/corrections',{onRequest:readerGuard},async request=>{
+    const {employeeId,date}=z.object({employeeId:z.uuid(),date:reportDate}).parse(request.params);
+    const {offset}=reportQuery.omit({revision:true}).parse(request.query);return reports.correctionHistory(employeeId,date,offset);
+  });
+  app.post('/api/daily-reports/:employeeId/:date/corrections',{onRequest:readerGuard},async(request,reply)=>{
+    const {employeeId,date}=z.object({employeeId:z.uuid(),date:reportDate}).parse(request.params);
+    const actor=await reader(request.headers.authorization);return reply.code(202).send(await reports.correct(employeeId,date,actor.id,request.body));
+  });
   app.get('/api/work-views', { onRequest: readerGuard }, async request => {
     const { offset } = reportQuery.parse(request.query); return workViews.list(offset);
   });

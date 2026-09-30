@@ -84,9 +84,10 @@ export function analysisService(db: Database, archive: ArchiveQuery) {
   }
   // Scheduled reporting records a system principal, never a source employee as requester.
   // for a manual per-session request. Archive ACK never calls normalization or this service.
-  async function request(snapshotId: string, actorId: string | null, options: { trigger?: AnalysisRun['trigger']; config?: AnalysisRun['config'] } = {}) {
+  async function request(snapshotId: string, actorId: string | null, options: { trigger?: AnalysisRun['trigger']; config?: AnalysisRun['config'];recomputeId?:string } = {}) {
     const trigger = options.trigger ?? 'manual'; const actorKind = actorId ? 'user' : 'system';
     if (!actorId && trigger === 'manual') throw new HttpError(400, '人工请求必须记录认证用户');
+    if(options.recomputeId&&!actorId)throw new HttpError(400,'重新分析必须关联认证更正人');
     const config = options.config ?? await worker();
     if (!config) throw new HttpError(503, '分析未配置、配置混用或运行时离线；原件不受影响');
     const { record, input } = await prepareAnalysisInput(db, archive, snapshotId, config);
@@ -105,6 +106,10 @@ export function analysisService(db: Database, archive: ArchiveQuery) {
         config_hash=EXCLUDED.config_hash,actor_id=EXCLUDED.actor_id,actor_kind=EXCLUDED.actor_kind,parser_version=EXCLUDED.parser_version,
         attribution_revision=EXCLUDED.attribution_revision,error=NULL RETURNING id,generation`,
         [randomUUID(), record.device_id, record.source, record.source_session_id, latest.id, config.configurationHash, actorId, actorKind, input.parserVersion,latest.attribution_revision])).rows[0];
+      if(options.recomputeId){
+        const newRequest=await client.query('INSERT INTO analysis_recomputations(target_id,request_id) VALUES($1,$2) ON CONFLICT DO NOTHING',[target.id,options.recomputeId]);
+        if(newRequest.rowCount){target.generation=(await client.query('UPDATE analysis_targets SET generation=generation+1,applicable_job_id=NULL,updated_at=now() WHERE id=$1 RETURNING generation',[target.id])).rows[0].generation;}
+      }
       await sweepQueue(client);
       const existing = await client.query(`SELECT ${runProjection} FROM analysis_jobs j WHERE snapshot_id=$1 AND config->>'configurationHash'=$2
         AND target_generation=$3 ORDER BY created_at DESC,id DESC LIMIT 1`, [snapshotId, config.configurationHash, target.generation]);
