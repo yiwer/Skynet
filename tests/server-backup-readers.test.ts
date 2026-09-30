@@ -71,6 +71,13 @@ test('fresh restore preserves authenticated Web/MCP fixed report history, quotes
       daily=await(await api(dailyPath)).json();if(daily.items?.length&& !daily.refreshPending)break;await new Promise(resolve=>setTimeout(resolve,200));
     }
     assert.ok(daily.items.length>0);assert.equal(daily.state,'partial');assert.equal(daily.coverage.fixture,true);
+    const fixedStatistic=daily.coverage.workStatistics;assert.ok(fixedStatistic);
+    assert.equal(fixedStatistic.employeeId,employee.employeeId);assert.equal(fixedStatistic.date,date);assert.ok(fixedStatistic.revision>0);assert.match(fixedStatistic.version,/^[a-f0-9]{64}$/);
+    const statisticPath=`/api/work-statistics/${fixedStatistic.employeeId}?`+new URLSearchParams({date:fixedStatistic.date,revision:String(fixedStatistic.revision)});
+    const sourceStatisticResponse=await api(statisticPath);assert.equal(sourceStatisticResponse.status,200);const sourceStatisticBody=await sourceStatisticResponse.text(),sourceStatistic=JSON.parse(sourceStatisticBody);
+    assert.deepEqual({employeeId:sourceStatistic.employeeId,date:sourceStatistic.date,revision:sourceStatistic.revision,version:sourceStatistic.version},fixedStatistic);
+    assert.equal(sourceStatistic.sourceInputsComplete,false,'unknown complete original format remains a gap before backup');
+    assert.equal(sourceStatistic.nextOffset,null,'this small fixed statistic fits one complete page');
     const fixedPaths=[dailyPath+`?revision=${daily.revision}`];
     for(const parameters of [{kind:'weekly',subject:employee.employeeId,from:monday(date),to:addDays(monday(date),6)},{kind:'project',subject:'/synthetic/backup-report',from:date,to:date}]){
       const path='/api/work-view?'+new URLSearchParams(parameters);assert.equal((await api(path,json({}))).status,202);let view:any;
@@ -78,7 +85,11 @@ test('fresh restore preserves authenticated Web/MCP fixed report history, quotes
       assert.ok(view.revision>0);fixedPaths.push(path+`&revision=${view.revision}`);
     }
     const oldBodies=await Promise.all(fixedPaths.map(async path=>await(await api(path)).text()));
-    const correction=await api(dailyPath+'/corrections',json({requestId:randomUUID(),kind:'note',expectedRevision:daily.revision,reason:'灾备合成说明：不增改活动或原件',note:'仅更正工作说明，保留原句与旧版本。'}));assert.equal(correction.status,202);const corrected=await correction.json();assert.ok(corrected.revision>daily.revision);fixedPaths.push(dailyPath+`?revision=${corrected.revision}`);oldBodies.push(await(await api(fixedPaths.at(-1)!)).text());
+    // Week/project preparation may publish another daily version. Keep the
+    // original fixed history above, but edit the current public revision.
+    const currentResponse=await api(dailyPath);assert.equal(currentResponse.status,200);const current=await currentResponse.json();assert.ok(current.revision>=daily.revision);
+    const correction=await api(dailyPath+'/corrections',json({requestId:randomUUID(),kind:'note',expectedRevision:current.revision,reason:'灾备合成说明：不增改活动或原件',note:'仅更正工作说明，保留原句与旧版本。'}));
+    const corrected=await correction.json();assert.equal(correction.status,202,JSON.stringify({response:corrected,expectedRevision:current.revision}));assert.ok(corrected.revision>current.revision);fixedPaths.push(dailyPath+`?revision=${corrected.revision}`);oldBodies.push(await(await api(fixedPaths.at(-1)!)).text());
     const history=await(await api(dailyPath+'/corrections')).text(),detail=await(await api(`/api/snapshots/${ack.snapshotId}`)).json();
     assert.ok(detail.events.some((event:any)=>event.text===quote&&event.origin.employeeId===employee.employeeId));
     const exports=new Map<string,Buffer>();for(const format of ['raw','readable','recovery'])exports.set(format,Buffer.from(await(await api(`/api/snapshots/${ack.snapshotId}/${format}`)).arrayBuffer()));assert.deepEqual(exports.get('raw'),bytes);
@@ -101,18 +112,20 @@ test('fresh restore preserves authenticated Web/MCP fixed report history, quotes
       const missingHash=await fresh.api('/api/snapshots',device.deviceCredential,json({protocolVersion:1,sourceSessionId:randomUUID(),source:'codex-cli',sourceVersion:'0.157.1',sourceOs:'win32',project:'/synthetic/outside-backup-boundary',hash:digest(outsideBytes),byteLength:outsideBytes.length,qualifiedAt:new Date().toISOString(),capability:'unverified'}));
       assert.equal(missingHash.status,409,'restored public snapshot cannot commit the later hash without upload');
       for(const [index,path]of fixedPaths.entries())assert.equal(await(await read(path)).text(),oldBodies[index],'full immutable report response exact after restore');
+      const restoredStatisticResponse=await read(statisticPath);assert.equal(restoredStatisticResponse.status,200);assert.equal(await restoredStatisticResponse.text(),sourceStatisticBody,'report-bound fixed statistic page is byte-exact after restore');
       assert.equal(await(await read(dailyPath+'/corrections')).text(),history,'authenticated actor/reason/time and correction history exact');
       const currentDetail=await(await read(`/api/snapshots/${ack.snapshotId}`)).json();assert.deepEqual(currentDetail.events,detail.events);assert.deepEqual(currentDetail.manifest,detail.manifest);
       for(const [format,original]of exports)assert.deepEqual(Buffer.from(await(await read(`/api/snapshots/${ack.snapshotId}/${format}`)).arrayBuffer()),original,`complete ${format} export exact`);
       restoredClient=await grantedReader(fresh,employee.readerCredential);
       const tool=async(name:string,args:Record<string,unknown>)=>{const result=await restoredClient!.callTool({name,arguments:args});assert.notEqual(result.isError,true,JSON.stringify(result));return JSON.parse((result.content as{text:string}[])[0]!.text);};
       assert.deepEqual(await tool('read_daily_report',{employeeId:employee.employeeId,date,revision:daily.revision}),JSON.parse(oldBodies[0]!));
+      assert.deepEqual(await tool('read_work_statistics',{employeeId:fixedStatistic.employeeId,date:fixedStatistic.date,revision:fixedStatistic.revision}),sourceStatistic,'OAuth MCP reads the same restored fixed statistic identity and final page');
       assert.deepEqual(await tool('read_report_corrections',{employeeId:employee.employeeId,date}),JSON.parse(history));
       const quoted=daily.items.flatMap((item:any)=>item.citations).find((citation:any)=>citation.quote===quote);assert.ok(quoted?.location);const located=await tool('read_location',{snapshotId:quoted.snapshotId,location:quoted.location});assert.ok(JSON.stringify(located).includes(quote));
       const operations=await tool('read_server_operations',{});assert.equal(operations.latestBackup.id,backup.receipt.id);assert.equal(operations.latestRestore.verification,'integrity-only');assert.equal(operations.reception,'single-copy');
       const targetPage=await browser.newPage({ignoreHTTPSErrors:true});await targetPage.goto(fresh.origin);await targetPage.getByLabel('个人读取凭据').fill(employee.readerCredential);await targetPage.getByRole('button',{name:'进入存档',exact:true}).click();await targetPage.getByRole('button',{name:'运行与备份',exact:true}).click();await targetPage.getByText('仅完整性校验；尚未验证原生续聊、异机重建和第二维护者操作。',{exact:true}).waitFor();assert.ok((await targetPage.getByRole('region',{name:'服务器运行与备份'}).innerText()).includes(backup.receipt.id));
       await capture(targetPage,'populated');
-      await writeFile(join(s.directory,'backup-restored-readers-public.json'),JSON.stringify({receipt:backup.receipt,restored,snapshotId:ack.snapshotId,eventIds:detail.events.map((event:any)=>event.origin.eventId),fixedPaths,frozenBodiesExact:true,correctionsExact:true,exports:Array.from(exports,([format,bytes])=>({format,hash:digest(bytes),byteLength:bytes.length})),operations,outsideBoundary:{snapshotId:outside.snapshotId,sourceReadable:true,restoredStatus:404,restoredChunkAbsent:true},fixtureReportOnly:true,screenshots},null,2));console.log(`Server backup readers/report evidence: ${s.directory}`);
+      await writeFile(join(s.directory,'backup-restored-readers-public.json'),JSON.stringify({receipt:backup.receipt,restored,snapshotId:ack.snapshotId,eventIds:detail.events.map((event:any)=>event.origin.eventId),fixedPaths,frozenBodiesExact:true,correctionsExact:true,correctionVersions:{originalFixed:daily.revision,submittedCurrent:current.revision,corrected:corrected.revision},fixedStatistic:{identity:fixedStatistic,path:statisticPath,sourceBodySha256:digest(sourceStatisticBody),sourceInputsComplete:sourceStatistic.sourceInputsComplete,nextOffset:sourceStatistic.nextOffset,httpExact:true,oauthMcpExact:true},exports:Array.from(exports,([format,bytes])=>({format,hash:digest(bytes),byteLength:bytes.length})),operations,outsideBoundary:{snapshotId:outside.snapshotId,sourceReadable:true,restoredStatus:404,restoredChunkAbsent:true},fixtureReportOnly:true,screenshots},null,2));console.log(`Server backup readers/report evidence: ${s.directory}`);
     }finally{await restoredClient?.close();if(fresh)await fresh.close();else await bare.close();}
   }finally{await browser?.close();await client?.close();await s.close();}
 });
