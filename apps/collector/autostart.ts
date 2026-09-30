@@ -13,9 +13,17 @@ type Registration = { state: string; adapter: string; taskName?: string; command
 function powershell() { return join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe'); }
 function supervisorAction(installation: Installation, canonical: string) {
   const quote = (value: string) => `'${value.replaceAll("'", "''")}'`;
+  // .NET Framework ProcessStartInfo has Arguments, not ArgumentList. Preserve
+  // each Windows argv element, including trailing backslashes, as one argument.
+  const argument = (value: string) => `"${value.replace(/(\\*)"/g, '$1$1\\"').replace(/(\\+)$/, '$1$1')}"`;
+  const argumentsText = [installation.launcher, 'background', '--state', canonical].map(argument).join(' ');
   // Keep the task action alive across a supervisor crash. An authenticated
   // normal stop ends the action; no PID recovered from a file is authority.
-  const script = `$ErrorActionPreference='Stop'; Remove-Item Env:SKYNET_KEY -ErrorAction SilentlyContinue; $delay=1; while($true){$started=[DateTime]::UtcNow; & ${quote(installation.node)} ${quote(installation.launcher)} 'background' '--state' ${quote(canonical)}; if($LASTEXITCODE -eq 0){exit 0}; if(([DateTime]::UtcNow-$started).TotalSeconds -ge 30){$delay=1}; Start-Sleep -Seconds $delay; $delay=[Math]::Min(30,$delay*2)}`;
+  // The task's Hidden setting does not hide a console child. Start the exact
+  // registered executable without a shell or a new console and wait on the
+  // Process object we created. The outer PowerShell still requests Hidden;
+  // its initial Task Scheduler window behavior needs separate observation.
+  const script = `$ErrorActionPreference='Stop'; Remove-Item Env:SKYNET_KEY -ErrorAction SilentlyContinue; $delay=1; while($true){$started=[DateTime]::UtcNow; $startInfo=New-Object System.Diagnostics.ProcessStartInfo; $startInfo.FileName=${quote(installation.node)}; $startInfo.Arguments=${quote(argumentsText)}; $startInfo.UseShellExecute=$false; $startInfo.CreateNoWindow=$true; $startInfo.WindowStyle=[System.Diagnostics.ProcessWindowStyle]::Hidden; $ownedChild=New-Object System.Diagnostics.Process; $ownedChild.StartInfo=$startInfo; try{if(-not $ownedChild.Start()){throw 'Registered supervisor could not start'}; $ownedChild.WaitForExit(); $exitCode=$ownedChild.ExitCode}finally{$ownedChild.Dispose()}; if($exitCode -eq 0){exit 0}; if(([DateTime]::UtcNow-$started).TotalSeconds -ge 30){$delay=1}; Start-Sleep -Seconds $delay; $delay=[Math]::Min(30,$delay*2)}`;
   return { command: powershell(), arguments: `-NoProfile -NonInteractive -WindowStyle Hidden -EncodedCommand ${Buffer.from(script, 'utf16le').toString('base64')}` };
 }
 export async function launchCurrentSession(state: string, installation: Installation) {
