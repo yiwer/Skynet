@@ -69,7 +69,10 @@ export async function verifyRuntime(config: AnalysisConfig) {
     if (config.mode === 'qwen-payg') await readCredential(config);
   } finally { await job.cleanup(); }
 }
-export async function runNativeAnalysis(config: AnalysisConfig, input: AnalysisInput, signal: AbortSignal) {
+export class NativeAnalysisFailure extends Error {
+  constructor(readonly requests: number, readonly code: string) { super(code); }
+}
+export async function runNativeAnalysis(config: AnalysisConfig, input: AnalysisInput, signal: AbortSignal, beforeForward?: () => Promise<boolean>) {
   const job = await isolated(config); const access = randomBytes(32).toString('hex');
   let key = 'synthetic-loopback-only';
   let requests = 0; let guardFailure = false; let received = 0; let failureCode = 'none';
@@ -90,6 +93,8 @@ export async function runNativeAnalysis(config: AnalysisConfig, input: AnalysisI
       const body = decodeUtf8(parts); validateRequest(JSON.parse(body), config);
       // Check synchronously immediately before forwarding, including concurrent requests.
       if (transportSignal.aborted || requests >= config.maxRequests) return deny();
+      if (beforeForward && !await beforeForward()) return deny('lease-or-durable-count');
+      if (transportSignal.aborted) return deny('cancelled');
       requests++;
       const headers: Record<string, string> = { 'content-type': 'application/json', 'x-api-key': key,
         'anthropic-version': '2023-06-01' };
@@ -133,6 +138,9 @@ export async function runNativeAnalysis(config: AnalysisConfig, input: AnalysisI
     const number = (value: unknown) => typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : null;
     return { output: parsed.structured_output, usage: { inputTokens: number(parsed.usage?.input_tokens), outputTokens: number(parsed.usage?.output_tokens),
       runtimeCostUsd: number(parsed.total_cost_usd), providerBilledCny: null, requests } };
+  } catch (error) {
+    throw new NativeAnalysisFailure(requests, signal.aborted ? 'timeout-or-cancelled' : error instanceof Error && /^native-runtime-or-provider-failed:[a-zA-Z0-9.,:-]+$/.test(error.message)
+      ? error.message : 'native-provider-or-output-failed');
   } finally {
     transport.abort(); guard.closeAllConnections();
     await Promise.allSettled([...active]);

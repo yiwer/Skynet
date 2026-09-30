@@ -55,6 +55,8 @@ export async function registerMcp(app: FastifyInstance, db: Database, archive: A
     input => result(() => archive.materialPage(input.snapshotId, input.materialId, input.offset, 2048)));
     mcp.registerTool('read_analysis', { description: '分页读取同一快照的持久分析任务、结果与精确原件引用。合成 fixture 明确标记；自述、推断、记录和材料不足分开，未知用量不等于零。',
       annotations, inputSchema: { snapshotId, offset: offset.refine(value => value <= 100000) } }, input => result(() => analysis.list(input.snapshotId, input.offset)));
+    mcp.registerTool('read_analysis_operations', { description: '读取与 Web 相同的分析队列、有限尝试、输入版本、运行时配置与预算预留；未知账单不填零，不返还未知预留。',
+      annotations, inputSchema: { offset: offset.refine(value => value <= 100000) } }, input => result(() => analysis.operations(input.offset)));
     return mcp;
   }
   app.post('/mcp', { bodyLimit: 64 * 1024, onRequest: guard }, async (request, reply) => {
