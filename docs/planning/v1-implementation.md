@@ -114,3 +114,13 @@ clean `c5d23c5` 无冲突合入 `6d828bf`。保留 #31 矩阵/固定来源统计
 主线自身 `npm run typecheck`、`npm run build`、`git diff --check` 与 `node --import tsx --test tests/report-corrections.test.ts tests/report-corrections-workflow.test.ts tests/material-qualification.test.ts tests/source-statistics.test.ts tests/team-coverage.test.ts tests/mcp.test.ts tests/work-views.test.ts` **12/12 PASS（56.26秒，0 fail / 0 cancelled）**。更正公开完整链 `nUxLNy`55.32秒、审计 `bjemQB`、首条迟到 `6G2Ijm`、资格 `jur5EB/rTGOXo`、覆盖 `pl3vSp`、周/项目 `k1YWQn`、OAuth MCP `AkjTV0`。脱敏JSON保存 `F:/GenCode/Skynet-evidence/v1-2026-09-30/main-30/`，覆盖JSON/截图在 `coverage-a1e041b4-99fa-4822-9c9c-6b2e5174429b/`；安全日志 `main-30-integration.log` 与 `main-30-evidence-summary.json` 保留实际计数和SHA。
 
 实际Claude2.1.281六次loopback请求1/1（54.37秒）来自最终支线 `xUlWpY`，本次没有native/Task/setup/maintenance或完整Windows，#30各次RED与既有全量/性能红结果全部保留。既有Linux53/53早于本次#30；通用证据非法UTF8仍待独立修订，PAYG质量/账单、Desktop、真实运营、第二人及G0–G4不关闭。#32可从root确认的clean集成节点新建独立树，继承完整更正/重算/期间巡检schema及固定旧版本，执行真正一致灾备与公开恢复路径。
+
+## 迟到数据与人工更正主线 Linux CI（2026-09-30）
+
+`68ee347` 的 [Linux CI](https://github.com/yiwer/Skynet/actions/runs/36697980515/job/109830431425) 已通过类型检查、构建与 **56/56（146.80秒，0 fail / 0 cancelled）**，包含 #30 审计、首次迟到活动及完整更正流程。日志保存 `F:/GenCode/Skynet-evidence/v1-2026-09-30/ci-68ee347-linux.log`。主线本地12/12与支线实际Claude loopback54.37秒分别保留来源；未复跑Task、maintenance或完整Windows。#32在独立树实施，G0–G4与历史失败继续开放。
+
+## 静默 hook 基线补采（2026-09-30）
+
+ROOT在 product `68ee347` 的冻结 compiled CLI/hook/filesystem 和产品 `launcherText` 分派下，使用全新自有 explicit-state 测量 **200次真实进程启动+本地入队**。Windows11 Pro10.0.26200、Node24.12.0、i7-14700K/28逻辑CPU；主机并发工作未控制。P50 **52.53ms**、P95 **67.17ms**、最大 **137.34ms**；200/200唯一样本确实保留在spool、无hook-gap、无原件读取/网络。每个child有3秒上限、windowsHide，完整结果与源/载荷哈希在 `F:/GenCode/Skynet-evidence/v1-2026-09-30/performance/hook-db721967-432e-4b2a-9f4f-cf7030ac2fb8/result.json`；复跑脚本 `performance/hook-baseline.mjs`。
+
+这是隔离状态的正常快路径证据，不是安装完成、真实宿主或旧Linux四任务ENOSPC压力复测；历史P95 **111.35ms** 失败与max **1075.89ms** 长尾保留。没有Task/setup/maintenance/后台启动或付费调用；AC-22/G4及原文可见延迟分布仍待完整实测。
