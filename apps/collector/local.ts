@@ -181,17 +181,25 @@ async function collectSources(state: string, settings: Settings, monitor: Captur
         previousSnapshotId: source.acknowledgedSnapshotId, materials, gaps: discovered.gaps, lineage: discovered.lineage,
         compacted: discovered.compacted, partialLine: discovered.partialLine });
       let restoredFrom;
-      // Only the exact primary restored rollout can inherit this receipt; unrelated
-      // sessions and context-only materials in the same home cannot claim its owner.
+      // A restored transcript still needs a normal host event before collection.
+      // Receipt paths merely select a claim; the server proves its immutable bytes.
       if (!previous.acknowledgedHash) {
         const nativeHome = dirname(settings.nativeRoot);
         try {
           const receiptBytes = await readNativeFile(nativeHome, join(nativeHome, 'restore-receipt.json'));
           if (receiptBytes.length > 1024 * 1024) throw new Error('Restore receipt exceeds its size limit');
           const receipt = JSON.parse(receiptBytes.toString('utf8'));
-          if (receipt.source === settings.source && receipt.sourceSessionId === source.sessionId
-            && typeof receipt.rolloutPath === 'string' && await safeNativePath(settings.nativeRoot, receipt.rolloutPath) === transcriptPath) {
-            const claim = restoredFromSchema.parse(receipt.restoredFrom);
+          let material;
+          if (receipt.source === settings.source && Array.isArray(receipt.materials) && receipt.materials.length <= 128) {
+            for (const item of receipt.materials) {
+              if (item.sourceSessionId === source.sessionId && item.mediaType === 'jsonl' && ['parent-transcript', 'child-transcript', 'previous-transcript', 'subagent'].includes(item.role)
+                && typeof item.path === 'string' && await safeNativePath(settings.nativeRoot, item.path) === transcriptPath) { material = item; break; }
+            }
+          }
+          if (material || (receipt.source === settings.source && receipt.sourceSessionId === source.sessionId
+            && typeof receipt.rolloutPath === 'string' && await safeNativePath(settings.nativeRoot, receipt.rolloutPath) === transcriptPath)) {
+            const claim = restoredFromSchema.parse(material ? { snapshotId: receipt.snapshotId, materialId: material.id,
+              hash: material.hash, byteLength: material.byteLength } : receipt.restoredFrom);
             if (bytes.length >= claim.byteLength && hash(bytes.subarray(0, claim.byteLength)) === claim.hash) restoredFrom = claim;
             else capture.gaps.push({ code: 'unknown-format', reference: '恢复回执的原件前缀已变化；无法确认跨设备历史归属，保留独立记录' });
           }

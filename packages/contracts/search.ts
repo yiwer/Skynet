@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { sourceSchema, type SessionSummary } from './archive.js';
+import type { EventOrigin } from './provenance.js';
 
 export const searchSchema = z.object({
   content: z.string().trim().max(160).default(''),
@@ -21,7 +22,7 @@ export const locationSchema = z.discriminatedUnion('kind', [
 ]);
 export type EvidenceLocation = z.infer<typeof locationSchema>;
 export type SearchHit = SessionSummary & { generation: string | null; revision: number | null; location: EvidenceLocation | null;
-  line: number | null; block: number | null; sourceDate: string | null; excerpt: string; matchLength: number; webPath: string };
+  line: number | null; block: number | null; sourceDate: string | null; excerpt: string; matchLength: number; webPath: string; origin?: EventOrigin };
 export type SearchPage = { hits: SearchHit[]; nextCursor: string | null; scanned: number; complete: boolean; boundary: string; scope: string };
 
 export function evidenceLink(snapshotId: string, location?: EvidenceLocation | null) {
