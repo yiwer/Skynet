@@ -22,7 +22,7 @@ export type WorkView = WorkViewSelection & { subjectLabel: string; timeZone: 'As
   statistics: { records: number | null; userTurns: number | null; toolCalls: number | null; complete: boolean; files: null; tokens: null; activityIntervals: null; humanWorkHours: null; definition: string } | null;
   coverage: { messages: string[]; fixture: boolean; complete: boolean; omittedItems: number; boundedInputs: boolean;
     days: { employeeId: string; employee: string; date: string; state: string; revision: number; version: string | null; dailyPath: string;
-      originalEventHash: string | null; originalEventCount: number | null; eligibleInputsComplete: boolean }[] } | null };
+      originalEventHash: string | null; originalEventCount: number | null; qualificationRevision: string | null; expectedQualificationRevision: string; eligibleInputsComplete: boolean }[] } | null };
 export function dailyPath(employeeId: string, date: string, revision: number) {
   return `#daily?${new URLSearchParams({ employeeId, date, ...(revision ? { revision: String(revision) } : {}) })}`;
 }

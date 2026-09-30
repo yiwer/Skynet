@@ -14,6 +14,7 @@ export async function migrateReports(db: Database) {
     ALTER TABLE daily_report_periods ADD COLUMN IF NOT EXISTS last_checked_at timestamptz;
     ALTER TABLE daily_report_periods ADD COLUMN IF NOT EXISTS generation integer NOT NULL DEFAULT 0;
     ALTER TABLE daily_report_periods ADD COLUMN IF NOT EXISTS refresh_pending boolean NOT NULL DEFAULT true;
+    ALTER TABLE daily_report_periods ADD COLUMN IF NOT EXISTS qualification_revision bigint NOT NULL DEFAULT 0;
     CREATE INDEX IF NOT EXISTS snapshot_event_carriers ON snapshot_events(event_id,snapshot_id);
     CREATE INDEX IF NOT EXISTS report_origin_day ON archive_event_origins(employee_id,source_date,context,event_id);
     CREATE TABLE IF NOT EXISTS daily_report_revisions(id uuid PRIMARY KEY,employee_id uuid NOT NULL REFERENCES employees(id),date text NOT NULL,
@@ -54,6 +55,8 @@ const definition = '记录、用户轮次（原件或材料行）、工具调用
 // Optional for historical short-session results. #23 owns the full per-range
 // contract; reports expose its compact scope plus the immutable analysis ID.
 type Processing = AnalysisProcessing;
+const qualificationForPeriod = `(SELECT COALESCE(MAX(c.revision),0) FROM archive_event_origins o JOIN event_qualifications c ON c.event_id=o.event_id
+  WHERE o.employee_id=p.employee_id AND o.source_date=p.date)`;
 export function reportRunCoverage(run: AnalysisRun) {
   const processing = (run.result as (AnalysisRun['result'] & { processing?: Processing }))?.processing;
   const coverage = run.input.coverage;
@@ -74,7 +77,7 @@ export function reportService(db: Database, analysis: AnalysisService, clock: ()
   async function read(employeeId: string, date: string, offset = 0, revision?: number): Promise<DailyReport> {
     const employee = await validate(employeeId, date);
     const row = (await db.query(`SELECT revision,version,payload,created_at,
-      (SELECT refresh_pending FROM daily_report_periods WHERE employee_id=$1 AND date=$2) AS refresh_pending
+      (SELECT refresh_pending OR qualification_revision<${qualificationForPeriod} FROM daily_report_periods p WHERE employee_id=$1 AND date=$2) AS refresh_pending
       FROM daily_report_revisions WHERE employee_id=$1 AND date=$2
       AND ($3::integer IS NULL OR revision=$3) ORDER BY revision DESC LIMIT 1`, [employeeId, date, revision ?? null])).rows[0];
     if (!row) {
@@ -113,11 +116,12 @@ export function reportService(db: Database, analysis: AnalysisService, clock: ()
       const lock = await client.query('SELECT pg_try_advisory_xact_lock(7402128) AS locked');
       if (!lock.rows[0].locked) { await client.query('ROLLBACK'); return; }
       const generation = (await client.query('SELECT generation FROM daily_report_periods WHERE employee_id=$1 AND date=$2', [employeeId, date])).rows[0]?.generation;
+      const qualificationRevision = (await client.query(`SELECT ${qualificationForPeriod} AS revision FROM daily_report_periods p WHERE employee_id=$1 AND date=$2`,[employeeId,date])).rows[0]?.revision??'0';
       const employee = (await client.query('SELECT name FROM employees WHERE id=$1', [employeeId])).rows[0];
-      const events = (await client.query(`SELECT event_id,project FROM archive_event_origins WHERE employee_id=$1 AND source_date=$2
+      const events = (await client.query(`SELECT event_id,project FROM effective_event_origins WHERE employee_id=$1 AND source_date=$2
         AND context='after-enrollment' ORDER BY event_id LIMIT 10001`, [employeeId, date])).rows;
-      const ledger = (await client.query(`SELECT ${ledgerCountProjection} FROM archive_event_origins o WHERE o.employee_id=$1 AND o.source_date=$2`, [employeeId, date])).rows[0];
-      const projectRows = (await client.query(`SELECT project,${ledgerCountProjection} FROM archive_event_origins o
+      const ledger = (await client.query(`SELECT ${ledgerCountProjection} FROM effective_event_origins o WHERE o.employee_id=$1 AND o.source_date=$2`, [employeeId, date])).rows[0];
+      const projectRows = (await client.query(`SELECT project,${ledgerCountProjection} FROM effective_event_origins o
         WHERE o.employee_id=$1 AND o.source_date=$2 GROUP BY project ORDER BY project LIMIT 101`, [employeeId, date])).rows;
       const projectStatistics: NonNullable<DailyReport['coverage']>['projectStatistics'] = []; let projectBytes = 0;
       for (const row of projectRows.slice(0, 100)) {
@@ -128,10 +132,10 @@ export function reportService(db: Database, analysis: AnalysisService, clock: ()
       const projectStatisticsComplete = projectStatistics.length === projectRows.length;
       const counts = { records: ledger.activityRecords, userTurns: ledger.activityUserTurns, toolCalls: ledger.activityToolCalls,
         historicalRecords: ledger.historicalRecords, unknownRecords: ledger.unknownRecords };
-      const undated = Number((await client.query(`SELECT count(*) FROM archive_event_origins WHERE employee_id=$1 AND source_date IS NULL`, [employeeId])).rows[0].count);
+      const undated = Number((await client.query(`SELECT count(*) FROM effective_event_origins WHERE employee_id=$1 AND source_date IS NULL`, [employeeId])).rows[0].count);
       // Each event's latest exact carrier is chosen, including restored primary
       // copies. Original origin coordinates/ownership stay frozen in analysis input.
-      const snapshots = events.length > 10000 ? [] : (await client.query(`SELECT DISTINCT s.id,s.hash FROM archive_event_origins o
+      const snapshots = events.length > 10000 ? [] : (await client.query(`SELECT DISTINCT s.id,s.hash FROM effective_event_origins o
         CROSS JOIN LATERAL (SELECT ss.id,ss.hash FROM snapshot_events se JOIN snapshots ss ON ss.id=se.snapshot_id
           WHERE se.event_id=o.event_id ORDER BY ss.committed_at DESC,ss.id DESC LIMIT 1) s
         WHERE o.employee_id=$1 AND o.source_date=$2 AND o.context='after-enrollment' ORDER BY s.id LIMIT 101`, [employeeId, date])).rows;
@@ -149,6 +153,7 @@ export function reportService(db: Database, analysis: AnalysisService, clock: ()
           const run = await analysis.request(snapshot.id, null, { trigger: 'scheduled' }) as AnalysisRun;
           runs.push(run); inputs.push({ snapshotId: snapshot.id, hash: snapshot.hash, analysisId: run.id, state: run.state,
             applicable: run.applicable, generation: run.generation, configurationHash: run.config.configurationHash, parserVersion: run.input.parserVersion,
+            attributionRevision: run.input.attributionRevision,
             processingScope: reportRunCoverage(run).processingScope });
           if (run.state === 'failed') messages.push(`分析 ${run.id} 失败；本日材料尚不足以形成完整主题。`);
           if (run.state === 'succeeded' && !run.applicable) messages.push(`分析 ${run.id} 已过时，不能作为当前日报结论；旧分析及原件仍可核查。`);
@@ -178,7 +183,7 @@ export function reportService(db: Database, analysis: AnalysisService, clock: ()
       const payload: DailyReport = { employeeId, employee: employee.name, date, timeZone: 'Asia/Shanghai', revision: 0, version: null,
         state, createdAt: null, items, nextOffset: null, refreshPending: false,
         statistics: { ...counts, files: null, tokens: null, activityIntervals: null, humanWorkHours: null, definition },
-        coverage: { messages: [...new Set(messages)], inputs, originalEventIdsSample: [...ids].slice(0, 20), originalEventCount: counts.records,
+        coverage: { messages: [...new Set(messages)], inputs, qualificationRevision, originalEventIdsSample: [...ids].slice(0, 20), originalEventCount: counts.records,
           projectStatistics, projectStatisticsComplete,
           originalEventHash, originalEventHashComplete: events.length <= 10000, eligibleInputsComplete: !incomplete && !waiting,
           dailyDeviceCoverage: 'unknown', fixture: runs.some(run => run.result?.fixture || run.config.mode === 'fixture') } };
@@ -188,8 +193,8 @@ export function reportService(db: Database, analysis: AnalysisService, clock: ()
       const latest = (await client.query(`SELECT revision,version FROM daily_report_revisions WHERE employee_id=$1 AND date=$2 ORDER BY revision DESC LIMIT 1`, [employeeId, date])).rows[0];
       if (latest?.version !== version) await client.query(`INSERT INTO daily_report_revisions(id,employee_id,date,revision,version,payload)
         VALUES($1,$2,$3,$4,$5,$6)`, [randomUUID(), employeeId, date, (latest?.revision ?? 0) + 1, version, payload]);
-      await client.query(`UPDATE daily_report_periods SET last_checked_at=now(),refresh_pending=CASE WHEN generation=$3 THEN false ELSE refresh_pending END
-        WHERE employee_id=$1 AND date=$2`, [employeeId, date, generation]);
+      await client.query(`UPDATE daily_report_periods SET last_checked_at=now(),qualification_revision=$4,refresh_pending=CASE WHEN generation=$3 THEN false ELSE refresh_pending END
+        WHERE employee_id=$1 AND date=$2`, [employeeId, date, generation,qualificationRevision]);
       await client.query('COMMIT');
     } catch (error) {
       await client.query('ROLLBACK');
@@ -220,7 +225,7 @@ export function reportService(db: Database, analysis: AnalysisService, clock: ()
     }
     const periods = (await db.query(`SELECT p.employee_id,p.date FROM daily_report_periods p
       LEFT JOIN LATERAL (SELECT payload,created_at FROM daily_report_revisions r WHERE r.employee_id=p.employee_id AND r.date=p.date ORDER BY revision DESC LIMIT 1) r ON true
-      WHERE p.refresh_pending OR r.payload IS NULL OR r.payload->>'state' IN ('waiting-analysis','queued','unavailable')
+      WHERE p.refresh_pending OR p.qualification_revision<${qualificationForPeriod} OR r.payload IS NULL OR r.payload->>'state' IN ('waiting-analysis','queued','unavailable')
       ORDER BY p.last_checked_at NULLS FIRST,p.requested_at LIMIT 10`)).rows;
     for (const period of periods) await refresh(period.employee_id, period.date);
   }

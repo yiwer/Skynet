@@ -4,7 +4,7 @@ type Row = { employeeId: string; employee: string; date: string | null; records:
   historicalRecords: number; unknownRecords: number; activityRecords: number; activityUserTurns: number; activityToolCalls: number };
 export function ActivityStatistics({ request }: { request: (path: string, signal?: AbortSignal) => Promise<Response> }) {
   const [offset, setOffset] = useState(0); const [data, setData] = useState<{ rows: Row[]; nextOffset: number | null; definition: string;
-    warnings: { unconfirmedRelationSnapshots: number; uncertainRewriteSnapshots: number } }>();
+    warnings: { unconfirmedRelationSnapshots: number; uncertainRewriteSnapshots: number; qualificationGaps: number; qualificationError: string|null } }>();
   const [error, setError] = useState(''); const [retry, setRetry] = useState(0);
   useEffect(() => {
     const abort = new AbortController(); setData(undefined); setError('');
@@ -16,6 +16,8 @@ export function ActivityStatistics({ request }: { request: (path: string, signal
     {error ? <><p role="alert">{error}</p><button onClick={() => setRetry(value => value + 1)}>重试去重统计</button></> : !data ? <p role="status">正在读取去重统计…</p> : <>
       <p className="muted small">{data.definition}</p>
       <p className="muted small">未声明已确认跨设备关系的快照 {data.warnings.unconfirmedRelationSnapshots}（含独立新会话）；重写或截断后仍有谱系不确定性的快照 {data.warnings.uncertainRewriteSnapshots}。未确认重复没有被自动合并。</p>
+      {!!data.warnings.qualificationGaps && <p className="notice">{data.warnings.qualificationGaps} 份旧原件未通过精确资格校验；原字节和归属保留，活动资格尚不完整。</p>}
+      {data.warnings.qualificationError&&<p className="notice">{data.warnings.qualificationError}</p>}
       <ul>{data.rows.map(row => <li key={`${row.employeeId}/${row.date}`}><strong>{row.employee} · {row.date ?? '来源日期未知'}</strong>：
         接入后用户轮次 {row.activityUserTurns}、工具调用 {row.activityToolCalls}、条目 {row.activityRecords}；
         历史上下文 {row.historicalRecords}、归期或接入边界未知 {row.unknownRecords}；全部唯一条目 {row.records}。</li>)}</ul>

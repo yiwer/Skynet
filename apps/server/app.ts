@@ -17,7 +17,7 @@ import { enrollDevice } from './enrollment.js';
 import { captureHealthSchema } from '../../packages/contracts/capture-health.js';
 import { saveCaptureHealth, readCaptureHealth } from './capture-health.js';
 import { analysisService, migrateAnalysis } from './analysis.js';
-import { backfillOrigins } from './provenance.js';
+import { backfillOrigins, reconcileOriginalQualifications } from './provenance.js';
 import { migrateReports, reportService } from './reports.js';
 import { reportDate } from '../../packages/contracts/reports.js';
 import { migrateWorkViews, workViewService } from './work-views.js';
@@ -33,6 +33,13 @@ export async function createApp(options: { db: Database; rawDirectory: string; w
   const raw = new RawStore(options.rawDirectory);
   await backfillOrigins(db, raw);
   const app = Fastify({ bodyLimit: CHUNK_BYTES, logger: false, requestTimeout: 30_000 });
+  let qualifying: Promise<void> | undefined;
+  const qualificationTimer=setInterval(()=>{
+    if(!qualifying)qualifying=reconcileOriginalQualifications(db,raw).catch(error=>{
+      app.log.error(error,'Legacy original-source qualification reconciliation failed');
+    }).finally(()=>{qualifying=undefined;});
+  },1000);qualificationTimer.unref();
+  app.addHook('onClose',async()=>{clearInterval(qualificationTimer);await qualifying;});
   app.setErrorHandler((error, _request, reply) => {
     if (error instanceof z.ZodError) return reply.code(400).send({ error: '请求格式无效' });
     const code = (error as { statusCode?: number }).statusCode ?? 500;

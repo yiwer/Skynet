@@ -46,7 +46,7 @@ function AnalysisResult({ run, retry }: { run: AnalysisRun; retry: () => Promise
     <p>版本 {run.generation} · 尝试 {run.attempts}/{run.maxAttempts} · {run.applicable ? '适用于当前输入' : '尚未适用或属于历史版本'} · {run.actorKind === 'system' ? '系统自动触发' : '认证用户触发'}</p>
     {run.state === 'retry-wait' && <p>下次尝试：{new Date(run.nextAttemptAt).toLocaleString('zh-CN')}</p>}
     {['failed', 'retry-wait'].includes(run.state) && run.attempts < run.maxAttempts && <button onClick={retry}>在剩余次数内重试</button>}
-    <p className="muted small">{run.config.model} · Claude Code {run.config.runtimeVersion} · {run.config.promptVersion} · {run.input.parserVersion}</p>
+    <p className="muted small">{run.config.model} · Claude Code {run.config.runtimeVersion} · {run.config.promptVersion} · {run.input.parserVersion} · 原来源资格版本 {run.input.attributionRevision ?? '未记录（历史输入）'}</p>
     <p>输入覆盖：{run.input.eventCount} 条已解析事件；{run.input.coverage.unrecognizedLines} 行未解析；{run.input.coverage.partialLine ? '存在未闭合末行' : '无未闭合末行'}；
       {run.input.coverage.excludedMaterials} 项关联材料未分析；{run.input.coverage.captureGaps.length} 项存档缺口。</p>
     {run.error && <p className="error">{run.error}</p>}

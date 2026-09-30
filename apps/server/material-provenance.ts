@@ -85,8 +85,8 @@ export async function restoredMaterial(q: Query, raw: RawStore, base: MaterialSo
   const mappings: { snapshotId: string; materialId: string; deviceId: string; hash: string; byteLength: number; origins: OriginRows }[] = [];
   let origins: OriginRows = []; let previousLines = 0;
   for (const segment of history.reverse()) {
-    // Freeze the first qualification. Later independently collected primaries
-    // must reuse that ledger instead of reinterpreting context as new activity.
+    // Freeze the first event identity/ownership mapping. A later original-device
+    // primary can append a separate qualification proof without recreating it.
     const frozen = (await q.query('SELECT 1 FROM material_qualifications WHERE snapshot_id=$1 AND material_id=$2', [segment.origin.id, material.id])).rowCount;
     const exact = frozen ? { rows: [] } : await q.query(`SELECT p.id,p.hash,(p.manifest->>'byteLength')::integer AS byte_length FROM snapshots p JOIN snapshots m ON m.id=$4
       WHERE p.device_id=$1 AND p.source=$2 AND p.source_session_id=$3 AND p.hash=$5 AND p.provenance IS NOT NULL

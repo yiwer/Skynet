@@ -32,6 +32,7 @@ export type AnalysisRun = { id: string; snapshotId: string; state: 'queued' | 'r
     maxInputBytes: number; maxSessionBytes: number; maxSegments: number; maxRequests: number; maxOutputTokens: number; timeoutSeconds: number; reservationCny: number; budgetCny: number; budgetId: string;
     maxAttempts: number; concurrency: number; leaseSeconds: number; retryDelaySeconds: number; autoAnalyzeUpdates: boolean; autoDebounceSeconds: number };
   input: { snapshotId: string; hash: string; parserVersion: string; eventCount: number; source: string; sourceVersion: string;
+    attributionRevision?: string;
     coverage: { unrecognizedLines: number; partialLine: boolean; excludedMaterials: number; captureGaps: unknown[]; scope: string } };
   result: { items: AnalysisItem[]; usage: { inputTokens: number | null; outputTokens: number | null; runtimeCostUsd: number | null;
     providerBilledCny: null; requests: number }; fixture: boolean; processing?: AnalysisProcessing } | null;
