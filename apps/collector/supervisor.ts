@@ -1,18 +1,22 @@
 import { spawn, type ChildProcess } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { setTimeout } from 'node:timers/promises';
 import { askRuntime, ownRuntime, releaseRuntime } from './runtime-control.js';
 import { installationSchema, jsonFile } from './install-state.js';
 import { markAutostartDelayed, startAutostart } from './autostart.js';
 import { atomicJson } from '../../packages/filesystem.js';
+import { payloadRoot } from './release.js';
+import { assertCaptureFences } from './capture-fence.js';
 
 export async function runSupervisor(state: string) {
   const installation = installationSchema.parse(await jsonFile(join(state, 'installation.json')));
+  if (resolve(payloadRoot) !== resolve(installation.maintenanceRuntime ?? installation.runtime)) throw new Error('This supervisor is no longer the registered maintenance release; use the stable launcher');
+  await assertCaptureRuntime(state, installation);
   const instance = randomUUID(); const startedAt = new Date().toISOString();
   let child: ChildProcess | undefined; let worker: any = null; let restarts = 0; let failures = 0; let lastExit: unknown = null;
   const stop = new AbortController();
-  const snapshot = () => ({ pid: process.pid, instance, startedAt, checkedAt: new Date().toISOString(), worker, restarts, lastExit, state: stop.signal.aborted ? 'stopping' : 'running' });
+  const snapshot = () => ({ pid: process.pid, instance, runtime: installation.runtime, toolingRuntime: payloadRoot, startedAt, checkedAt: new Date().toISOString(), worker, restarts, lastExit, state: stop.signal.aborted ? 'stopping' : 'running' });
   let lease;
   try { lease = await ownRuntime(state, 'supervisor', snapshot, () => stop.abort()); }
   catch (error) {
@@ -38,7 +42,10 @@ export async function runSupervisor(state: string) {
     while (!stop.signal.aborted && await askRuntime(state, 'worker')) await setTimeout(200);
     while (!stop.signal.aborted) {
       const launchedAt = Date.now();
-      child = spawn(installation.node, [installation.launcher, 'background-worker', '--state', state], {
+      // The current maintenance supervisor enforces capture fences, then runs
+      // the selected actual worker payload. A rollback genuinely executes the
+      // earlier worker; stable background entrypoints cannot bypass the fence.
+      child = spawn(installation.node, [join(installation.runtime, 'dist', 'apps', 'collector', 'cli.js'), 'background-worker', '--state', state], {
         windowsHide: true, stdio: ['ignore', 'ignore', 'pipe', 'ipc'], env: { ...process.env, SKYNET_KEY: undefined } });
       const current = child;
       let diagnostic = ''; current.stderr?.on('data', part => { diagnostic = (diagnostic + part).slice(-4096); });
@@ -64,6 +71,8 @@ export async function runSupervisor(state: string) {
   } finally { await finishChild(); await releaseRuntime(lease); }
 }
 export async function ensureRunning(state: string, node: string, launcher: string) {
+  const installation = installationSchema.parse(await jsonFile(join(state, 'installation.json')));
+  await assertCaptureRuntime(state, installation); const expected = installation.runtime;
   let current = await askRuntime(state, 'supervisor');
   let scheduled = false;
   const launch = () => {
@@ -77,11 +86,18 @@ export async function ensureRunning(state: string, node: string, launcher: strin
   for (let attempt = 0; attempt < 160; attempt++) {
     current = await askRuntime(state, 'supervisor');
     const worker = await askRuntime(state, 'worker');
-    if (current?.worker && worker?.supervisorInstance === current.instance && worker.instance === current.worker.instance && worker.state === 'running') return current;
+    if (current?.worker && worker?.supervisorInstance === current.instance && worker.instance === current.worker.instance && worker.state === 'running') {
+      if (current.runtime && resolve(current.runtime) !== resolve(expected)) throw new Error('An authenticated previous release is still running; stop it before activating a newer runtime');
+      return current;
+    }
     if (attempt === 60 && scheduled && !current) { await markAutostartDelayed(state); launch(); }
     await setTimeout(100);
   }
   throw new Error('Background ownership could not be established. State and pending evidence were retained; inspect skynet status, Node/runtime paths and user task policy.');
+}
+async function assertCaptureRuntime(state: string, installation: ReturnType<typeof installationSchema.parse>) {
+  if (installation.lifecycle === 'uninstalled') throw new Error('Capture is uninstalled; use current maintenance drain for frozen delivery, or explicitly setup to reconnect');
+  await assertCaptureFences(state, installation);
 }
 export async function stopRuntime(state: string) {
   const current = await askRuntime(state, 'supervisor', 'stop');

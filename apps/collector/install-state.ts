@@ -12,6 +12,8 @@ export const entrySchema = z.object({ channel: z.enum(channels), packageVersion:
   registeredAt: z.iso.datetime(), sources: z.array(z.enum(sources)) });
 export const installationSchema = z.object({ version: z.literal(1), deploymentId: z.string(), node: z.string(), launcher: z.string(),
   entries: z.array(entrySchema).optional(),
+  lifecycle: z.enum(['active', 'uninstalled']).optional(),
+  maintenanceRuntime: z.string().optional(),
   runtime: z.string(), installedAt: z.iso.datetime(), clients: z.array(z.object({ source: z.enum(sources), detected: z.boolean(),
     version: z.string().nullable(), executable: z.string().nullable(), nativeRoot: z.string(), configPath: z.string(),
     configured: z.boolean(), capability: z.literal('unverified'), notice: z.string() })),

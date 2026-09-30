@@ -57,9 +57,12 @@ test('offline npm package with scripts disabled → one key setup → owned hook
     const repeated = JSON.parse(await installed.run('setup')); assert.equal(repeated.deviceId, identity.deviceId); assert.equal(repeated.runtime.instance, installed.status.runtime.instance);
     assert.equal(repeated.autostart.lifecycle.login, 'not-verified'); assert.equal(repeated.autostart.lifecycle.sleepResume, 'not-verified');
     if (process.platform === 'win32') {
-      assert.equal(repeated.autostart.state, 'registered'); assert.equal(repeated.autostart.taskState, 'Running');
-      const script = "$t=Get-ScheduledTask -TaskName $env:SKYNET_TEST_TASK; [pscustomobject]@{level=[string]$t.Principal.RunLevel;logon=[string]$t.Principal.LogonType;hidden=$t.Settings.Hidden;action=$t.Actions[0].Arguments} | ConvertTo-Json -Compress";
+      assert.equal(repeated.autostart.state, 'registered');
+      const script = "$t=Get-ScheduledTask -TaskName $env:SKYNET_TEST_TASK; [pscustomobject]@{state=[string]$t.State;level=[string]$t.Principal.RunLevel;logon=[string]$t.Principal.LogonType;hidden=$t.Settings.Hidden;action=$t.Actions[0].Arguments} | ConvertTo-Json -Compress";
       const task = JSON.parse(await command('powershell.exe', ['-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(script, 'utf16le').toString('base64')], { ...env, SKYNET_TEST_TASK: repeated.autostart.taskName }));
+      assert.equal(repeated.autostart.taskState, task.state, 'report the actual scheduled task state, never infer Running from a separate fallback process');
+      assert.ok(['Running', 'Ready'].includes(task.state)); assert.equal(repeated.background, 'running');
+      assert.equal(repeated.worker.supervisorInstance, repeated.supervisor.instance);
       assert.equal(task.level, 'Limited'); assert.equal(task.logon, 'Interactive'); assert.equal(task.hidden, true);
       assert.ok(task.action.includes('-WindowStyle Hidden')); assert.ok(!task.action.includes(employee.enrollmentCredential));
     }

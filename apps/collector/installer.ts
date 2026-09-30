@@ -1,6 +1,6 @@
 import { cp, lstat, mkdir, readFile, realpath, writeFile } from 'node:fs/promises';
 import { basename, dirname, join, resolve } from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 import { randomUUID } from 'node:crypto';
 import { tmpdir } from 'node:os';
@@ -14,6 +14,7 @@ import { enroll, setupLock } from './enrollment.js';
 import { initializeControl } from './runtime-control.js';
 import { installAutostart } from './autostart.js';
 import { compareVersions, packageEntrySchema, registeredEntries } from './entries.js';
+import { launcherText } from './release.js';
 
 export const deploymentSchema = z.object({ deploymentId: z.string().regex(/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$/),
   enrollmentOrigin: z.string(), protocolVersion: z.literal(1) }).strict();
@@ -30,6 +31,8 @@ export async function install(state: string) {
   try {
     const previousValue = await optionalJson(join(state, 'installation.json'));
     const previous = previousValue ? installationSchema.parse(previousValue) : null;
+    const upgrade = await optionalJson(join(state, 'upgrade.json'));
+    if (upgrade && ['prepared', 'switched'].includes(upgrade.phase)) throw new Error('Interrupted upgrade exists; run repair before setup');
     if (previous && previous.deploymentId !== deployment.deploymentId) throw new Error('This user environment is already bound to another deployment');
     if (previous) {
       const activeVersion = (await jsonFile(join(previous.runtime, 'package.json'))).version;
@@ -55,7 +58,7 @@ export async function install(state: string) {
     });
     if (!clients.some(client => allowed(client.source) && (client.detected || client.configured))) throw new Error('No runnable Agent for this entry was detected; install the supported host and retry setup');
     const node = await realpath(process.execPath); const launcher = join(state, 'skynet-launcher.mjs');
-    const runtime = join(state, 'runtime', entry.version);
+    const runtime = previous?.runtime ?? join(state, 'runtime', entry.version);
     const configurations: Installation['configurations'] = [];
     const plans = [];
     for (const client of clients.filter(item => item.configured || (allowed(item.source) && item.detected))) {
@@ -80,12 +83,12 @@ export async function install(state: string) {
       await cp(join(packageRoot, 'dist', 'packages'), join(runtime, 'dist', 'packages'), { recursive: true, errorOnExist: true });
       const zodRoot = dirname(createRequire(import.meta.url).resolve('zod/package.json'));
       await cp(zodRoot, join(runtime, 'node_modules', 'zod'), { recursive: true, errorOnExist: true });
-      await writeFile(join(runtime, 'package.json'), JSON.stringify({ type: 'module', version: entry.version }), { flag: 'wx', mode: 0o600 });
+      await writeFile(join(runtime, 'package.json'), JSON.stringify({ type: 'module', version: entry.version, captureFenceVersion: 1 }), { flag: 'wx', mode: 0o600 });
     }
-    const launcherText = `#!/usr/bin/env node\n// Skynet owned stable launcher; contains no credentials.\nawait import(${JSON.stringify(pathToFileURL(join(runtime, 'dist', 'apps', 'collector', 'cli.js')).href)});\n`;
+    const desiredLauncher = launcherText(runtime, previous?.maintenanceRuntime);
     const existingLauncher = await readFile(launcher, 'utf8').catch(error => { if (error.code === 'ENOENT') return null; throw error; });
-    if (existingLauncher !== null && existingLauncher !== launcherText) throw new Error('Stable launcher differs; upgrade/repair is required before replacing it');
-    if (!existingLauncher) await writeFile(launcher, launcherText, { flag: 'wx', mode: 0o700 });
+    if (existingLauncher !== null && existingLauncher !== desiredLauncher) throw new Error('Stable launcher differs; upgrade/repair is required before replacing it');
+    if (!existingLauncher) await writeFile(launcher, desiredLauncher, { flag: 'wx', mode: 0o700 });
     for (const client of clients.filter(item => item.configured)) {
       const sourceState = join(state, 'sources', client.source); await mkdir(join(sourceState, 'spool'), { recursive: true, mode: 0o700 });
       await atomicJson(join(sourceState, 'settings.json'), { sharedIdentity: '../../identity.json', nativeRoot: client.nativeRoot,
@@ -97,6 +100,7 @@ export async function install(state: string) {
       registeredAt: registeredEntries(previous).find(item => item.channel === entry.channel)?.registeredAt ?? new Date().toISOString(),
       sources: clients.filter(client => allowed(client.source) && client.configured).map(client => client.source) });
     const installation = installationSchema.parse({ version: 1, deploymentId: deployment.deploymentId, node, launcher, runtime, entries,
+      maintenanceRuntime: previous?.maintenanceRuntime,
       installedAt: previous?.installedAt ?? new Date().toISOString(), clients, configurations });
     // Persist ownership after each config write, so a subsequent setup can safely
     // continue after a failure on another host without duplicating prior hooks.

@@ -11,9 +11,11 @@ import { autostartStatus } from './autostart.js';
 import { CaptureMonitor } from './capture-health.js';
 import { reportDeliveryHealth } from './health.js';
 import { registeredEntries } from './entries.js';
+import { payloadRoot } from './release.js';
 export { ensureRunning } from './supervisor.js';
 
 async function routeCodex(state: string, installation: ReturnType<typeof installationSchema.parse>) {
+  if (!installation.clients.some(client => client.source !== 'claude-code-cli' && client.configured)) return [];
   const spool = join(state, 'inbox', 'codex', 'spool'); await mkdir(spool, { recursive: true, mode: 0o700 });
   const errors: string[] = [];
   for (const file of await readdir(spool)) {
@@ -43,6 +45,8 @@ async function routeCodex(state: string, installation: ReturnType<typeof install
 }
 export async function runInstalled(state: string) {
   if (!process.send || !process.connected) throw new Error('Installed workers must be started by the owning supervisor; use skynet start');
+  const active = installationSchema.parse(await jsonFile(join(state, 'installation.json')));
+  if (active.runtime !== payloadRoot) throw new Error('This worker payload is no longer the active release; use the registered stable launcher');
   const supervisorInstance = await new Promise<string>((resolve, reject) => {
     const timer = globalThis.setTimeout(() => reject(new Error('Supervisor handshake timed out')), 5000);
     process.once('message', message => {
@@ -57,7 +61,7 @@ export async function runInstalled(state: string) {
   const stop = new AbortController(); process.once('SIGINT', () => stop.abort()); process.once('SIGTERM', () => stop.abort());
   process.once('disconnect', () => stop.abort());
   process.on('message', message => { if (typeof message === 'object' && message !== null && (message as any).type === 'stop') stop.abort(); });
-  const lease = await ownRuntime(state, 'worker', () => ({ pid: process.pid, instance, supervisorInstance, startedAt, state: stop.signal.aborted ? 'stopping' : 'running' }), () => stop.abort());
+  const lease = await ownRuntime(state, 'worker', () => ({ pid: process.pid, instance, runtime: payloadRoot, supervisorInstance, startedAt, state: stop.signal.aborted ? 'stopping' : 'running' }), () => stop.abort());
   const legacy = await optionalJson(lockPath);
   if (legacy && legacy.version !== 2) {
     try { process.kill(legacy.pid, 0); throw new Error('Legacy worker may still be active; stop it using its original installation before migrating'); }
@@ -140,6 +144,9 @@ export async function installedStatus(state: string) {
       confirmedUploads: tracked.filter((item: any) => item.acknowledgedSnapshotId).length, queuedEvents: queued.filter(file => file.endsWith('.json')).length, capture, gap, coverage });
   }
   return { installed: true, deviceId: identity.deviceId, deploymentId: installation.deploymentId, stateDirectory: state,
+    launcher: installation.launcher,
+    lifecycle: installation.lifecycle ?? 'active', runtimeVersion: (await jsonFile(join(installation.runtime, 'package.json'))).version,
+    upgrade: await optionalJson(join(state, 'upgrade.json')).then(value => value ? { phase: value.phase, updatedAt: value.updatedAt } : null),
     entries: registeredEntries(installation),
     background: supervisor?.worker?.instance === worker?.instance && worker?.supervisorInstance === supervisor?.instance && worker?.state === 'running' ? 'running' : 'unavailable', runtime,
     supervisor, worker, controlError, lastSweepCompletedAt: runtime?.checkedAt ?? null,

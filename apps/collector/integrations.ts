@@ -3,9 +3,10 @@ import { promisify } from 'node:util';
 import { homedir } from 'node:os';
 import { delimiter, join, resolve } from 'node:path';
 import { lstat, stat, open, readFile, realpath, rename, unlink, writeFile } from 'node:fs/promises';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { type Installation, plainDirectory } from './install-state.js';
 import { syncDirectory } from '../../packages/filesystem.js';
+import { setupLock } from './enrollment.js';
 
 const execute = promisify(execFile);
 const events = ['SessionStart', 'UserPromptSubmit', 'PreToolUse', 'PostToolUse', 'PostToolUseFailure', 'Stop', 'SessionEnd'];
@@ -79,7 +80,9 @@ export async function planConfiguration(path: string, entries: Record<string, un
   return { path, before, after: JSON.stringify(value, null, 2) + '\n', entries };
 }
 export async function applyConfiguration(plan: Plan) {
-  const lock = await open(`${plan.path}.skynet.lock`, 'wx', 0o600).catch(() => { throw new Error('Another installer is modifying host settings'); });
+  const canonical = await realpath(resolve(plan.path, '..'));
+  const tag = createHash('sha256').update(resolve(plan.path).toLowerCase()).digest('hex').slice(0, 24);
+  const release = await setupLock(canonical, `configuration-${tag}`);
   const temporary = `${plan.path}.${randomUUID()}.tmp`;
   try {
     const current = await readFile(plan.path, 'utf8').catch(error => { if (error.code === 'ENOENT') return null; throw error; });
@@ -93,5 +96,5 @@ export async function applyConfiguration(plan: Plan) {
     const checked = await readFile(plan.path, 'utf8').catch(error => { if (error.code === 'ENOENT') return null; throw error; });
     if (checked !== current) throw new Error('Host settings changed during setup; original retained');
     await rename(temporary, plan.path); await syncDirectory(resolve(plan.path, '..'));
-  } finally { await lock.close(); await unlink(`${plan.path}.skynet.lock`); await unlink(temporary).catch(() => undefined); }
+  } finally { await release(); await unlink(temporary).catch(() => undefined); }
 }

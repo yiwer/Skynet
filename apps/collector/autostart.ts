@@ -8,7 +8,8 @@ import { optionalJson, type Installation } from './install-state.js';
 
 const execute = promisify(execFile);
 const lifecycle = { login: 'not-verified', reboot: 'not-verified', sleepResume: 'not-verified', desktopIcon: 'not-verified' };
-type Registration = { state: string; adapter: string; taskName?: string; command?: string; arguments?: string; description?: string; checkedAt: string; error?: string; lifecycle: typeof lifecycle };
+type Registration = { state: string; adapter: string; taskName?: string; command?: string; arguments?: string; description?: string; checkedAt: string; error?: string; lifecycle: typeof lifecycle;
+  fallback?: { observedAt: string; notice: string } };
 function powershell() { return join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe'); }
 async function windowsTask(state: string, mode: 'register' | 'start' | 'inspect' | 'remove', registration: Registration) {
   // All task fields are JSON data. No path or identifier is interpolated into shell code.
@@ -26,6 +27,7 @@ switch($env:SKYNET_AUTOSTART_ACTION){
   return result.stdout.trim();
 }
 export async function installAutostart(state: string, installation: Installation) {
+  const previous = await optionalJson(join(state, 'autostart.json')) as Registration | null;
   if (process.platform !== 'win32') {
     const value: Registration = { state: 'degraded', adapter: 'current-session-only', checkedAt: new Date().toISOString(), lifecycle,
       error: 'Login integration is not yet implemented or measured on this OS. Run skynet start after login; keep Node at its registered absolute path.' };
@@ -40,6 +42,7 @@ export async function installAutostart(state: string, installation: Installation
   const value: Registration = { state: 'registering', adapter: 'windows-user-task', taskName: `Skynet-${tag}`, command: powershell(),
     arguments: `-NoProfile -NonInteractive -WindowStyle Hidden -EncodedCommand ${Buffer.from(script, 'utf16le').toString('base64')}`,
     description: `Skynet current-user collector ${tag}`, checkedAt: new Date().toISOString(), lifecycle };
+  if (previous && previous.taskName === value.taskName && previous.command === value.command && previous.arguments === value.arguments) value.fallback = previous.fallback;
   await atomicJson(join(state, 'autostart.json'), value);
   try { await windowsTask(state, 'register', value); value.state = 'registered'; }
   catch { value.state = 'degraded'; value.error = 'Windows user task registration was blocked or conflicts with an existing task. Collection can run in this login session. Inspect Task Scheduler permissions and rerun skynet setup; no elevation or policy change is required by Skynet.'; }
@@ -49,12 +52,14 @@ export async function startAutostart(state: string) {
   const value = await optionalJson(join(state, 'autostart.json')) as Registration | null;
   if (value?.adapter !== 'windows-user-task' || value.state !== 'registered') return false;
   try { await windowsTask(state, 'start', value); return true; }
-  catch { await atomicJson(join(state, 'autostart.json'), { ...value, state: 'degraded', error: 'The registered user task could not start. Current-session fallback is active; inspect Task Scheduler and rerun setup.' }); return false; }
+  catch { await atomicJson(join(state, 'autostart.json'), { ...value, state: 'degraded', error: 'The registered user task could not start. Current-session fallback is active; inspect Task Scheduler and rerun setup.',
+    fallback: { observedAt: new Date().toISOString(), notice: 'Current-session launch was used after the registered task failed; this is an observation, not login/reboot validation.' } }); return false; }
 }
 export async function markAutostartDelayed(state: string) {
   const value = await optionalJson(join(state, 'autostart.json'));
   if (value) await atomicJson(join(state, 'autostart.json'), { ...value, state: 'degraded',
-    error: 'The user task did not establish runtime ownership. A current-session background was started; inspect Task Scheduler and run setup again.' });
+    error: 'The user task did not establish runtime ownership. A current-session background was started; inspect Task Scheduler and run setup again.',
+    fallback: { observedAt: new Date().toISOString(), notice: 'Current-session launch was used after delayed task ownership; this does not prove login/reboot operation.' } });
 }
 export async function autostartStatus(state: string) {
   const value = await optionalJson(join(state, 'autostart.json')) as Registration | null;

@@ -1,7 +1,7 @@
 import { join } from 'node:path';
 import { z } from 'zod';
 import { atomicJson } from '../../packages/filesystem.js';
-import { channels, installationSchema, jsonFile, type Installation } from './install-state.js';
+import { channels, installationSchema, jsonFile, optionalJson, type Installation } from './install-state.js';
 import { applyConfiguration, planConfiguration } from './integrations.js';
 import { ensureRunning, stopRuntime } from './supervisor.js';
 import { setupLock } from './enrollment.js';
@@ -21,9 +21,14 @@ export async function removeEntry(state: string, channel: string) {
   const selected = z.enum(channels).parse(channel);
   const release = await setupLock(state);
   try {
+    const upgrade = await optionalJson(join(state, 'upgrade.json'));
+    if (upgrade && ['prepared', 'switched'].includes(upgrade.phase)) throw new Error('Interrupted upgrade exists; run repair before changing entry ownership');
     const installation = installationSchema.parse(await jsonFile(join(state, 'installation.json')));
     const remaining = registeredEntries(installation).filter(entry => entry.channel !== selected);
     const active = new Set(remaining.flatMap(entry => entry.sources));
+    if (installation.clients.some(client => client.source !== 'claude-code-cli' && client.configured && !active.has(client.source))
+      && (await jsonFile(join(installation.runtime, 'package.json'))).captureFenceVersion !== 1)
+      throw new Error('This older runtime cannot enforce this Codex source capture fence. Upgrade before removing its final owner, or use full uninstall; current entries and evidence retained.');
     const retained = installation.configurations.filter(configuration =>
       installation.clients.some(client => client.configPath === configuration.path && active.has(client.source)));
     const plans = [];

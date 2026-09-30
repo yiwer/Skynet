@@ -10,10 +10,12 @@ const { values, positionals } = parseArgs({ allowPositionals: true, options: {
   'source-version': { type: 'string' },
   output: { type: 'string' }, origin: { type: 'string' }, deployment: { type: 'string' },
   entry: { type: 'string' },
+  version: { type: 'string' },
 } });
 const command = positionals[0];
-if (!['setup', 'status', 'start', 'stop', 'autostart-remove', 'restore', 'pack-agent', 'pack-plugins', 'entry-remove'].includes(command ?? '') && !values.state) throw new Error('--state must name an explicit private collector directory');
-const state = values.state ? resolve(values.state) : ['setup', 'status', 'start', 'stop', 'autostart-remove', 'entry-remove'].includes(command ?? '') ? (await import('./install-state.js')).defaultState() : '';
+const maintenance = ['repair', 'upgrade', 'rollback', 'uninstall', 'drain'];
+if (!['setup', 'status', 'start', 'stop', 'autostart-remove', 'restore', 'pack-agent', 'pack-plugins', 'entry-remove', ...maintenance].includes(command ?? '') && !values.state) throw new Error('--state must name an explicit private collector directory');
+const state = values.state ? resolve(values.state) : ['setup', 'status', 'start', 'stop', 'autostart-remove', 'entry-remove', ...maintenance].includes(command ?? '') ? (await import('./install-state.js')).defaultState() : '';
 async function stdin() {
   let input = '';
   for await (const part of process.stdin) {
@@ -23,15 +25,17 @@ async function stdin() {
   return JSON.parse(input);
 }
 
-if (command === 'pack-plugins') {
+if (maintenance.includes(command ?? '')) {
+  console.log(JSON.stringify(await (await import('./maintenance.js')).maintain(state, command as 'repair' | 'upgrade' | 'rollback' | 'uninstall' | 'drain')));
+} else if (command === 'pack-plugins') {
   if (!values.output || !values.origin || !values.deployment) throw new Error('Operator packaging requires --output NEW_DIRECTORY --origin HTTPS_ORIGIN --deployment ID');
-  console.log(JSON.stringify(await (await import('./plugin-package.js')).packPlugins(values.output, values.origin, values.deployment)));
+  console.log(JSON.stringify(await (await import('./plugin-package.js')).packPlugins(values.output, values.origin, values.deployment, values.version)));
 } else if (command === 'entry-remove') {
   if (!values.entry) throw new Error('entry-remove requires --entry npm|codex-plugin|claude-plugin');
   console.log(JSON.stringify(await (await import('./entries.js')).removeEntry(state, values.entry)));
 } else if (command === 'pack-agent') {
   if (!values.output || !values.origin || !values.deployment) throw new Error('Operator packaging requires --output NEW_DIRECTORY --origin HTTPS_ORIGIN --deployment ID');
-  console.log(JSON.stringify(await (await import('./package.js')).packAgent(values.output, values.origin, values.deployment)));
+  console.log(JSON.stringify(await (await import('./package.js')).packAgent(values.output, values.origin, values.deployment, values.version)));
 } else if (command === 'restore') {
   const { restorePackage } = await import('./restore.js');
   const version = values['source-version'] ?? values['desktop-version'];
@@ -62,11 +66,17 @@ if (command === 'pack-plugins') {
   await (await import('./runtime.js')).runInstalled(state);
 } else if (command === 'start') {
   const { installationSchema, jsonFile } = await import('./install-state.js');
-  const installation = installationSchema.parse(await jsonFile(join(state, 'installation.json')));
-  await (await import('./supervisor.js')).ensureRunning(state, installation.node, installation.launcher);
-  console.log(JSON.stringify(await (await import('./runtime.js')).installedStatus(state)));
+  const release = await (await import('./enrollment.js')).waitForSetupLock(state);
+  try {
+    const installation = installationSchema.parse(await jsonFile(join(state, 'installation.json')));
+    if (installation.lifecycle === 'uninstalled') throw new Error('Capture is uninstalled; use drain for frozen delivery, or explicitly setup to reconnect');
+    await (await import('./supervisor.js')).ensureRunning(state, installation.node, installation.launcher);
+    console.log(JSON.stringify(await (await import('./runtime.js')).installedStatus(state)));
+  } finally { await release(); }
 } else if (command === 'stop') {
-  console.log(JSON.stringify(await (await import('./supervisor.js')).stopRuntime(state)));
+  const release = await (await import('./enrollment.js')).waitForSetupLock(state);
+  try { console.log(JSON.stringify(await (await import('./supervisor.js')).stopRuntime(state))); }
+  finally { await release(); }
 } else if (command === 'autostart-remove') {
   console.log(JSON.stringify(await (await import('./autostart.js')).removeAutostart(state)));
 } else if (command === 'retry') {
