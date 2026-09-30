@@ -8,9 +8,10 @@ import { readEvidence } from './evidence.js';
 import { beijingDate } from '../../packages/activity.js';
 import { manifestSchema, sourceTimestamp, type SessionSummary } from '../../packages/contracts/archive.js';
 import { evidenceLink, searchSchema, type SearchInput, type SearchHit, type EvidenceLocation } from '../../packages/contracts/search.js';
+import { eventOrigins } from './provenance.js';
 
 const cursorSchema = z.object({ scan: z.uuid(), offset: z.number().int().min(0), query: z.string().length(64) });
-const scope = '每个匹配快照返回首个命中：已解析原文、原件 JSONL（含未知和未闭合行）、文本关联材料；二进制不做 OCR。内容为不区分大小写的字面量，员工和项目为包含匹配。日期是命中记录的北京时间来源日期，未知日期不匹配日期筛选；关联材料日期未知。';
+const scope = '每个匹配快照返回首个命中：已解析原文、原件 JSONL（含未知和未闭合行）、文本关联材料；二进制不做 OCR。员工和项目按已确认事件原始归属匹配；无法解析的原件行及关联材料只能按上传设备员工/清单项目匹配。内容、员工、项目均为不区分大小写的字面包含。日期是命中记录的北京时间来源日期，未知日期不匹配日期筛选；关联材料日期未知。';
 export const textBoundary = (text: string, end: number) => end > 0 && /[\uD800-\uDBFF]/.test(text[end - 1]!) && /[\uDC00-\uDFFF]/.test(text[end] ?? '') ? end - 1 : end;
 
 export async function migrateArchiveSearch(db: Database) {
@@ -53,9 +54,11 @@ export function archiveSearch(db: Database, raw: RawStore) {
           const selected = await connection.query(`WITH candidates AS (SELECT s.*,e.name AS employee,
               row_number() OVER (PARTITION BY s.device_id,s.source,s.source_session_id ORDER BY s.committed_at DESC,s.id DESC) AS recency
               FROM snapshots s JOIN devices d ON d.id=s.device_id JOIN employees e ON e.id=d.employee_id)
-            SELECT id FROM candidates WHERE ($1='all' OR recency=1) AND strpos(lower(employee),lower($2))>0
-              AND strpos(lower(manifest->>'project'),lower($3))>0
-              AND ($4='all' OR COALESCE(manifest->>'project','')='') AND ($5::text IS NULL OR source=$5)
+            SELECT id FROM candidates c WHERE ($1='all' OR recency=1) AND ($5::text IS NULL OR source=$5) AND
+              ((strpos(lower(employee),lower($2))>0 AND strpos(lower(manifest->>'project'),lower($3))>0
+                AND ($4='all' OR COALESCE(manifest->>'project','')=''))
+              OR EXISTS(SELECT 1 FROM snapshot_events se JOIN archive_event_origins o ON o.event_id=se.event_id JOIN employees oe ON oe.id=o.employee_id
+                WHERE se.snapshot_id=c.id AND strpos(lower(oe.name),lower($2))>0 AND strpos(lower(o.project),lower($3))>0 AND ($4='all' OR o.project='')))
             ORDER BY committed_at DESC,id DESC LIMIT 100001`,
           [filters.history, filters.employee, filters.project, filters.projectState, filters.source ?? null]);
           if (selected.rows.length > 100_000) throw new HttpError(413, '候选快照超过单次检索的 100,000 份上限，请收窄员工、项目或 Agent；未返回不完整结果');
@@ -82,6 +85,11 @@ export function archiveSearch(db: Database, raw: RawStore) {
         const manifest = manifestSchema.parse(row.manifest);
         const bytes = await raw.read(row.device_id, row.hash); scannedBytes += bytes.length;
         const evidence = readEvidence(bytes, manifest.source);
+        const origins = new Map((await eventOrigins(db, row.id)).map(event => [`${event.line}/${event.block}`, event]));
+        const ownerMatches = (employee: string, project: string) => employee.toLowerCase().includes(filters.employee.toLowerCase())
+          && project.toLowerCase().includes(filters.project.toLowerCase()) && (filters.projectState === 'all' || project === '');
+        const currentOwnerMatches = ownerMatches(row.employee, manifest.project);
+        let hitEmployee = row.employee; let hitProject = manifest.project;
         let hit: Pick<SearchHit, 'location' | 'line' | 'block' | 'sourceDate' | 'excerpt' | 'matchLength'> | undefined;
         function match(text: string, timestamp: string | null, location: EvidenceLocation, line: number | null, block: number | null = null) {
           if (!dateMatches(timestamp)) return;
@@ -92,28 +100,32 @@ export function archiveSearch(db: Database, raw: RawStore) {
             excerpt: text.slice(start, textBoundary(text, Math.min(text.length, index + (found?.[0].length ?? 0) + 120))), matchLength: found?.[0].length ?? 0 };
         }
         for (const [offset, event] of evidence.events.entries()) {
+          const origin = origins.get(`${event.line}/${event.block ?? 0}`);
+          if (!ownerMatches(origin?.employee ?? row.employee, origin?.project ?? manifest.project)) continue;
           match(event.text, event.timestamp, { kind: 'event', offset, textOffset: 0, line: event.line, block: event.block, parserVersion: evidence.parserVersion }, event.line, event.block ?? null);
-          if (hit) break;
+          if (hit) { hitEmployee = origin?.employee ?? row.employee; hitProject = origin?.project ?? manifest.project; break; }
         }
         if (!hit) {
           // Raw lines also preserve metadata, unsupported formats and partial trailing writes.
           for (const [index, line] of bytes.toString('utf8').split('\n').entries()) {
             if (!line) continue;
+            const origin = origins.get(`${index + 1}/0`);
+            if (!ownerMatches(origin?.employee ?? row.employee, origin?.project ?? manifest.project)) continue;
             let timestamp: string | null = null;
             try { timestamp = sourceTimestamp(JSON.parse(line)?.timestamp); } catch { /* Unknown source time remains unknown. */ }
             match(line, timestamp, { kind: 'raw', line: index + 1, textOffset: 0 }, index + 1);
-            if (hit) break;
+            if (hit) { hitEmployee = origin?.employee ?? row.employee; hitProject = origin?.project ?? manifest.project; break; }
           }
         }
-        if (!hit && !(filters.from || filters.to)) for (const material of manifest.capture?.materials ?? []) {
+        if (!hit && currentOwnerMatches && !(filters.from || filters.to)) for (const material of manifest.capture?.materials ?? []) {
           if (material.mediaType === 'binary') continue;
           const content = await raw.read(row.device_id, material.hash); scannedBytes += content.length;
           match(content.toString('utf8'), null, { kind: 'material', materialId: material.id, textOffset: 0 }, null);
           if (hit) break;
         }
-        if (!hit && !expression && !(filters.from || filters.to)) hit = { location: null, line: null, block: null, sourceDate: null, excerpt: '当前原件为空；可查看清单和完整导出。', matchLength: 0 };
+        if (!hit && currentOwnerMatches && !expression && !(filters.from || filters.to)) hit = { location: null, line: null, block: null, sourceDate: null, excerpt: '当前原件为空；可查看清单和完整导出。', matchLength: 0 };
         if (hit) {
-          const session: SessionSummary = { id: row.id, employee: row.employee, source_session_id: row.source_session_id, project: manifest.project,
+          const session: SessionSummary = { id: row.id, employee: hitEmployee, source_session_id: row.source_session_id, project: hitProject,
             committed_at: row.committed_at.toISOString(), hash: row.hash, byte_length: manifest.byteLength, source_version: manifest.sourceVersion, source_os: manifest.sourceOs, source: manifest.source };
           const result = { ...session, ...hit, generation: manifest.capture?.generation ?? null, revision: manifest.capture?.revision ?? null, webPath: evidenceLink(row.id, hit.location) };
           if (hits.length && Buffer.byteLength(JSON.stringify([...hits, result])) > 7000) break;

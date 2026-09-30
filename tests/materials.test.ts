@@ -141,7 +141,7 @@ test('three sources retain generations, related bytes, bounded large output and 
     await section.getByRole('button', { name: '阅读 tool-results/large.txt', exact: true }).click();
     await expect(section.getByRole('region', { name: '关联材料阅读' })).toContainText('<script>window.materialInjected=true</script>');
     assert.equal(await page.evaluate(() => 'materialInjected' in window), false);
-    await section.getByText(/查看旧快照/).click(); await section.locator(`a[href="#${selected.firstId}"]`).click(); await expect(page.getByRole('region', { name: '快照历史与关联材料' })).toContainText('首次捕获');
+    await section.getByText(/查看旧快照/).click(); await section.locator(`details a[href="#${selected.firstId}"]`).click(); await expect(page.getByRole('region', { name: '快照历史与关联材料' })).toContainText('首次捕获');
     await page.screenshot({ path: join(sandbox.directory, 'materials-desktop.png'), fullPage: true });
     await page.setViewportSize({ width: 375, height: 900 }); assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
     await page.screenshot({ path: join(sandbox.directory, 'materials-mobile.png'), fullPage: true });

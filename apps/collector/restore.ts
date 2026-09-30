@@ -135,6 +135,7 @@ export async function restorePackage(options: { packagePath: string; target: str
     restoredMaterials.push({ ...item.material, path, mapping: item.mapping });
   }
   const result = { state: isClaude ? 'prepared-claude-unverified' : isCodexCli ? 'prepared-cli' : 'prepared-desktop-unverified', snapshotId: bundle.snapshot.id, sourceEmployee: bundle.snapshot.employee,
+    restoredFrom: { snapshotId: bundle.snapshot.id, hash: bundle.manifest.hash, byteLength: bundle.manifest.byteLength },
     sourceSessionId: bundle.manifest.sourceSessionId, nativeHome: target, rolloutPath,
     sha256: bundle.manifest.hash, byteLength: bundle.manifest.byteLength,
     sourceVersion: bundle.manifest.sourceVersion, runtimeVersion, os: process.platform,
