@@ -17,7 +17,8 @@
     "test:linux": "tsx tests/linux-smoke.ts",
     "test:native-recovery": "tsx --test tests/native-recovery.test.ts",
     "test:codex-cli-native": "tsx --test tests/native-codex-cli.test.ts",
-    "test:mcp-native": "tsx --test tests/native-mcp.test.ts"
+    "test:mcp-native": "tsx --test tests/native-mcp.test.ts",
+    "test:g0-native": "tsx tests/native-g0.ts"
   },
   "dependencies": {
     "@fastify/static": "^10.1.5",
