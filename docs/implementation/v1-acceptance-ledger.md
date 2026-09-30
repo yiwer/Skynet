@@ -20,11 +20,11 @@
 | AC-12 日周项目与证据 | [#27](issue-27.md)：搜索、稳定原件位置、跨页完整读取 | #28/#29 工作主题、日周与项目视图 |
 | AC-13 证据分级与统计 | [#8](issue-8.md)、[#19](issue-19.md)：唯一事件及来源员工/项目/日期、历史或关联上下文与未知分类；[#22](issue-22.md) 四级结论、逐字引用及原材料锚点与输入语义位置区分 | 真实模型质量验收；#28/#31 完整统计与未知值，不把 context-only 捕获计活动 |
 | AC-14 北京时间归期 | [#8](issue-8.md)：来源日期和可信接入边界 | #28/#29 定时日周任务；#30 迟到数据和受管理期间 |
-| AC-15 更正与版本隔离 | 原始快照不可变 | #24 任务版本；#30 更正、历史报告与旧任务晚完成 |
+| AC-15 更正与版本隔离 | 原始快照不可变；[#24](issue-24.md) 持久 generation、parser/配置、失效租约、迟到旧 token、新输入去抖与非适用历史结果公开回归 | #30 更正和历史报告；真实运行验收 |
 | AC-16 认证撤销与共享读 | [#20](issue-20.md)：逐请求校验、共享读取、维护权限、审计 | 新增分析/报告/更正接口沿用边界并复验 |
 | AC-17 MCP 真实授权与查询 | [#26](issue-26.md)、[#27](issue-27.md)：两个 CLI 正常 OAuth、自然到期刷新、分页及导出 | 日周报告与 Web 共用结果；实际部署域名 |
 | AC-18 真实分析与长会话 | [#22](issue-22.md) 已集成公开任务、独立实际 Claude Code worker、Web/MCP 结果与证据；支线 Windows/Linux 原生公开整链使用显式 loopback fixture 通过 | #21/G2 前置；指定千问 PAYG 模型、专用配置、核实价格与预算实测；#23 长会话 |
-| AC-19 分析失败隔离 | [#22](issue-22.md)：未配置/离线、有限输入、引用拒绝、deadline 失败、隔离实际 CLI；支线挂起超时期间上传/读取/导出正常 | #24 完整预算、重试、租约、晚完成和版本隔离；真实运行验收 |
+| AC-19 分析失败隔离 | [#22](issue-22.md)、[#24](issue-24.md)：公开持久有限总尝试、全局并发、逐尝试预算预留、未知不退款、租约与转发 fencing、版本适用性、Web/MCP 队列；支线实际 CLI Windows/Linux loopback 无效引用/超时两次停止，原件上传/查询/导出仍可用 | 真实 PAYG 价格上界与账单、模型质量及 G2/G3验收；fixture 不认证真实计费 |
 | AC-20 指令隔离与防递归 | [#22](issue-22.md) 产品运行时禁用执行工具、hooks/auth/MCP 不继承，恶意材料及伪造引用在 Windows/Linux 实际 CLI loopback 公共链拒绝，无员工会话回流 | 真实千问 PAYG 模型与完整 G3 验收 |
 | AC-21 服务器备份恢复 | 单机容器持久卷重启演练；ACK 明示单副本 | #32 独立一致备份、新服务器恢复、报告引用、损坏检测及运行状态 |
 | AC-22 安装与性能 | [#11](issue-11.md)、[#12](issue-12.md)、[#18](issue-18.md)、[#14](issue-14.md) 的 200 样本 hook 实测；稳定维护 launcher 普通条件 P95 85.44 ms，保留长尾 | 并行满盘 P95 **111.35 ms** 超标记录保留；需优化/复验、安装两分钟与原文 60 秒指标、登记负载 |
@@ -36,7 +36,7 @@
 | G0 / #10 | 未通过 | Desktop 实际 UI 自动采集和服务器独立续聊；当前环境 Codex workspace-write 被宿主退化为 read-only；全部材料/历史/工具样例支持矩阵 |
 | G1 / #15 | 未通过 | fallback确定性崩溃恢复已修；Windows初次安装控制端点无响应仍需tight-loop诊断；Desktop图标与登录/重启/休眠、完整安装演练和第二人复现 |
 | G2 / #21 | 未通过 | 可独立资格材料来源已集成但不替代门槛；在已通过安装的三来源上复跑完整故障矩阵、覆盖未知关系和支持组合 |
-| G3 / #25 | 未通过 | #22 已为 loopback 准备；#23/#24，真实 Claude Code + 指定千问 PAYG 模型、核实价格与预算 |
+| G3 / #25 | 未通过 | #22/#24 已为 loopback 准备；#23 长会话，真实 Claude Code + 指定千问 PAYG 模型、核实价格与预算 |
 | G4 / #33 | 未通过 | #28–#32、页面/性能检查、第二人运维复现、门槛通过后的五个工作日试点与负责人签收 |
 
 门槛按顺序验收。代码或合成回归通过只证明所测行为，不解除尚缺真实条件的门槛，不关闭未验收票据。性能实测达不到目标时保留失败值和具体优化方案。
@@ -88,3 +88,13 @@
 后续诊断指针 `%TEMP%/skynet-v1-implementation/runtime-control-diagnosis-readiness.md` 准备 role/action、connect/response/server event-loop 脱敏时序与最小化压力条件，tight red-capable loop 尚未完成，不能先假定CPU负载或调大timeout。G1/G2与全部V1门槛仍开放。
 
 recovery 合并后主线自身 typecheck/build/diffcheck 与 control保护5/5通过（2.04秒）；只有文档冲突，不重复heavy/native。完整Windows24项红结果来自该recovery支线，源码无冲突不能将它改写为主线完整通过；此前f6ccbca Linux28/28同样是另一环境/提交的证据。
+
+## 2026-09-30 #24 持久分析队列准备集成
+
+`f2b9cf9` 经 `c281d7c` 无冲突合入。保留 #14 guardian/UTF8、G0 原生恢复、#19 主件/材料原锚点，以及分析 inputLocation 的精确语义偏移。主线自身 typecheck/build/diffcheck 与队列/分析/OAuth MCP/旧会话（含自动增量及 confirmed append）5/5通过（18.7秒）。队列证据 `%TEMP%/skynet-test-ZW9LOh`，历史 `jxlHRv`，HTTPS MCP `Y5P5bC`。没有重复完整 Windows 批次，也不声明已修复后台控制失败。
+
+实际 CLI 证据来自 #24 实现分支最终源码：Windows `5Mze6i`1/1（30.9秒），Linux UID1000生产 worker镜像 `pvpq1E`1/1（32.1秒）。两次均明确使用合成 loopback provider，没有付费调用。模型输出无效引用/挂起均在两次总尝试后停止，Web/MCP队列同状态，未知用量不退款，故障期间原件仍可提交/读取/导出。正金额预算算术只用测试自建假凭据/价格进行数据库操作，不代表计费证明。已修迁移与在线领取的 jobs/targets 锁反转；受控旧实现稳定 red2.8秒、固定锁顺序后 green，以及原始 Windows native 复跑均有维护回归。详见 [#24](issue-24.md)。
+
+最新较早节点 `9b90e7a` 的 [Linux CI](https://github.com/yiwer/Skynet/actions/runs/36677460451) 为27pass/1fail/0cancelled（106.54秒），失败是安装测试 `installation.test.ts:204` 期望禁用任务时包含 `not yet verified`；runtime 状态竞态由 #14 独立跟进。该结果不含本次 #24，不能用主线定向通过覆盖，也不把之前 f6ccbca 的28/28改写为最新完整通过。此前 Windows 初次维护1500ms控制无响应仍保留，后续独立 tight-loop 诊断继续。
+
+G0–G4、#21/G2、#22/#24 的真实 PAYG/G3均开放。#23长会话、#28日报及之后票据继续按依赖准备；未宣称 V1完成或关闭票据。
