@@ -193,8 +193,8 @@ test('resuming one old conversation preserves source dates, sends verified appen
     await expect(page.locator('.message').first()).toContainText('历史上下文');
     let nextOffset = (await detail(results.at(-1)!.snapshotId)).nextOffset;
     while (nextOffset !== null) {
-      const response = page.waitForResponse(value => value.url().endsWith(`?offset=${nextOffset}`));
-      await page.getByRole('button', { name: '下一页' }).click();
+      const response = page.waitForResponse(value => value.url().endsWith(`/api/snapshots/${results.at(-1)!.snapshotId}?offset=${nextOffset}`));
+      await page.getByRole('button', { name: '下一页', exact: true }).click();
       const nextPage = await (await response).json(); nextOffset = nextPage.nextOffset;
       await expect(page.locator('.message').first()).toContainText(`原件第 ${nextPage.events[0].line} 行`);
       await expect(activity).toContainText('用户轮次 2 · 工具调用 1');

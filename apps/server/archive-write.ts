@@ -3,6 +3,7 @@ import { digest, type Database } from './database.js';
 import { RawStore } from './raw-store.js';
 import { HttpError } from './identities.js';
 import { manifestSchema, type Manifest } from '../../packages/contracts/archive.js';
+import { assignOrigins } from './provenance.js';
 
 export function archiveWriter(db: Database, raw: RawStore) {
   return async (owner: { id: string; enrolled_at: Date | null }, input: Manifest, uploadId?: string) => {
@@ -13,6 +14,7 @@ export function archiveWriter(db: Database, raw: RawStore) {
     const transaction = await db.connect();
     try {
       await transaction.query('BEGIN');
+      await transaction.query('SELECT pg_advisory_xact_lock(hashtextextended($1,19))', [`${owner.id}/${manifest.source}/${manifest.sourceSessionId}`]);
       if (uploadId) {
         // Serializes concurrent attempts for this device/key without exposing a
         // reservation before the snapshot and binding commit together.
@@ -27,9 +29,10 @@ export function archiveWriter(db: Database, raw: RawStore) {
       }
       const result = await transaction.query(`INSERT INTO snapshots(id,device_id,source_session_id,manifest_hash,manifest,hash)
         VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT(device_id,source,source_session_id,manifest_hash)
-        DO UPDATE SET manifest_hash=EXCLUDED.manifest_hash RETURNING id, committed_at`,
+        DO UPDATE SET manifest_hash=EXCLUDED.manifest_hash RETURNING id, committed_at,provenance`,
       [randomUUID(), owner.id, manifest.sourceSessionId, manifestHash, manifest, manifest.hash]);
       const record = result.rows[0];
+      if (!record.provenance) await assignOrigins(transaction, raw, { id: record.id, device_id: owner.id, manifest, hash: manifest.hash });
       if (uploadId) await transaction.query(`INSERT INTO snapshot_uploads(device_id,upload_id,manifest_hash,snapshot_id)
         VALUES($1,$2,$3,$4) ON CONFLICT DO NOTHING`, [owner.id, uploadId, manifestHash, record.id]);
       await transaction.query('COMMIT');

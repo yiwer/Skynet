@@ -35,6 +35,7 @@ AC-01…AC-22 的已有证据和缺口集中列于 [V1 验收证据台账](../im
 - #16：原件与清单先持久入队、断网退避补传、配额和设备同步状态已通过 `4ce4170` 合并。集成 10 项普通测试通过；实现分支另通过两个 CLI 安装模式及 Desktop 后端的原生回归。离线后改写/删除源头、429、错误凭据及错误 ACK 均保留队列；G1/G2 仍开放。
 - #17：持久上传键、同键异内容拒绝、注册确认丢失恢复与实际进程崩溃验证已通过 `f534f46` 合并；十次断连接丢 ACK 仍只有一个逻辑快照。整合时修复不同冷快照并发读取的忙碌问题，保留并行读取断言，并在 #12 合并后通过 13 项全量测试。
 - #18：真实 Linux ENOSPC、EACCES、ENOENT 下的正常 Claude 回合、独立故障报告与恢复后补传已通过 `cbb90b3` 合并。设备/会话/Web/MCP 共享动态覆盖，已提交原件保持不可变；无法补回的范围仍显示缺口。Claude 子会话 metadata 关联与原位恢复已修。最终合并专项 3/3 通过；Windows 等价故障、同时离线全盘满和性能目标仍待验收。
+- #19：`261fee9` 的主会话 A→B→C 服务器恢复链、逐事件原始员工/设备/项目、已确认历史去重、HTTP/Web/MCP 统计和导出已集成。相同文字独立活动保持分离，同 UUID 改变字节不覆盖历史；关联材料仅作上下文，已核实相同材料保留捕获来源，变化材料显式保留此前来源及不确定性。**关联子会话/fork 之后独立成为主会话时的事件历史归属仍未完成，#19 全部 AC 与 G2 保持开放。** 验证及限制见 [#19 记录](../implementation/issue-19.md)。
 - #20：维护者停用账号/设备、逐请求撤销及操作审计已通过 `ec65e04` 合并；与 #8 集成的 6 项公开流程测试通过，可信接入边界保留。#11 安装前置验收仍未通过。
 - #26：个人 OAuth 授权、HTTPS MCP、共享 Web/MCP 查询与分页导出已通过 `85a1533` 合并。两个真实 CLI 各完成 17 次 MCP 调用、正常授权及导出字节校验；后续自然等待 16 分钟，两者均无需重新登录即可自动刷新并重复通过读取。模型为确定性替身；实际域名部署及完整门禁仍开放。
 - #27：组合内容搜索、历史代次和稳定原件定位已通过 `96c3d92` 合并。分支 14 项普通测试、两个真实 CLI 各 20 次 MCP 调用通过；合并后搜索/MCP/缓存 3 项回归通过，105 个独立会话跨 37 页完整命中。查询成员可跨重启继续，过期明确报错；320/375/1440px 布局已检查。
@@ -44,7 +45,7 @@ AC-01…AC-22 的已有证据和缺口集中列于 [V1 验收证据台账](../im
 - [草稿 PR #55](https://github.com/yiwer/Skynet/pull/55) 已保存实现与规格关闭引用；保持草稿，尚无 ticket 通过验收或被关闭。
 - 本地类型检查、构建、公开入口 E2E、Linux 容器持久卷重启验证及初次 GitHub CI 通过；[两路评审](../implementation/review-issue-4.md) 的可修复代码问题已在 `9ad3277` 修复，并通过 `920b92f` 合并，回归检查通过。
 
-运行与复现见 [首条存档链](../implementation/issue-4.md)、[导出与恢复](../implementation/issue-5.md)、[Codex CLI 链路](../implementation/issue-6.md)、[Claude CLI 链路](../implementation/issue-7.md)、[旧会话与增量](../implementation/issue-8.md)、[关联材料](../implementation/issue-9.md)、[单 Key 安装](../implementation/issue-11.md)、[共享后台](../implementation/issue-12.md)、[插件接入](../implementation/issue-13.md)、[离线补传](../implementation/issue-16.md)、[提交一致性](../implementation/issue-17.md)、[故障与缺口](../implementation/issue-18.md)、[身份停用](../implementation/issue-20.md)、[HTTPS MCP](../implementation/issue-26.md)、[组合搜索](../implementation/issue-27.md)。目前需补齐的外部条件见 [原生客户端验收状态](../implementation/native-validation-status.md)。
+运行与复现见 [首条存档链](../implementation/issue-4.md)、[导出与恢复](../implementation/issue-5.md)、[Codex CLI 链路](../implementation/issue-6.md)、[Claude CLI 链路](../implementation/issue-7.md)、[旧会话与增量](../implementation/issue-8.md)、[关联材料](../implementation/issue-9.md)、[单 Key 安装](../implementation/issue-11.md)、[共享后台](../implementation/issue-12.md)、[插件接入](../implementation/issue-13.md)、[离线补传](../implementation/issue-16.md)、[提交一致性](../implementation/issue-17.md)、[故障与缺口](../implementation/issue-18.md)、[跨设备历史归属](../implementation/issue-19.md)、[身份停用](../implementation/issue-20.md)、[HTTPS MCP](../implementation/issue-26.md)、[组合搜索](../implementation/issue-27.md)。目前需补齐的外部条件见 [原生客户端验收状态](../implementation/native-validation-status.md)。
 
 ## 已确认的开发环境
 

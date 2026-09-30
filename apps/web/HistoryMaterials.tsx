@@ -10,7 +10,8 @@ export function HistoryMaterials({ snapshotId, capture, request }: { snapshotId:
   const [history, setHistory] = useState<{ id: string; committed_at: string; manifest: Manifest }[]>([]);
   const [next, setNext] = useState<number | null>(null);
   const [error, setError] = useState('');
-  const [preview, setPreview] = useState<{ material: Material; text: string; encoding: string; nextOffset: number | null } | null>(null);
+  const [preview, setPreview] = useState<{ material: Material; text: string; encoding: string; nextOffset: number | null;
+    ownership: { employee: string; snapshotId: string; limitation: string; warning: string | null } } | null>(null);
   const [busy, setBusy] = useState(false);
   async function loadHistory(offset: number, signal?: AbortSignal) {
     const result = await (await request(`/api/snapshots/${snapshotId}/history?offset=${offset}`, signal)).json();
@@ -58,7 +59,9 @@ export function HistoryMaterials({ snapshotId, capture, request }: { snapshotId:
         <button disabled={busy} aria-label={`下载 ${material.name}`} onClick={() => download(material)}>下载原件</button>
       </li>)}</ul>}
     {(capture?.gaps.length ?? 0) > 0 && <div className="notice" aria-label="材料缺口"><strong>材料缺口</strong><ul>{capture!.gaps.map((gap, index) => <li key={index}>{gapLabel[gap.code]}：{gap.reference}</li>)}</ul></div>}
-    {preview && <section aria-label="关联材料阅读"><h4>{preview.material.name}</h4><p className="small">{preview.encoding} · 仅作上下文 · 每页最多 32,768 字符，下载保留完整字节</p><pre>{preview.text}</pre>
+    {preview && <section aria-label="关联材料阅读"><h4>{preview.material.name}</h4><p className="small">{preview.encoding} · 仅作上下文 · 每页最多 32,768 字符，下载保留完整字节</p>
+      <p className="small">已确认捕获来源：{preview.ownership.employee} · <a href={`#${preview.ownership.snapshotId}`}>来源快照</a>。{preview.ownership.limitation}</p>
+      {preview.ownership.warning && <p className="notice">{preview.ownership.warning}</p>}<pre>{preview.text}</pre>
       <button disabled={busy} onClick={() => view(preview.material)}>从头阅读材料</button>{' '}
       {preview.nextOffset !== null && <button disabled={busy} onClick={() => view(preview.material, preview.nextOffset!)}>继续阅读材料</button>}
       <button onClick={() => setPreview(null)}>关闭材料</button></section>}

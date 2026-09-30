@@ -223,6 +223,13 @@ test(`${scenario}: ordinary Claude hooks archive two projects and a server-only 
     await mkdir(restoredWorkspace);
     const restoredEnv = await nativeEnv(restoredHome, target);
     restoring = true; toolStep = 0;
+    const resumedEmployee = await sandbox.provision('恢复后的 Claude 员工乙');
+    const resumedState = join(directory, 'restored-collector-B');
+    const resumedSetup = JSON.parse(await sandbox.collectorCommand('setup', resumedState, { server: origin,
+      enrollmentCredential: resumedEmployee.enrollmentCredential, nativeRoot: join(target, 'projects'), source: 'claude-code-cli', sourceVersion: '2.1.281', sourceOs: process.platform }));
+    const hooksFor = (collectorState: string) => Object.fromEntries(['SessionStart', 'UserPromptSubmit', 'PostToolUse', 'Stop', 'SessionEnd'].map(event => [event,
+      [{ hooks: [{ type: 'command', command: process.execPath, args: [resolve('dist/apps/collector/cli.js'), 'hook', '--state', collectorState] }] }]]));
+    await writeFile(join(target, 'settings.json'), JSON.stringify({ hooks: hooksFor(resumedState) }));
     const beforeResume = requests.length;
     await writeFile(join(directory, 'claude-resumed.jsonl'), await runNative(restoredEnv, restoredWorkspace, ids.A, 'SKYNET_CLAUDE_RESUME: continue with previous tool history.', true));
     const continuation = requests.slice(beforeResume).find(item => item.url.startsWith('/v1/messages'));
@@ -234,6 +241,50 @@ test(`${scenario}: ordinary Claude hooks archive two projects and a server-only 
     assert.ok(blocks.some((b: any) => b.type === 'tool_result' && JSON.stringify(b.content).includes(marker)));
     if (codeChange) assert.ok(blocks.some((b: any) => b.type === 'tool_use' && b.name === 'Write' && b.input.content.includes('export const greeting')));
     if (subagent) { const child = JSON.stringify(resumedChildHistory); assert.ok(child.includes('SKYNET_CHILD_CONTEXT')); assert.ok(child.includes(marker)); assert.ok(child.includes('toolu_skynet_child_read')); }
+    await sandbox.collectorCommand('run', resumedState);
+    const resumedSessions = (await (await fetch(`${origin}/api/sessions`, { headers })).json()).sessions;
+    const resumedSession = resumedSessions.find((item: any) => item.source_session_id === ids.A && item.employee === '恢复后的 Claude 员工乙');
+    assert.ok(resumedSession, 'normal restored native hooks qualify the new bound employee device');
+    const resumedDetail = await (await fetch(`${origin}/api/snapshots/${resumedSession.id}`, { headers })).json();
+    assert.equal(resumedDetail.provenance.relation, 'verified-restoration');
+    assert.equal(resumedDetail.manifest.restoredFrom.snapshotId, session.id);
+    const oldEventIds = detail.events.map((event: any) => event.origin.eventId);
+    assert.ok(oldEventIds.every((id: string) => resumedDetail.events.some((event: any) => event.origin.eventId === id && event.origin.employeeId === employee.employeeId)));
+    assert.ok(resumedDetail.events.some((event: any) => event.role === 'user' && event.text.includes('SKYNET_CLAUDE_RESUME')
+      && event.origin.employeeId === resumedEmployee.employeeId && event.origin.deviceId === resumedSetup.deviceId));
+    const secondPackage = join(directory, 'server-only-B.skynet-recovery.json');
+    await writeFile(secondPackage, Buffer.from(await (await fetch(`${origin}/api/snapshots/${resumedSession.id}/recovery`, { headers })).arrayBuffer()));
+    await sandbox.stopCollector();
+    const secondTarget = join(directory, 'restored-config-C');
+    const secondReceipt = JSON.parse(await command(process.execPath, ['dist/apps/collector/cli.js', 'restore', '--package', secondPackage,
+      '--target', secondTarget, '--runtime', runtime], sandbox.env));
+    const thirdState = join(directory, 'restored-collector-C');
+    const thirdSetup = JSON.parse(await sandbox.collectorCommand('setup', thirdState, { server: origin, enrollmentCredential: employee.enrollmentCredential,
+      nativeRoot: join(secondTarget, 'projects'), source: 'claude-code-cli', sourceVersion: '2.1.281', sourceOs: process.platform }));
+    await writeFile(join(secondTarget, 'settings.json'), JSON.stringify({ hooks: hooksFor(thirdState) }));
+    const thirdEnv = await nativeEnv(join(directory, 'restored-user-C'), secondTarget);
+    await writeFile(join(directory, 'claude-resumed-C.jsonl'), await runNative(thirdEnv, restoredWorkspace, ids.A, 'SKYNET_CLAUDE_RESUME_C: preserve the complete A and B history.', true));
+    await sandbox.collectorCommand('run', thirdState);
+    const finalSessions = (await (await fetch(`${origin}/api/sessions`, { headers })).json()).sessions;
+    const finalSession = finalSessions.find((item: any) => item.source_session_id === ids.A && item.id !== session.id && item.id !== resumedSession.id);
+    assert.ok(finalSession);
+    const finalDetail = await (await fetch(`${origin}/api/snapshots/${finalSession.id}`, { headers })).json();
+    assert.equal(finalDetail.provenance.relation, 'verified-restoration');
+    assert.equal(finalDetail.provenance.sourceSnapshotId, resumedSession.id);
+    assert.ok(resumedDetail.events.every((old: any) => finalDetail.events.some((event: any) => event.origin.eventId === old.origin.eventId
+      && event.origin.employeeId === old.origin.employeeId && event.origin.project === old.origin.project)));
+    assert.ok(finalDetail.events.some((event: any) => event.text.includes('SKYNET_CLAUDE_RESUME_C') && event.origin.deviceId === thirdSetup.deviceId));
+    const finalReadable = await (await fetch(`${origin}/api/snapshots/${finalSession.id}/readable`, { headers })).text();
+    assert.ok(finalReadable.includes(resumedSetup.deviceId));
+    assert.ok(finalDetail.events.every((event: any) => finalReadable.includes(event.origin.snapshotId)), 'readable export uses the original immutable evidence anchors, which can predate the latest A snapshot');
+    const stats = await (await fetch(`${origin}/api/activity-statistics`, { headers })).json();
+    await page.goto(`${origin}/#${finalSession.id}`);
+    await expect(page.getByRole('region', { name: '历史归属' })).toContainText('服务器已核对恢复来源');
+    await expect(page.getByRole('region', { name: '跨设备去重统计' })).toContainText('恢复后的 Claude 员工乙');
+    await page.screenshot({ path: join(directory, 'native-claude-cross-device.png'), fullPage: true });
+    await writeFile(join(directory, 'native-cross-device-evidence.json'), JSON.stringify({ sourceSnapshotId: session.id, secondSnapshotId: resumedSession.id,
+      thirdSnapshotId: finalSession.id, secondReceipt, preservedOrigins: finalDetail.events.map((event: any) => event.origin), statistics: stats,
+      normalRestoredHooks: true, AtoBtoC: true, sameOsUserDifferentBindings: true, exactHistoricalAndNewOwners: true, model: 'synthetic loopback' }, null, 2));
     const evidence = { scenario, oldSessionOnly: oldSession, nativeWriteVerified: codeChange, nativeChildResumed: subagent, testedAt: new Date().toISOString(), client: 'claude-code-cli', version: '2.1.281', os: process.platform, arch: process.arch,
       ordinaryHostHooks: true, twoProjects: true, oldSessionDateBoundaries: oldSession, serverPackageOnly: true, sourceHomeRemoved: true,
       npmIgnoreScriptsSetup: !!process.env.SKYNET_TEST_INSTALLER, pluginMarketplaceSetup: process.env.SKYNET_TEST_PLUGINS ?? false,

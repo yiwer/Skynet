@@ -11,9 +11,11 @@ import './style.css';
 import { InstallationHelp } from './installation.js';
 import { ArchiveSearch } from './ArchiveSearch.js';
 import { EvidenceReader, selectedEvidence } from './EvidenceReader.js';
+import { ActivityStatistics } from './ActivityStatistics.js';
+import type { Provenance } from '../../packages/contracts/provenance.js';
 
 type Detail = { snapshotId: string; employee: string; manifest: Manifest; committedAt: string; events: ActivityEvent[]; activity: ActivitySummary;
-  unrecognizedLines: number; partialLine: boolean; nextOffset: number | null; total: number; captureHealth: Coverage;
+  unrecognizedLines: number; partialLine: boolean; nextOffset: number | null; total: number; captureHealth: Coverage; provenance: Provenance;
   recovery: { nativeRuntimeVersion: string | null; preparation: string; nativeBackend: string; limitation: string } };
 const date = (value: string) => new Date(value).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false });
 const contextLabel: Record<ActivityContext, string> = { historical: '历史上下文', 'after-enrollment': '接入后活动',
@@ -142,6 +144,11 @@ function App() {
           {(detail.unrecognizedLines > 0 || detail.partialLine) && <p className="notice">{detail.unrecognizedLines} 行未解析{detail.partialLine ? '，另有未闭合的末行' : ''}。全部字节仍保存在原件中。</p>}
           <HistoryMaterials key={detail.snapshotId} snapshotId={detail.snapshotId} capture={detail.manifest.capture} request={(path, signal) => request(path, token, signal)} />
           <CaptureCoverage key={`coverage-${detail.snapshotId}`} initial={detail.captureHealth} path={`/api/snapshots/${detail.snapshotId}/capture-status`} request={path => request(path)} />
+          <section className="recovery" aria-label="历史归属"><h3>历史归属</h3><p>本快照上传员工：{detail.employee}。历史记录按每条证据的原始设备及员工归属；当前项目不覆盖历史项目。</p>
+            <p>{detail.provenance.relation === 'verified-restoration' ? '服务器已核对恢复来源与完整原件前缀。' : detail.provenance.relation === 'same-device-continuation' ? '已核对同设备会话的延续关系。' : '跨设备关系未确认。'}</p>
+            {detail.provenance.sourceSnapshotId && <a href={`#${detail.provenance.sourceSnapshotId}`}>查看来源快照</a>}
+            {detail.provenance.warning && <p className="notice">{detail.provenance.warning}</p>}</section>
+          <ActivityStatistics key={`statistics-${detail.snapshotId}:${refresh}`} request={(path, signal) => request(path, token, signal)} />
           <section className="recovery" aria-label="来源日期与活动"><h3>来源日期与活动</h3>
             <dl><div><dt>设备接入</dt><dd>{detail.activity.enrolledAt ? date(detail.activity.enrolledAt) : '未知（旧设备没有可信登记时间）'}</dd></div>
               <div><dt>宿主登记</dt><dd>{date(detail.manifest.qualifiedAt)}</dd></div>
@@ -149,7 +156,7 @@ function App() {
             <p>今日活动（北京时间 {detail.activity.today.date}）：{detail.activity.today.counts
               ? `用户轮次 ${detail.activity.today.counts.userTurns} · 工具调用 ${detail.activity.today.counts.toolCalls} · 已解析条目 ${detail.activity.today.counts.records}`
               : '未知，缺少可信设备接入时间。'}</p>
-            <p className="muted small">仅计入来源时间明确的接入后活动。历史上下文 {detail.activity.historicalRecords} 条、来源时间未知 {detail.activity.unknownTimeRecords} 条、接入边界未知 {detail.activity.unknownEnrollmentRecords} 条；上传与提交时间不作为工作发生时间。</p>
+            <p className="muted small">本快照包含的唯一记录（可能有多名原始员工），按每条原始设备接入边界分类。历史上下文 {detail.activity.historicalRecords} 条、来源时间未知 {detail.activity.unknownTimeRecords} 条、接入边界未知 {detail.activity.unknownEnrollmentRecords} 条；上传与提交时间不作为工作发生时间。跨快照统计见上方去重统计。</p>
             <details><summary>按来源日期查看</summary><ul>{detail.activity.days.map(day => <li key={day.date}>
               <strong>{day.date}</strong>：历史上下文 {day.historicalRecords} 条；接入后用户轮次 {day.afterEnrollment.userTurns}、工具调用 {day.afterEnrollment.toolCalls}
             </li>)}</ul>{detail.activity.days.length === 0 && <p>没有可确定归属的来源日期。</p>}</details>
@@ -176,7 +183,8 @@ function App() {
             {exportError && <p className="error" role="alert">{exportError} 可重新点击导出重试。</p>}
           </section>
           <p className="muted">共 {detail.total} 条已解析记录。消息只代表会话中记录的内容。</p>
-          {detail.events.map(event => <section className="message" key={`${event.line}:${event.block ?? 0}`}><div className="message-meta"><strong>{event.role}</strong><span>{contextLabel[event.context]}</span><span>原件第 {event.line} 行 · 来源时间：{event.timestamp ? date(event.timestamp) : '未知'}</span></div><pre>{event.text}</pre></section>)}
+          {detail.events.map(event => <section className="message" key={`${event.line}:${event.block ?? 0}`}><div className="message-meta"><strong>{event.role}</strong><span>{contextLabel[event.context]}</span><span>原件第 {event.line} 行 · 来源时间：{event.timestamp ? date(event.timestamp) : '未知'}</span></div>
+            {event.origin && <p className="muted small">原始归属：{event.origin.employee} · {event.origin.project || '未归类项目'} · 设备 {event.origin.deviceId} · <a href={`#${event.origin.snapshotId}`}>原始快照第 {event.origin.line} 行</a></p>}<pre>{event.text}</pre></section>)}
           {!evidenceLocation && detail.events.length === 0 && <p>当前原件没有可解析的消息；可下载原件核查。</p>}
           {!evidenceLocation && <div className="pagination"><button disabled={offset === 0} onClick={() => setOffset(value => Math.max(0, value - 100))}>上一页</button><button disabled={detail.nextOffset === null} onClick={() => setOffset(detail.nextOffset ?? 0)}>下一页</button></div>}
         </>}</article></div></>}</>}

@@ -10,6 +10,10 @@ export const sourceLabel = (source: Source) => ({ 'codex-desktop': 'Codex Deskto
 export const enrollmentSchema = z.object({ installationId: z.uuid(), name: bounded,
   // Generated and privately persisted by the installer before its first request.
   deviceCredential: z.string().regex(/^[A-Za-z0-9_-]{43}$/).optional() }).strict();
+// A receipt is a claim, never an ownership grant. The server verifies its immutable
+// source snapshot and the exact native prefix before carrying event origins forward.
+export const restoredFromSchema = z.object({ snapshotId: z.uuid(), hash: hashSchema,
+  byteLength: z.number().int().positive().max(MAX_ARTIFACT_BYTES) }).strict();
 export const manifestSchema = z.object({
   protocolVersion: z.literal(1),
   sourceSessionId: bounded,
@@ -24,6 +28,7 @@ export const manifestSchema = z.object({
   enrolledAt: z.iso.datetime().optional(),
   capability: z.literal('unverified'),
   capture: captureSchema.optional(),
+  restoredFrom: restoredFromSchema.optional(),
 }).strict().refine(value => value.byteLength + (value.capture?.materials.reduce((n, material) => n + material.byteLength, 0) ?? 0) <= COLLECTION_BYTES, 'Capture exceeds the collection size limit');
 export type Manifest = z.infer<typeof manifestSchema>;
 

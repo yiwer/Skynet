@@ -65,6 +65,25 @@ export async function migrate(db: Database) {
       manifest_hash text NOT NULL, snapshot_id uuid NOT NULL REFERENCES snapshots(id),
       PRIMARY KEY(device_id,upload_id)
     );
+    ALTER TABLE snapshots ADD COLUMN IF NOT EXISTS provenance jsonb;
+    CREATE TABLE IF NOT EXISTS archive_event_origins (
+      event_id text PRIMARY KEY, snapshot_id uuid NOT NULL REFERENCES snapshots(id),
+      line integer NOT NULL, block integer NOT NULL,
+      employee_id uuid NOT NULL REFERENCES employees(id), device_id uuid NOT NULL REFERENCES devices(id),
+      project text NOT NULL, source text NOT NULL, source_session_id text NOT NULL,
+      role text NOT NULL, timestamp text, source_date text, context text NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS snapshot_events (
+      snapshot_id uuid NOT NULL REFERENCES snapshots(id), line integer NOT NULL, block integer NOT NULL,
+      event_id text NOT NULL REFERENCES archive_event_origins(event_id),
+      PRIMARY KEY(snapshot_id,line,block)
+    );
+    CREATE INDEX IF NOT EXISTS archive_event_owner_day ON archive_event_origins(employee_id,source_date);
+    CREATE TABLE IF NOT EXISTS native_event_occurrences (
+      device_id uuid NOT NULL REFERENCES devices(id), source text NOT NULL, source_session_id text NOT NULL,
+      occurrence_hash text NOT NULL, event_id text NOT NULL REFERENCES archive_event_origins(event_id),
+      PRIMARY KEY(device_id,source,source_session_id,occurrence_hash)
+    );
     COMMIT;
   `);
 }
