@@ -50,7 +50,7 @@ AC-01…AC-22 的已有证据和缺口集中列于 [V1 验收证据台账](../im
 - #28 日报准备已集成：北京时间09:00持久入队、自动 system 分析、来源员工/项目/日期的日报与原句、Web/MCP固定分页版本已实现；真实 Claude CLI loopback 的8会话/2项目/24事项整链通过，历史背景不计当天工作，未知及未完整处理标 partial。统计共用原事件账本；原生 token/文件/区间与按日覆盖待 #31，真实 G3 和所有门槛保持开放。见 [#28](../implementation/issue-28.md)，独立实现提交5399481已合入，正式验收仍开放。
 - #10、#14–#15、#19、#21、#23–#25、#28–#33：尚未完成；依赖与门槛继续按 ticket 图核查。
 
-#23 独立实现准备已基于 #24 最终 `f2b9cf9` 完成有界长会话 public trace：实际 Windows Claude Code 2.1.281 对本地合成服务分段提取/汇总，原 UTF-16 引用、跨段头尾事实、坏段与 skipped 范围、Web/MCP/原件导出定向通过，见 [#23 记录](../implementation/issue-23.md)。全尝试共享请求/租约/deadline/预算，不按段追加额度。支线完整 Windows 33 项为 **31 pass / 2 runtime-control fail / 0 cancel**，237.08s；新长会话/队列通过，维护 236.15s 通过，安装与插件 1500ms 无响应仍红并交接独立诊断。真实千问、质量和 G3 仍开放，等待集成复核。
+#23 独立实现准备已基于 #24 最终 `f2b9cf9` 完成有界长会话 public trace，并通过组合主线 `0743d4d` 集成复核：实际 Windows Claude Code 2.1.281 对本地合成服务分段提取/汇总，原 UTF-16 引用、跨段头尾事实、坏段与 skipped 范围、Web/MCP/原件导出定向通过，见 [#23 记录](../implementation/issue-23.md)。全尝试共享请求/租约/deadline/预算，不按段追加额度。支线完整 Windows 33 项为 **31 pass / 2 runtime-control fail / 0 cancel**，237.08s；新长会话/队列通过，维护 236.15s 通过，安装与插件 1500ms 无响应仍红并交接独立诊断。真实千问、质量和 G3 仍开放。
 - G0–G4：未通过。原生恢复、真实分析、客户端 MCP 授权与五个工作日试点必须保留实测证据。
 - [草稿 PR #55](https://github.com/yiwer/Skynet/pull/55) 已保存实现与规格关闭引用；保持草稿，尚无 ticket 通过验收或被关闭。
 - 本地类型检查、构建、公开入口 E2E、Linux 容器持久卷重启验证及初次 GitHub CI 通过；[两路评审](../implementation/review-issue-4.md) 的可修复代码问题已在 `9ad3277` 修复，并通过 `920b92f` 合并，回归检查通过。
@@ -72,4 +72,4 @@ AC-01…AC-22 的已有证据和缺口集中列于 [V1 验收证据台账](../im
 
 先 cherry-pick 独立安装状态观测6324d0a至9f06a49，再合日报5399481至185f6af，随后合长会话803f89b。仅 README / 台账 / 规划文档冲突，按 resolving-merge-conflicts 保留14失败、24队列、28日报与23长范围；源码无冲突，日报类型接入正式 AnalysisProcessing。主线自身 typecheck/build/diffcheck通过；日报/统计/归属/历史/材料/队列/MCP12/12（18.45秒），组合日报/长范围/队列/分析/MCP11/11（17.86秒）。实际Claude2.1.281日报公开8会话24事项/分页/调度/归属/restart/Web/MCP1/1（19.92秒）来自本次组合主线，eJcXIF；返回 original-utf16-1处理范围，原件有未解析行仍partial。长会话17请求实测来自23支线6PLN80，未冒充本次复跑。
 
-没有重跑heavy完整Windows；23支线31/33（237.08秒）、安装/插件1500ms控制故障及旧23/24/取消批次均保留，focused状态观测待新LinuxCI，旧27/28尚不被替代。原设备后资格材料的历史/活动分类另由19后续版本化修订，未在日报中改写既有origin/raw/report。G0–G4、PAYG质量/预算、DesktopUI与五个工作日均开放。
+没有重跑heavy完整Windows；23支线31/33（237.08秒）、安装/插件1500ms控制故障及旧23/24/取消批次均保留。focused状态观测修订 `9f06a49` 的 [Linux CI](https://github.com/yiwer/Skynet/actions/runs/36680977269/job/109776132842) 已通过类型检查、构建及29/29（111.12秒），该节点含最终24与状态观测修订、尚未含23/28；旧27/28失败保留。组合主线 `0743d4d` 的 [CI](https://github.com/yiwer/Skynet/actions/runs/36681601424/job/109778040443) 已通过类型检查、构建及36/36（119.91秒），包含新增长会话/日报。原设备后资格材料的历史/活动分类另由19后续版本化修订，未在日报中改写既有origin/raw/report。G0–G4、PAYG质量/预算、DesktopUI与五个工作日均开放。

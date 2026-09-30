@@ -101,6 +101,6 @@ G0–G4、#21/G2、#22/#24 的真实 PAYG/G3均开放。#23长会话、#28日报
 
 ## 2026-09-30 日报 / 长会话组合准备与失败保留
 
-安装状态观测6324d0a经9f06a49集成；旧Linux27/28以 [focused修订](issue-14-status-observation.md) 的实际失败/完成routing sweep解释为准，待新CI，不先改为通过。日报5399481经185f6af，后接长会话803f89b；文档冲突保留24当前适用版本、28固定版本与23原范围。主线自身typecheck/build/diffcheck通过，归属/报告等12/12（18.45秒）及组合长范围/报告等11/11（17.86秒）；本次主线实际Claude日报公开链1/1（19.92秒）eJcXIF，处理字段original-utf16-1、raw未知仍partial。没有重跑heavy完整Windows。
+安装状态观测6324d0a经9f06a49集成；旧Linux27/28以 [focused修订](issue-14-status-observation.md) 的实际失败/完成routing sweep解释为准，保留原失败。`9f06a49` 的 [CI](https://github.com/yiwer/Skynet/actions/runs/36680977269/job/109776132842) 类型检查/构建及29/29通过（111.12秒）。日报5399481经185f6af，长会话803f89b经组合主线0743d4d集成；该组合的 [Linux CI](https://github.com/yiwer/Skynet/actions/runs/36681601424/job/109778040443) 类型检查/构建及36/36通过（119.91秒）。文档冲突保留24当前适用版本、28固定版本与23原范围。主线自身typecheck/build/diffcheck通过，归属/报告等12/12（18.45秒）及组合长范围/报告等11/11（17.86秒）；本次主线实际Claude日报公开链1/1（19.92秒）eJcXIF，处理字段original-utf16-1、raw未知仍partial。没有重跑heavy完整Windows。
 
 23支线最新完整ordinary33项31pass/2fail/0cancel（237.08秒），安装GbzZun与插件j1GGMW均1500ms runtime-control无响应；该完整批次尚不包含日报，不改写为当前主线整套结果。既有recovery23/24及更早取消/失败批次同样保留，源故障继续独立诊断。G1/G2/G3及全部门槛仍开放。材料先作历史上下文后在原设备取得正常独立资格时的活动分类已交独立修订；冻结事件归属不被日报擅自重解释，G2不因计数/引用测试通过而签收。
