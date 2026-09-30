@@ -1,8 +1,9 @@
 import { backupCommandSchema } from '../../packages/contracts/server-backup.js';
 // Private operator connection only. Never print URI, credentials, PG stderr or host paths.
-let input='';process.stdin.setEncoding('utf8');
+const chunks:Buffer[]=[];let bytes=0;
 try{
-  for await(const part of process.stdin){input+=part;if(Buffer.byteLength(input)>65536)throw new Error('input-overlimit');}
+  for await(const part of process.stdin){bytes+=part.length;if(bytes>65536)throw new Error('input-overlimit');chunks.push(part);}
+  const input=new TextDecoder('utf-8',{fatal:true}).decode(Buffer.concat(chunks));
   const command=backupCommandSchema.parse(JSON.parse(input));
   const {backupArchive,restoreArchive,reconcileBackups}=await import('./server-backup.js');
   const {verifyBundle}=await import('./backup-files.js');

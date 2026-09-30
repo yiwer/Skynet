@@ -20,7 +20,7 @@ async function pgTool(name:'pg_dump'|'pg_restore',args:string[],url:string){
   return execute(name,args,{env:connectionEnvironment(url),windowsHide:true,timeout:900000,maxBuffer:1024*1024});
 }
 const objectRow=(row:{device_id:string;hash:string;byte_length:number})=>backupObjectSchema.parse({deviceId:row.device_id,hash:row.hash,byteLength:row.byte_length});
-type BackupStages={stage?:(phase:'before-publication'|'after-publication'|'restore-dump-loaded')=>void|Promise<void>};
+type BackupStages={stage?:(phase:'dump-completed'|'before-publication'|'after-publication'|'restore-dump-loaded')=>void|Promise<void>};
 export async function backupArchive(url:string,options:{rawDirectory:string;backupDirectory:string;failureDomain?:BackupReceipt['failureDomain']},observer:BackupStages={}){
   const db=pool(url),id=randomUUID();let locked=false,transaction=false;
   const client=await db.connect().catch(async error=>{await db.end();throw error;});
@@ -41,6 +41,7 @@ export async function backupArchive(url:string,options:{rawDirectory:string;back
     const dumpFile=join(pending,'database.dump'),deadline=Date.now()+900000;
     // Dump and enumeration import exactly the same still-open exporter view.
     await pgTool('pg_dump',['--format=custom',`--snapshot=${scope.snapshot}`,'--lock-wait-timeout=5000',`--file=${dumpFile}`],url);
+    await observer.stage?.('dump-completed');
     const dumpHandle=await open(dumpFile,'r+');try{await dumpHandle.sync();}finally{await dumpHandle.close();}
     const dump=await hashFile(dumpFile);const version=(await execute('pg_dump',['--version'],{windowsHide:true,timeout:5000,maxBuffer:8192})).stdout.trim();
     let cursorDevice:string|null=null,cursorHash:string|null=null,objects=0,bytes=0;const pages:BackupReceipt['pages']=[];

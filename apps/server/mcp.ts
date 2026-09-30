@@ -14,8 +14,9 @@ import type { CoverageService } from './team-coverage.js';
 import type { WorkStatisticsService } from './work-statistics.js';
 import type { WorkViewService } from './work-views.js';
 import { workViewQuery } from '../../packages/contracts/work-views.js';
+import type { ServerOperationsService } from './server-operations.js';
 
-export async function registerMcp(app: FastifyInstance, db: Database, archive: ArchiveQuery, publicOrigin: string, analysis: AnalysisService, reports: ReportService, coverage: CoverageService, workStatistics: WorkStatisticsService, workViews: WorkViewService) {
+export async function registerMcp(app: FastifyInstance, db: Database, archive: ArchiveQuery, publicOrigin: string, analysis: AnalysisService, reports: ReportService, coverage: CoverageService, workStatistics: WorkStatisticsService, workViews: WorkViewService,operations:ServerOperationsService) {
   const { guard } = await registerMcpAuth(app, db, publicOrigin);
   const offset = z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).default(0);
   const snapshotId = z.uuid().describe('Immutable snapshot ID from list_sessions, never a mutable session ID');
@@ -83,6 +84,7 @@ export async function registerMcp(app: FastifyInstance, db: Database, archive: A
       annotations, inputSchema: { offset } }, input => result(() => workViews.projects(input.offset)));
     mcp.registerTool('read_analysis_operations', { description: '读取与 Web 相同的分析队列、有限尝试、输入版本、运行时配置与预算预留；未知账单不填零，不返还未知预留。',
       annotations, inputSchema: { offset: offset.refine(value => value <= 100000) } }, input => result(() => analysis.operations(input.offset)));
+    mcp.registerTool('read_server_operations',{description:'读取与 Web 相同的实际原件容量、已提交与暂存对象、上次成功备份和恢复完整性校验。上传ACK仅表示单副本接收；同机备份或完整性校验不证明异机重建、第二维护者或原生续聊。',annotations,inputSchema:{}},()=>result(()=>operations.read()));
     return mcp;
   }
   app.post('/mcp', { bodyLimit: 64 * 1024, onRequest: guard }, async (request, reply) => {

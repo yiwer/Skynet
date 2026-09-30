@@ -9,8 +9,8 @@ import { connect } from '../apps/server/database.js';
 import { command, createSandbox } from './support.js';
 const headersObject = (headers: Headers) => { const result: Record<string, string> = {}; headers.forEach((value, key) => { result[key] = value; }); return result; };
 
-export async function mcpSandbox(options: { reportClock?: () => Date } = {}) {
-  const sandbox = await createSandbox();
+export async function mcpSandbox(options: { reportClock?: () => Date; sandbox?:Awaited<ReturnType<typeof createSandbox>> } = {}) {
+  const sandbox = options.sandbox??await createSandbox();
   const openssl = process.env.SKYNET_OPENSSL ?? (process.platform === 'win32' ? 'C:/Program Files/Git/usr/bin/openssl.exe' : 'openssl');
   const ca = join(sandbox.directory, 'test-ca.pem'); const key = join(sandbox.directory, 'test-key.pem');
   const cert = join(sandbox.directory, 'test-cert.pem');
