@@ -18,7 +18,7 @@
 
 外部证据：`%TEMP%/skynet-test-eXNtHr/analysis-queue-evidence.json`。分析/队列/MCP/材料/旧会话定向普通回归 6/6 通过（18.3 秒）；身份/恢复回归 2/2 通过（8.7 秒）。OAuth MCP 和 Web 使用相同队列投影。没有重跑或掩盖 #14 Windows 全量分支中独立记录的维护失败。
 
-实际 Claude Code 2.1.281 Windows CLI 最终探针 1/1 通过（30.9 秒），证据 `%TEMP%/skynet-test-5Mze6i/analysis-public-evidence.json`。只连接显式合成 loopback，恶意 Bash/外发指令没有副作用，无继承用户 hooks/auth/config；错误引用与挂起各在两次总尝试后失败，超时请求用量未知，原件仍可同步/查询/导出；公开 Web 队列、原件跳转及 OAuth MCP 同状态。Linux 非 root UID1000 镜像相同故障探针的最终复验进行中。
+实际 Claude Code 2.1.281 Windows CLI 最终探针 1/1 通过（30.9 秒），证据 `%TEMP%/skynet-test-5Mze6i/analysis-public-evidence.json`。只连接显式合成 loopback，恶意 Bash/外发指令没有副作用，无继承用户 hooks/auth/config；错误引用与挂起各在两次总尝试后失败，超时请求用量未知，原件仍可同步/查询/导出；公开 Web 队列、原件跳转及 OAuth MCP 同状态。最终生产 worker 镜像 `skynet-analysis:issue24`（镜像配置 SHA256 `55834d926c6dfca872197de0f1b00e626d4f0afeeb942939b723fa3d15bc00d6`）以 Linux 非 root UID1000、read-only、无原件挂载运行相同公开故障探针，1/1 通过（32.1 秒），证据 `%TEMP%/skynet-test-pvpq1E/analysis-public-evidence.json`。
 
 最终重跑曾真实发现 Web 重启迁移与在线 worker 的 PostgreSQL `40P01` 死锁：队列事务先锁 targets 再访问 jobs，迁移先获得 jobs DDL 锁再等待 targets。受控复现让旧实现稳定在 2.8 秒失败（迁移持有 jobs AccessExclusiveLock 同时被 claimant 阻塞），加入相同队列 advisory lock **在任何 DDL 之前**后，队列回归与原始 Windows native 复现通过。没有调大超时。重启会等当前短队列事务完成，而不会持有相反次序的关系锁。原先真实失败与这个 red/green 过程均保留，不算先前通过。
 
