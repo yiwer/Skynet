@@ -100,9 +100,13 @@ export async function runInstalled(state: string) {
           const identity = identitySchema.parse(await jsonFile(join(state, 'identity.json')));
           const nonce = typeof request?.nonce === 'string' ? request.nonce : randomUUID();
           try {
+            const clients = await Promise.all(installation.clients.map(async client => {
+              const tracked = await optionalJson(join(state, 'sources', client.source, 'tracked.json'));
+              return { source: client.source, configured: client.configured, hostEvent: Array.isArray(tracked) && tracked.length ? 'observed' : 'not-observed' };
+            }));
             const response = await fetch(new URL('/api/devices/health', identity.server), { method: 'POST', redirect: 'error',
               headers: { Authorization: `Bearer ${identity.deviceCredential}`, 'Content-Type': 'application/json' },
-              body: JSON.stringify({ nonce }), signal: AbortSignal.timeout(5000) });
+              body: JSON.stringify({ nonce, installation: { clients } }), signal: AbortSignal.timeout(5000) });
             if (!response.ok) throw new Error(`Server rejected device health (${response.status})`);
             const ack = await response.json();
             if (ack.nonce !== nonce || ack.deviceId !== identity.deviceId) throw new Error('Unexpected health acknowledgement');
