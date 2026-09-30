@@ -7,6 +7,7 @@ import { RawStore } from './raw-store.js';
 import { deliveryHealthSchema } from '../../packages/contracts/delivery.js';
 import { archiveQuery, exportFormat } from './archive-query.js';
 import { registerMcp } from './mcp.js';
+import { migrateServerOperations,serverOperations } from './server-operations.js';
 import { assembleSchema, CHUNK_BYTES } from '../../packages/contracts/materials.js';
 import { appendSnapshotSchema, hashSchema, manifestSchema, sourceSchema } from '../../packages/contracts/archive.js';
 import { HttpError, identities } from './identities.js';
@@ -32,6 +33,7 @@ export async function createApp(options: { db: Database; rawDirectory: string; w
   await migrateArchiveSearch(db);
   await migrateAnalysis(db);
   await migrateReports(db);
+  await migrateServerOperations(db);
   await migrateCoverage(db);
   await migrateWorkViews(db);
   const raw = new RawStore(options.rawDirectory);
@@ -62,6 +64,8 @@ export async function createApp(options: { db: Database; rawDirectory: string; w
   const coverage = coverageService(db);
   const workStatistics = workStatisticsService(db, raw);
   const readerGuard = async (request: { headers: { authorization?: string } }) => { await reader(request.headers.authorization); };
+  const operations=serverOperations(db,options.rawDirectory);
+  app.get('/api/server/operations',{onRequest:readerGuard},()=>operations.read());
   const deviceGuard = async (request: { headers: { authorization?: string } }) => { await device(request.headers.authorization); };
   const managerGuard = async (request: { headers: { authorization?: string } }) => { await identity.manager(request.headers.authorization); };
 
