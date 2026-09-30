@@ -1,10 +1,10 @@
 # Skynet tracer-bullet tickets
 
-状态：已按确认方案发布 52 张独立 Issue（#3—#54），正文、标签和依赖均已核验。来源为 GitHub [父 Issue #1](https://github.com/yiwer/Skynet/issues/1) 与 [父 Issue #2](https://github.com/yiwer/Skynet/issues/2) 的完整正文及评论（读取时均无评论）。
+状态：已按确认方案发布 52 张独立 Issue（#3—#54），正文、标签和依赖均已核验。来源为 GitHub [父 Issue #1](https://github.com/yiwer/Skynet/issues/1) 与 [父 Issue #2](https://github.com/yiwer/Skynet/issues/2) 的完整正文及评论（读取时均无评论）。本文保留拆分与发布时的任务图；当前 V1 实施状态与未通过的验收门槛见 [实施记录](v1-implementation.md)。
 
 ## 拆分约定
 
-- 共 52 张：44 张端到端功能切片、1 张 S0 决策文档票、7 张验收/校准票。当前仓库没有产品代码，无需前置代码重构。
+- 共 52 张：44 张端到端功能切片、1 张 S0 决策文档票、7 张验收/校准票。拆分时仓库没有产品代码，无需前置代码重构。
 - **Tracer bullet**：每张功能票围绕一个可演示的用户行为，随票完成必要的数据持久化、接口、UI/MCP 和测试；每票按一个全新上下文可完成的范围限定。最初使用一名测试员工、一台设备和一个登记组合，后续扩展客户端与故障场景。
 - T01 是 PRD 要求的 S0 文档工作；T08/T13/T19/T23/T31/T50/T52 是完成跨切片验收与试点的明确门槛。它们通过实际产品旅程提供证据。
 - T01…T52 是本地方案编号；对应 GitHub 编号见发布索引。每张票已创建独立 Issue，使用 `ready-for-agent`，前置关系已转换成真实 Issue 引用和原生 blocking links。
@@ -14,7 +14,7 @@
 - 功能实现与自动化测试使用合成材料。真实客户端兼容性、Claude Code 分析链和试点性能必须实际验证，不能用替身或界面示例代替。每票仅声明实测支持的 OS/版本/环境，未登记的组合保持待验证。
 - AC-32 的响应目标、实际部署环境和试点校准数据仍按父规格在对应验收票中落实；本拆分没有假定容量、工期或性能已达标。
 
-## 当前可领取
+## 发布时可领取
 
 - [T01 / #3：对齐 V2 使用能力评估的领域与验收约定](https://github.com/yiwer/Skynet/issues/3)。
 - [T02 / #4：从 Codex Desktop 新会话看到服务器原件](https://github.com/yiwer/Skynet/issues/4)。
