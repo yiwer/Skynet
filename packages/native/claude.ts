@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { sourceTimestamp, type EvidenceLine } from '../contracts/archive.js';
+import {completeOriginalLines,partialOriginalLine} from './raw-lines.js';
 
 const text = z.object({ type: z.literal('text'), text: z.string() });
 const toolUse = z.object({ type: z.literal('tool_use'), id: z.string().min(1), name: z.string().min(1), input: z.record(z.string(), z.unknown()) });
@@ -34,11 +35,10 @@ export function claudeIdentity(bytes: Buffer, expectedSessionId: string) {
 }
 
 export function readClaudeEvidence(bytes: Buffer) {
-  const lines = bytes.toString('utf8').split('\n');
-  const partialLine = lines.pop()!;
   const events: EvidenceLine[] = [];
   let unrecognizedLines = 0;
-  for (const [index, line] of lines.entries()) {
+  for (const {line:lineNumber,text:line} of completeOriginalLines(bytes)) {
+    if(line===null){unrecognizedLines++;continue;}
     if (!line.trim()) continue;
     try {
       const parsed = messageSchema.safeParse(JSON.parse(line));
@@ -46,7 +46,7 @@ export function readClaudeEvidence(bytes: Buffer) {
       const item = parsed.data;
       const content = item.message.content;
       if (typeof content === 'string') {
-        events.push({ line: index + 1, role: 'user', text: content, timestamp: sourceTimestamp(item.timestamp) });
+        events.push({ line: lineNumber, role: 'user', text: content, timestamp: sourceTimestamp(item.timestamp) });
         continue;
       }
       // Validate the entire message before emitting any block: unsupported images/thinking
@@ -56,9 +56,9 @@ export function readClaudeEvidence(bytes: Buffer) {
         if (part.type === 'text') { role = item.type; rendered = part.text; }
         else if (part.type === 'tool_use') { role = 'tool request'; rendered = `${part.name} (${part.id})\n${JSON.stringify(part.input, null, 2)}`; }
         else { role = 'tool result'; rendered = `${part.tool_use_id}${part.is_error ? ' · error' : ''}\n${typeof part.content === 'string' ? part.content : part.content.map(p => p.text).join('\n')}`; }
-        events.push({ line: index + 1, block, role, text: rendered, timestamp: sourceTimestamp(item.timestamp) });
+        events.push({ line: lineNumber, block, role, text: rendered, timestamp: sourceTimestamp(item.timestamp) });
       }
     } catch { unrecognizedLines++; }
   }
-  return { parserVersion: 'claude-jsonl-2', events, unrecognizedLines, partialLine: partialLine.length > 0 };
+  return { parserVersion: 'claude-jsonl-3', events, unrecognizedLines, partialLine: partialOriginalLine(bytes) };
 }

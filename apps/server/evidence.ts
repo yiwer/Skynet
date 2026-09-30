@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { sourceTimestamp, type EvidenceLine, type Source } from '../../packages/contracts/archive.js';
 import { readClaudeEvidence } from '../../packages/native/claude.js';
+import {completeOriginalLines,partialOriginalLine} from '../../packages/native/raw-lines.js';
 
 const identifier = z.string().min(1);
 const textPart = z.object({ type: z.enum(['input_text', 'output_text']), text: z.string() });
@@ -23,11 +24,10 @@ const recordSchema = z.discriminatedUnion('type', [
 
 export function readEvidence(bytes: Buffer, source: Source = 'codex-desktop') {
   if (source === 'claude-code-cli') return readClaudeEvidence(bytes);
-  const lines = bytes.toString('utf8').split('\n');
-  const partialLine = lines.pop()!;
   const events: EvidenceLine[] = [];
   let unrecognizedLines = 0;
-  for (const [index, line] of lines.entries()) {
+  for (const {line:lineNumber,text:line} of completeOriginalLines(bytes)) {
+    if(line===null){unrecognizedLines++;continue;}
     if (!line.trim()) continue;
     try {
       // Count a source line only when its whole supported event is readable. In particular,
@@ -49,8 +49,8 @@ export function readEvidence(bytes: Buffer, source: Source = 'codex-desktop') {
       } else {
         role = 'tool result'; text = typeof payload.output === 'string' ? payload.output : payload.output.map(part => part.text).join('\n');
       }
-      events.push({ line: index + 1, role, text, timestamp: sourceTimestamp(item.timestamp) });
+      events.push({ line: lineNumber, role, text, timestamp: sourceTimestamp(item.timestamp) });
     } catch { unrecognizedLines++; }
   }
-  return { parserVersion: 'codex-jsonl-3', events, unrecognizedLines, partialLine: partialLine.length > 0 };
+  return { parserVersion: 'codex-jsonl-4', events, unrecognizedLines, partialLine: partialOriginalLine(bytes) };
 }

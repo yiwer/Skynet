@@ -8,6 +8,7 @@ import type { Manifest } from '../../packages/contracts/archive.js';
 import type { EventOrigin, Provenance } from '../../packages/contracts/provenance.js';
 import { locatedOrigin, restoredMaterial, qualifiedMaterialPrefix } from './material-provenance.js';
 import { qualifyOriginalEvents, validQualificationBytes } from './qualification.js';
+import {completeOriginalLines} from '../../packages/native/raw-lines.js';
 
 type Query = Pick<Database, 'query'> | Pick<pg.PoolClient, 'query'>;
 type Record = { id: string; device_id: string; manifest: Manifest; hash: string; committed_at?: Date };
@@ -90,7 +91,7 @@ export async function assignOrigins(q: Query, raw: RawStore, record: Record, bac
   }
   const parsed = readEvidence(bytes, manifest.source);
   const events = activityFor(parsed.events, manifest.enrolledAt).events;
-  const rawLines = bytes.toString('utf8').split('\n');
+  const rawLines = [...completeOriginalLines(bytes)];
   const known = (await q.query(`SELECT n.occurrence_hash,o.event_id AS "eventId",o.snapshot_id AS "snapshotId",o.line,o.block,
     o.employee_id AS "employeeId",e.name AS employee,o.device_id AS "deviceId",o.project,o.context,o.source_date AS "sourceDate",o.material_id AS "materialId",o.text_offset AS "textOffset"
     FROM native_event_occurrences n JOIN effective_event_origins o ON o.event_id=n.event_id JOIN employees e ON e.id=o.employee_id
@@ -101,8 +102,8 @@ export async function assignOrigins(q: Query, raw: RawStore, record: Record, bac
     const inherited = (event.line <= prefixLines ? prefix.get(`${event.line}/${block}`) : undefined)
       ?? (event.line <= localPrefixLines ? localPrefix.get(`${event.line}/${block}`) : undefined);
     const line = rawLines[event.line - 1]!;
-    const occurrence = nativeKey(line, manifest.source);
-    const occurrenceHash = occurrence ? digest(JSON.stringify([occurrence, digest(line), block])) : null;
+    const occurrence = nativeKey(line.text!, manifest.source);
+    const occurrenceHash = occurrence ? digest(JSON.stringify([occurrence, digest(line.bytes), block])) : null;
     const existing = occurrenceHash ? occurrences.get(occurrenceHash) : undefined;
     if (inherited && existing && inherited.eventId !== existing.eventId) throw new HttpError(409, '稳定原生记录存在冲突的历史归属；保留原归属，不能覆盖');
     if (inherited) return { event, occurrenceHash, origin: { ...inherited, line: inherited.originLine, block: inherited.originBlock } };
@@ -144,7 +145,7 @@ export async function assignOrigins(q: Query, raw: RawStore, record: Record, bac
     }
   }
   if(origins.some(({origin})=>origin.materialId&&origin.deviceId===record.device_id&&!origin.qualification)
-    && await validQualificationBytes(bytes)) await qualifyOriginalEvents(q,record,origins,line=>digest(rawLines[line-1]!));
+    && await validQualificationBytes(bytes)) await qualifyOriginalEvents(q,record,origins,line=>digest(rawLines[line-1]!.bytes));
   await q.query('UPDATE snapshots SET provenance=$2 WHERE id=$1', [record.id, provenance]);
   return provenance;
 }
