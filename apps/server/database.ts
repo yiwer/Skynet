@@ -100,6 +100,29 @@ export async function migrate(db: Database) {
       occurrence_hash text NOT NULL, event_id text NOT NULL REFERENCES archive_event_origins(event_id),
       PRIMARY KEY(device_id,source,source_session_id,occurrence_hash)
     );
+    CREATE TABLE IF NOT EXISTS event_qualifications (
+      revision bigserial PRIMARY KEY,event_id text NOT NULL REFERENCES archive_event_origins(event_id),
+      proof_snapshot_id uuid NOT NULL REFERENCES snapshots(id),proof_line integer NOT NULL,proof_block integer NOT NULL,
+      context text NOT NULL CHECK(context IN ('historical','after-enrollment','unknown-time','unknown-enrollment')),
+      enrolled_at timestamptz NOT NULL,record_hash text NOT NULL,created_at timestamptz NOT NULL DEFAULT now(),
+      UNIQUE(event_id,proof_snapshot_id)
+    );
+    CREATE INDEX IF NOT EXISTS event_qualification_latest ON event_qualifications(event_id,revision DESC);
+    CREATE TABLE IF NOT EXISTS qualification_reconcile (
+      id integer PRIMARY KEY CHECK(id=1),cutoff timestamptz NOT NULL DEFAULT now(),
+      last_committed_at timestamptz,last_snapshot_id uuid,complete boolean NOT NULL DEFAULT false,last_error text
+    );
+    ALTER TABLE qualification_reconcile ADD COLUMN IF NOT EXISTS last_error text;
+    INSERT INTO qualification_reconcile(id) VALUES(1) ON CONFLICT DO NOTHING;
+    CREATE TABLE IF NOT EXISTS qualification_reconcile_gaps (
+      snapshot_id uuid PRIMARY KEY REFERENCES snapshots(id),reason text NOT NULL
+    );
+    DO $$ BEGIN IF to_regclass('effective_event_origins') IS NULL THEN
+      EXECUTE 'CREATE VIEW effective_event_origins AS SELECT o.event_id,o.snapshot_id,o.line,o.block,o.employee_id,o.device_id,o.project,
+        o.source,o.source_session_id,o.role,o.timestamp,o.source_date,COALESCE(c.context,o.context) AS context,o.material_id,o.text_offset,
+        o.context AS base_context,COALESCE(c.revision,0) AS qualification_revision,c.proof_snapshot_id,c.proof_line,c.proof_block,c.enrolled_at AS proof_enrolled_at
+        FROM archive_event_origins o LEFT JOIN LATERAL(SELECT * FROM event_qualifications WHERE event_id=o.event_id ORDER BY revision DESC LIMIT 1)c ON true';
+    END IF; END $$;
     COMMIT;
   `);
 }

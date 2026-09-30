@@ -13,6 +13,7 @@ import { locationSchema, type EvidenceLocation } from '../../packages/contracts/
 import { eventOrigins, archiveStatistics } from './provenance.js';
 import type { EventOrigin } from '../../packages/contracts/provenance.js';
 import type { Provenance } from '../../packages/contracts/provenance.js';
+import { attributionRevision } from './qualification.js';
 
 export const exportFormat = z.enum(['raw', 'readable', 'recovery']);
 export type ExportFormat = z.infer<typeof exportFormat>;
@@ -76,7 +77,9 @@ export function archiveQuery(db: Database, raw: RawStore) {
     return { record, evidence, activity, recovery: recoveryInfo(record.manifest, bytes), estimatedBytes: bytes.length * 3 + origins.size * 1536 };
   }
   async function detail(id: string, offset = 0, summary = false) {
-    const { record, evidence, activity, recovery } = await evidenceCache.get(`${id}:${beijingDate(new Date())}`, () => parsed(id));
+    if (!z.uuid().safeParse(id).success) throw new HttpError(404, '未找到存档');
+    const revision=await attributionRevision(db,id);
+    const { record, evidence, activity, recovery } = await evidenceCache.get(`${id}:${beijingDate(new Date())}:${revision}`, () => parsed(id));
     return { snapshotId: record.id, employee: record.employee, deviceId: record.device_id, manifest: record.manifest,
       committedAt: record.committed_at, state: 'committed', backup: 'single-copy', ...evidence, recovery, provenance: record.provenance,
       captureHealth: await readCaptureHealth(db, record.device_id, record.source, record.source_session_id),
@@ -123,7 +126,9 @@ export function archiveQuery(db: Database, raw: RawStore) {
       nextOffset: end < text.length ? end : null, encoding: 'JSON text; offsets count UTF-16 code units' };
   }
   async function exported(id: string, format: ExportFormat) {
-    return exportCache.get(`${id}:${format}`, () => buildExport(id, format));
+    if (!z.uuid().safeParse(id).success) throw new HttpError(404, '未找到存档');
+    const revision=format==='readable'?await attributionRevision(db,id):'raw';
+    return exportCache.get(`${id}:${format}:${revision}`, () => buildExport(id, format));
   }
   async function buildExport(id: string, format: ExportFormat) {
     const record = await snapshot(id); const bytes = await raw.read(record.device_id, record.hash);

@@ -3,7 +3,7 @@ import { isAbsolute } from 'node:path';
 import { z } from 'zod';
 import { digest } from '../server/database.js';
 
-export const PROMPT_VERSION = 'original-segments-1';
+export const PROMPT_VERSION = 'original-segments-qualification-1';
 export const QWEN_ORIGIN = 'https://maas.qianwenaiapi.com/apps/anthropic';
 const absolute = z.string().min(1).refine(isAbsolute, 'Use an absolute analysis-only path');
 const schema = z.object({

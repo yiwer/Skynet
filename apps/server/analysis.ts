@@ -11,6 +11,7 @@ import { activityFor } from '../../packages/activity.js';
 import { eventOrigins } from './provenance.js';
 import type { EventOrigin } from '../../packages/contracts/provenance.js';
 import { analysisProjection, analysisTransaction, migrateQueue, sweepQueue } from '../analysis/queue.js';
+import { attributionRevision, attributionRevisionSql } from './qualification.js';
 
 export async function migrateAnalysis(db: Database) {
   const client = await db.connect();
@@ -40,11 +41,13 @@ export async function prepareAnalysisInput(db: Database, archive: ArchiveQuery, 
     try { new TextDecoder('utf-8', { fatal: true }).decode(bytes); }
     catch { throw new HttpError(422, '原件包含损坏的 UTF-8；没有调用模型，完整原始字节仍可存档、查询与导出'); }
     const parsed = readEvidence(bytes, record.source);
-    const origins = new Map<string, EventOrigin>((await eventOrigins(db, snapshotId)).map(origin => [`${origin.line}/${origin.block}`,
+    const originRows = await eventOrigins(db, snapshotId);
+    const revision = originRows.reduce((latest,origin)=>{const next=BigInt(origin.qualification?.revision??'0');return next>latest?next:latest;},0n).toString();
+    const origins = new Map<string, EventOrigin>(originRows.map(origin => [`${origin.line}/${origin.block}`,
       { ...origin, line: origin.originLine, block: origin.originBlock }]));
     const attributed = activityFor(parsed.events, record.manifest.enrolledAt, undefined, origins);
     const input: AnalysisInput = { snapshotId, hash: record.hash, parserVersion: parsed.parserVersion, source: record.source,
-      sourceVersion: record.manifest.sourceVersion, eventCount: parsed.events.length, events: attributed.events,
+      sourceVersion: record.manifest.sourceVersion, eventCount: parsed.events.length, attributionRevision: revision, events: attributed.events,
       coverage: { unrecognizedLines: parsed.unrecognizedLines, partialLine: parsed.partialLine,
         excludedMaterials: record.manifest.capture?.materials.length ?? 0, captureGaps: record.manifest.capture?.gaps ?? [],
         scope: '当前不可变主原件的全部已解析事件；未知行、未闭合末行及关联材料未进入本次分析；这不表示这些范围没有活动。' } };
@@ -89,15 +92,19 @@ export function analysisService(db: Database, archive: ArchiveQuery) {
     const { record, input } = await prepareAnalysisInput(db, archive, snapshotId, config);
     return analysisTransaction(db, async client => {
       await sweepQueue(client);
-      const latest = (await client.query('SELECT id FROM snapshots WHERE device_id=$1 AND source=$2 AND source_session_id=$3 ORDER BY committed_at DESC,id DESC LIMIT 1',
+      if (await attributionRevision(client,snapshotId) !== input.attributionRevision) throw new HttpError(409,'原来源采集资格版本已更新，请重新准备分析；未追加模型调用');
+      const latest = (await client.query(`SELECT s.id,${attributionRevisionSql('s.id')} AS attribution_revision FROM snapshots s WHERE device_id=$1 AND source=$2 AND source_session_id=$3 ORDER BY committed_at DESC,id DESC LIMIT 1`,
         [record.device_id, record.source, record.source_session_id])).rows[0];
       if (trigger !== 'manual' && latest.id !== snapshotId) throw new HttpError(409, '输入已更新，等待最新快照去抖准备；未追加模型调用');
-      const target = (await client.query(`INSERT INTO analysis_targets(id,device_id,source,source_session_id,desired_snapshot_id,config_hash,actor_id,actor_kind,parser_version)
-        VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) ON CONFLICT(device_id,source,source_session_id) DO UPDATE SET
-        generation=analysis_targets.generation+CASE WHEN analysis_targets.config_hash<>EXCLUDED.config_hash OR analysis_targets.parser_version<>EXCLUDED.parser_version THEN 1 ELSE 0 END,
-        applicable_job_id=CASE WHEN analysis_targets.config_hash<>EXCLUDED.config_hash OR analysis_targets.parser_version<>EXCLUDED.parser_version THEN NULL ELSE analysis_targets.applicable_job_id END,
-        config_hash=EXCLUDED.config_hash,actor_id=EXCLUDED.actor_id,actor_kind=EXCLUDED.actor_kind,parser_version=EXCLUDED.parser_version,error=NULL RETURNING id,generation`,
-        [randomUUID(), record.device_id, record.source, record.source_session_id, latest.id, config.configurationHash, actorId, actorKind, input.parserVersion])).rows[0];
+      const target = (await client.query(`INSERT INTO analysis_targets(id,device_id,source,source_session_id,desired_snapshot_id,config_hash,actor_id,actor_kind,parser_version,attribution_revision)
+        VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) ON CONFLICT(device_id,source,source_session_id) DO UPDATE SET
+        generation=analysis_targets.generation+CASE WHEN analysis_targets.config_hash<>EXCLUDED.config_hash OR analysis_targets.parser_version<>EXCLUDED.parser_version
+          OR analysis_targets.attribution_revision<>EXCLUDED.attribution_revision THEN 1 ELSE 0 END,
+        applicable_job_id=CASE WHEN analysis_targets.config_hash<>EXCLUDED.config_hash OR analysis_targets.parser_version<>EXCLUDED.parser_version
+          OR analysis_targets.attribution_revision<>EXCLUDED.attribution_revision THEN NULL ELSE analysis_targets.applicable_job_id END,
+        config_hash=EXCLUDED.config_hash,actor_id=EXCLUDED.actor_id,actor_kind=EXCLUDED.actor_kind,parser_version=EXCLUDED.parser_version,
+        attribution_revision=EXCLUDED.attribution_revision,error=NULL RETURNING id,generation`,
+        [randomUUID(), record.device_id, record.source, record.source_session_id, latest.id, config.configurationHash, actorId, actorKind, input.parserVersion,latest.attribution_revision])).rows[0];
       await sweepQueue(client);
       const existing = await client.query(`SELECT ${runProjection} FROM analysis_jobs j WHERE snapshot_id=$1 AND config->>'configurationHash'=$2
         AND target_generation=$3 ORDER BY created_at DESC,id DESC LIMIT 1`, [snapshotId, config.configurationHash, target.generation]);
@@ -109,7 +116,7 @@ export function analysisService(db: Database, archive: ArchiveQuery) {
         [randomUUID(), snapshotId, actorId, config, input, target.id, target.generation, config.maxAttempts ?? 1, trigger, actorKind]);
       await client.query("INSERT INTO analysis_actions(id,job_id,actor_id,actor_kind,action) VALUES($1,$2,$3,$4,'request')", [randomUUID(), result.rows[0].id, actorId, actorKind]);
       return result.rows[0];
-    });
+    },true);
   }
   async function get(id: string) {
     await analysisTransaction(db, sweepQueue);
@@ -143,7 +150,7 @@ export function analysisService(db: Database, archive: ArchiveQuery) {
     });
     await analysisTransaction(db, sweepQueue);
     const targets = await db.query(`SELECT t.*,s.committed_at FROM analysis_targets t JOIN snapshots s ON s.id=t.desired_snapshot_id
-      WHERE t.config_hash=$1 AND s.committed_at<now()-$2*interval '1 second'
+      WHERE t.config_hash=$1 AND GREATEST(s.committed_at,t.updated_at)<now()-$2*interval '1 second'
         AND NOT EXISTS(SELECT 1 FROM analysis_jobs j WHERE j.target_id=t.id AND j.target_generation=t.generation)
       ORDER BY t.updated_at LIMIT 20`, [config.configurationHash, config.autoDebounceSeconds]);
     for (const target of targets.rows) try {
