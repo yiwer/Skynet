@@ -29,7 +29,7 @@ export type AnalysisRun = { id: string; snapshotId: string; state: 'queued' | 'r
   attemptHistory: { number: number; state: string; reservedCny: number; requests: number | null; usage: unknown;
     error: string | null; startedAt: string; finishedAt: string | null }[];
   config: { mode: 'qwen-payg' | 'fixture'; model: string; runtimeVersion: string; promptVersion: string; configurationHash: string;
-    maxInputBytes: number; maxSessionBytes: number; maxSegments: number; maxRequests: number; maxOutputTokens: number; timeoutSeconds: number; reservationCny: number; budgetCny: number;
+    maxInputBytes: number; maxSessionBytes: number; maxSegments: number; maxRequests: number; maxOutputTokens: number; timeoutSeconds: number; reservationCny: number; budgetCny: number; budgetId: string;
     maxAttempts: number; concurrency: number; leaseSeconds: number; retryDelaySeconds: number; autoAnalyzeUpdates: boolean; autoDebounceSeconds: number };
   input: { snapshotId: string; hash: string; parserVersion: string; eventCount: number; source: string; sourceVersion: string;
     coverage: { unrecognizedLines: number; partialLine: boolean; excludedMaterials: number; captureGaps: unknown[]; scope: string } };

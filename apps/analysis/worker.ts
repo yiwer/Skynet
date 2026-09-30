@@ -15,7 +15,10 @@ process.once('SIGTERM', () => shutdown.abort()); process.once('SIGINT', () => sh
 const heartbeat = async () => db.query(`INSERT INTO analysis_workers(id,config) VALUES($1,$2)
   ON CONFLICT(id) DO UPDATE SET config=EXCLUDED.config,updated_at=now()`, [workerId, publicConfig(config)]);
 await heartbeat();
-const timer = globalThis.setInterval(() => { void heartbeat().catch(() => shutdown.abort()); }, 3000);
+let heartbeatPending: Promise<unknown> | undefined;
+const timer = globalThis.setInterval(() => {
+  if (!heartbeatPending) heartbeatPending = heartbeat().catch(() => shutdown.abort()).finally(() => { heartbeatPending = undefined; });
+}, 3000);
 console.log(`Skynet analysis worker ready (${config.mode}; Claude Code ${config.runtimeVersion})`);
 const running = new Set<Promise<void>>();
 async function run(job: ClaimedAnalysis) {
@@ -43,6 +46,6 @@ try {
     try { await setTimeout(500, undefined, { signal: shutdown.signal }); } catch {}
   }
 } finally {
-  clearInterval(timer); await Promise.allSettled([...running]);
+  clearInterval(timer); await heartbeatPending; await Promise.allSettled([...running]);
   await db.query('DELETE FROM analysis_workers WHERE id=$1', [workerId]); await db.end();
 }

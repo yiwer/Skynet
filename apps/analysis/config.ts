@@ -59,8 +59,8 @@ export async function readAnalysisConfig(path: string): Promise<AnalysisConfig> 
     configurationHash: digest(JSON.stringify({ ...config, origin, credentialFingerprint, promptVersion: PROMPT_VERSION })) };
 }
 export function publicConfig(config: AnalysisConfig) {
-  const { mode, model, runtimeVersion, maxInputBytes, maxSessionBytes, maxSegments, maxRequests, maxOutputTokens, timeoutSeconds, reservationCny, budgetCny, configurationHash,
+  const { mode, model, runtimeVersion, maxInputBytes, maxSessionBytes, maxSegments, maxRequests, maxOutputTokens, timeoutSeconds, reservationCny, budgetCny, budgetId, configurationHash,
     maxAttempts, concurrency, leaseSeconds, retryDelaySeconds, autoAnalyzeUpdates, autoDebounceSeconds } = config;
-  return { mode, model, runtimeVersion, maxInputBytes, maxSessionBytes, maxSegments, maxRequests, maxOutputTokens, timeoutSeconds, reservationCny, budgetCny, configurationHash, promptVersion: PROMPT_VERSION,
+  return { mode, model, runtimeVersion, maxInputBytes, maxSessionBytes, maxSegments, maxRequests, maxOutputTokens, timeoutSeconds, reservationCny, budgetCny, budgetId, configurationHash, promptVersion: PROMPT_VERSION,
     maxAttempts, concurrency, leaseSeconds, retryDelaySeconds, autoAnalyzeUpdates, autoDebounceSeconds };
 }

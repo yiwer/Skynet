@@ -5,7 +5,7 @@ import { HttpError } from './identities.js';
 import { readEvidence } from './evidence.js';
 import { analysisOutputSchema, type AnalysisItem, type AnalysisRun } from '../../packages/contracts/analysis.js';
 import { evidenceLink, type EvidenceLocation } from '../../packages/contracts/search.js';
-import type { EvidenceLine } from '../../packages/contracts/archive.js';
+import type { EvidenceLine, Source } from '../../packages/contracts/archive.js';
 import type { ActivityEvent } from '../../packages/activity.js';
 import { activityFor } from '../../packages/activity.js';
 import { eventOrigins } from './provenance.js';
@@ -15,7 +15,9 @@ import { analysisProjection, analysisTransaction, migrateQueue, sweepQueue } fro
 export async function migrateAnalysis(db: Database) {
   const client = await db.connect();
   try {
-  await client.query(`BEGIN; SELECT pg_advisory_xact_lock(7402122);
+  // Take the queue lock before any DDL: a live claimant must not hold attempts/targets
+  // while a restarting server holds jobs and waits for those same relations.
+  await client.query(`BEGIN; SELECT pg_advisory_xact_lock(7402122); SELECT pg_advisory_xact_lock(7402123);
     CREATE TABLE IF NOT EXISTS analysis_workers (id text PRIMARY KEY, config jsonb NOT NULL, updated_at timestamptz NOT NULL DEFAULT now());
     CREATE TABLE IF NOT EXISTS analysis_jobs (id uuid PRIMARY KEY, snapshot_id uuid NOT NULL REFERENCES snapshots(id),
       actor_id uuid NOT NULL REFERENCES employees(id), state text NOT NULL, config jsonb NOT NULL, input jsonb NOT NULL,
@@ -59,9 +61,11 @@ export function analysisService(db: Database, archive: ArchiveQuery) {
   }
   async function availability() {
     const config = await worker();
+    const mixed = (await db.query("SELECT count(DISTINCT config->>'configurationHash')::int AS count FROM analysis_workers WHERE updated_at>now()-interval '15 seconds'")).rows[0].count > 1;
     return config ? { ready: true, reason: config.mode === 'fixture' ? '合成演示运行时；未调用真实千问，不作为正式分析验收' : 'Claude Code 分析运行时可用',
       mode: config.mode, model: config.model, runtimeVersion: config.runtimeVersion }
-      : { ready: false, reason: '分析未配置或运行时离线；需部署专用 Claude Code、千问按量模型、凭据与预算。原件仍可同步、查询和导出。' };
+      : { ready: false, reason: mixed ? '检测到不同身份的运行时配置，暂停分析领取；请统一模型、凭据、预算和版本。原件仍可同步、查询和导出。'
+        : '分析未配置或运行时离线；需部署专用 Claude Code、千问按量模型、凭据与预算。原件仍可同步、查询和导出。' };
   }
   async function list(snapshotId: string, offset = 0) {
     await analysisTransaction(db, sweepQueue);
@@ -87,12 +91,14 @@ export function analysisService(db: Database, archive: ArchiveQuery) {
       await sweepQueue(client);
       const latest = (await client.query('SELECT id FROM snapshots WHERE device_id=$1 AND source=$2 AND source_session_id=$3 ORDER BY committed_at DESC,id DESC LIMIT 1',
         [record.device_id, record.source, record.source_session_id])).rows[0];
-      const target = (await client.query(`INSERT INTO analysis_targets(id,device_id,source,source_session_id,desired_snapshot_id,config_hash,actor_id,actor_kind)
-        VALUES($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT(device_id,source,source_session_id) DO UPDATE SET
-        generation=analysis_targets.generation+CASE WHEN analysis_targets.config_hash<>EXCLUDED.config_hash THEN 1 ELSE 0 END,
-        applicable_job_id=CASE WHEN analysis_targets.config_hash<>EXCLUDED.config_hash THEN NULL ELSE analysis_targets.applicable_job_id END,
-        config_hash=EXCLUDED.config_hash,actor_id=EXCLUDED.actor_id,actor_kind=EXCLUDED.actor_kind,error=NULL RETURNING id,generation`,
-        [randomUUID(), record.device_id, record.source, record.source_session_id, latest.id, config.configurationHash, actorId, actorKind])).rows[0];
+      if (trigger !== 'manual' && latest.id !== snapshotId) throw new HttpError(409, '输入已更新，等待最新快照去抖准备；未追加模型调用');
+      const target = (await client.query(`INSERT INTO analysis_targets(id,device_id,source,source_session_id,desired_snapshot_id,config_hash,actor_id,actor_kind,parser_version)
+        VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) ON CONFLICT(device_id,source,source_session_id) DO UPDATE SET
+        generation=analysis_targets.generation+CASE WHEN analysis_targets.config_hash<>EXCLUDED.config_hash OR analysis_targets.parser_version<>EXCLUDED.parser_version THEN 1 ELSE 0 END,
+        applicable_job_id=CASE WHEN analysis_targets.config_hash<>EXCLUDED.config_hash OR analysis_targets.parser_version<>EXCLUDED.parser_version THEN NULL ELSE analysis_targets.applicable_job_id END,
+        config_hash=EXCLUDED.config_hash,actor_id=EXCLUDED.actor_id,actor_kind=EXCLUDED.actor_kind,parser_version=EXCLUDED.parser_version,error=NULL RETURNING id,generation`,
+        [randomUUID(), record.device_id, record.source, record.source_session_id, latest.id, config.configurationHash, actorId, actorKind, input.parserVersion])).rows[0];
+      await sweepQueue(client);
       const existing = await client.query(`SELECT ${runProjection} FROM analysis_jobs j WHERE snapshot_id=$1 AND config->>'configurationHash'=$2
         AND target_generation=$3 ORDER BY created_at DESC,id DESC LIMIT 1`, [snapshotId, config.configurationHash, target.generation]);
       if (existing.rows[0]) return existing.rows[0];
@@ -126,6 +132,15 @@ export function analysisService(db: Database, archive: ArchiveQuery) {
   }
   async function enqueueLatest(config: AnalysisRun['config']) {
     if (!config.autoAnalyzeUpdates) return;
+    await analysisTransaction(db, async client => {
+      await client.query(`UPDATE analysis_targets SET config_hash=$1,generation=generation+1,applicable_job_id=NULL,updated_at=now(),error=NULL
+        WHERE config_hash<>$1`, [config.configurationHash]);
+      for (const source of ['codex-cli', 'codex-desktop', 'claude-code-cli'] as Source[]) {
+        const parserVersion = readEvidence(Buffer.alloc(0), source).parserVersion;
+        await client.query(`UPDATE analysis_targets SET parser_version=$2,generation=generation+1,applicable_job_id=NULL,updated_at=now(),error=NULL
+          WHERE source=$1 AND config_hash=$3 AND parser_version<>$2`, [source,parserVersion,config.configurationHash]);
+      }
+    });
     await analysisTransaction(db, sweepQueue);
     const targets = await db.query(`SELECT t.*,s.committed_at FROM analysis_targets t JOIN snapshots s ON s.id=t.desired_snapshot_id
       WHERE t.config_hash=$1 AND s.committed_at<now()-$2*interval '1 second'
