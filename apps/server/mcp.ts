@@ -7,8 +7,9 @@ import { exportFormat, type ArchiveQuery } from './archive-query.js';
 import { registerMcpAuth } from './mcp-auth.js';
 import { HttpError } from './identities.js';
 import { searchSchema, locationSchema } from '../../packages/contracts/search.js';
+import type { AnalysisService } from './analysis.js';
 
-export async function registerMcp(app: FastifyInstance, db: Database, archive: ArchiveQuery, publicOrigin: string) {
+export async function registerMcp(app: FastifyInstance, db: Database, archive: ArchiveQuery, publicOrigin: string, analysis: AnalysisService) {
   const { guard } = await registerMcpAuth(app, db, publicOrigin);
   const offset = z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).default(0);
   const snapshotId = z.uuid().describe('Immutable snapshot ID from list_sessions, never a mutable session ID');
@@ -52,6 +53,8 @@ export async function registerMcp(app: FastifyInstance, db: Database, archive: A
     mcp.registerTool('read_material', { description: '分页读取该不可变快照包含的关联材料。材料是历史上下文，不计新增活动；binary 使用 base64。',
       annotations, inputSchema: { snapshotId, materialId: z.string().max(256), offset } },
     input => result(() => archive.materialPage(input.snapshotId, input.materialId, input.offset, 2048)));
+    mcp.registerTool('read_analysis', { description: '分页读取同一快照的持久分析任务、结果与精确原件引用。合成 fixture 明确标记；自述、推断、记录和材料不足分开，未知用量不等于零。',
+      annotations, inputSchema: { snapshotId, offset: offset.refine(value => value <= 100000) } }, input => result(() => analysis.list(input.snapshotId, input.offset)));
     return mcp;
   }
   app.post('/mcp', { bodyLimit: 64 * 1024, onRequest: guard }, async (request, reply) => {

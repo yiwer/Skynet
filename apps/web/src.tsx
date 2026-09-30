@@ -11,6 +11,7 @@ import './style.css';
 import { InstallationHelp } from './installation.js';
 import { ArchiveSearch } from './ArchiveSearch.js';
 import { EvidenceReader, selectedEvidence } from './EvidenceReader.js';
+import { SessionAnalysis } from './SessionAnalysis.js';
 import { ActivityStatistics } from './ActivityStatistics.js';
 import type { Provenance } from '../../packages/contracts/provenance.js';
 
@@ -57,8 +58,8 @@ function App() {
     return () => window.removeEventListener('hashchange', change);
   }, []);
 
-  async function request(path: string, access = token, signal?: AbortSignal) {
-    const response = await fetch(path, { headers: { Authorization: `Bearer ${access}` }, signal });
+  async function request(path: string, access = token, signal?: AbortSignal, method?: 'POST') {
+    const response = await fetch(path, { method, headers: { Authorization: `Bearer ${access}`, ...(method ? { 'Content-Type': 'application/json' } : {}) }, signal, ...(method ? { body: '{}' } : {}) });
     if (response.status === 401 && token && access === token) logout('凭据无效或已停用，请重新登录。');
     if (!response.ok) {
       const body = await response.json().catch(() => null);
@@ -144,6 +145,7 @@ function App() {
           {(detail.unrecognizedLines > 0 || detail.partialLine) && <p className="notice">{detail.unrecognizedLines} 行未解析{detail.partialLine ? '，另有未闭合的末行' : ''}。全部字节仍保存在原件中。</p>}
           <HistoryMaterials key={detail.snapshotId} snapshotId={detail.snapshotId} capture={detail.manifest.capture} request={(path, signal) => request(path, token, signal)} />
           <CaptureCoverage key={`coverage-${detail.snapshotId}`} initial={detail.captureHealth} path={`/api/snapshots/${detail.snapshotId}/capture-status`} request={path => request(path)} />
+          <SessionAnalysis key={`analysis-${detail.snapshotId}`} snapshotId={detail.snapshotId} request={(path, signal, method) => request(path, token, signal, method)} />
           <section className="recovery" aria-label="历史归属"><h3>历史归属</h3><p>本快照上传员工：{detail.employee}。历史记录按每条证据的原始设备及员工归属；当前项目不覆盖历史项目。</p>
             <p>{detail.provenance.relation === 'verified-restoration' ? '服务器已核对恢复来源与完整原件前缀。' : detail.provenance.relation === 'same-device-continuation' ? '已核对同设备会话的延续关系。' : '跨设备关系未确认。'}</p>
             {detail.provenance.sourceSnapshotId && <a href={`#${detail.provenance.sourceSnapshotId}`}>查看来源快照</a>}

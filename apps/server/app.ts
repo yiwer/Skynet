@@ -16,19 +16,21 @@ import { archiveWriter } from './archive-write.js';
 import { enrollDevice } from './enrollment.js';
 import { captureHealthSchema } from '../../packages/contracts/capture-health.js';
 import { saveCaptureHealth, readCaptureHealth } from './capture-health.js';
+import { analysisService, migrateAnalysis } from './analysis.js';
 import { backfillOrigins } from './provenance.js';
 
 export async function createApp(options: { db: Database; rawDirectory: string; webDirectory?: string; publicOrigin?: string }) {
   const { db } = options;
   await migrate(db);
   await migrateArchiveSearch(db);
+  await migrateAnalysis(db);
   const raw = new RawStore(options.rawDirectory);
   await backfillOrigins(db, raw);
   const app = Fastify({ bodyLimit: CHUNK_BYTES, logger: false, requestTimeout: 30_000 });
   app.setErrorHandler((error, _request, reply) => {
     if (error instanceof z.ZodError) return reply.code(400).send({ error: '请求格式无效' });
     const code = (error as { statusCode?: number }).statusCode ?? 500;
-    return reply.code(code).send({ error: code < 500 ? (error as Error).message : '服务暂时不可用；原件尚未确认，请重试' });
+    return reply.code(code).send({ error: code < 500 || error instanceof HttpError ? (error as Error).message : '服务暂时不可用；原件尚未确认，请重试' });
   });
   app.addHook('onSend', async (_request, reply) => {
     reply.header('Cache-Control', 'no-store');
@@ -146,6 +148,19 @@ export async function createApp(options: { db: Database; rawDirectory: string; w
 
   app.get('/api/me', { onRequest: readerGuard }, async request => reader(request.headers.authorization));
   const archive = archiveQuery(db, raw);
+  const analysis = analysisService(db, archive);
+  app.get('/api/snapshots/:id/analysis', { onRequest: readerGuard }, async request => {
+    const id = z.uuid().parse((request.params as { id: string }).id);
+    const { offset } = z.object({ offset: z.coerce.number().int().min(0).max(100000).default(0) }).strict().parse(request.query);
+    return analysis.list(id, offset);
+  });
+  app.post('/api/snapshots/:id/analysis', { onRequest: readerGuard }, async (request, reply) => {
+    const id = z.uuid().parse((request.params as { id: string }).id);
+    z.object({}).strict().parse(request.body ?? {});
+    const actor = await reader(request.headers.authorization);
+    return reply.code(202).send(await analysis.request(id, actor.id));
+  });
+  app.get('/api/analysis/:id', { onRequest: readerGuard }, async request => analysis.get(z.uuid().parse((request.params as { id: string }).id)));
   app.get('/api/activity-statistics', { onRequest: readerGuard }, async request => {
     const { offset } = z.object({ offset: z.coerce.number().int().min(0).default(0) }).parse(request.query);
     return archive.statistics(offset);
@@ -202,7 +217,7 @@ export async function createApp(options: { db: Database; rawDirectory: string; w
     const file = await archive.exported((request.params as { id: string }).id, format);
     return reply.header('Content-Disposition', `attachment; filename="${file.filename}"`).type(file.contentType).send(file.bytes);
   });
-  if (options.publicOrigin) await registerMcp(app, db, archive, options.publicOrigin);
+  if (options.publicOrigin) await registerMcp(app, db, archive, options.publicOrigin, analysis);
   if (options.webDirectory) {
     await app.register(fastifyStatic, { root: resolve(options.webDirectory), wildcard: false });
   }
