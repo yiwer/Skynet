@@ -5,18 +5,32 @@ import { createHash } from 'node:crypto';
 import { realpath } from 'node:fs/promises';
 import { atomicJson } from '../../packages/filesystem.js';
 import { optionalJson, type Installation } from './install-state.js';
+import { registerTask, type TaskRegistration } from './autostart-registration.js';
 
 const execute = promisify(execFile);
 const lifecycle = { login: 'not-verified', reboot: 'not-verified', sleepResume: 'not-verified', desktopIcon: 'not-verified' };
-type Registration = { state: string; adapter: string; taskName?: string; command?: string; arguments?: string; description?: string; checkedAt: string; error?: string; lifecycle: typeof lifecycle;
-  fallback?: { observedAt: string; notice: string } };
+type Registration = TaskRegistration;
 function powershell() { return join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe'); }
 function supervisorAction(installation: Installation, canonical: string) {
   const quote = (value: string) => `'${value.replaceAll("'", "''")}'`;
+  // .NET Framework ProcessStartInfo has Arguments, not ArgumentList. Preserve
+  // each Windows argv element, including trailing backslashes, as one argument.
+  const argument = (value: string) => `"${value.replace(/(\\*)"/g, '$1$1\\"').replace(/(\\+)$/, '$1$1')}"`;
+  const argumentsText = [installation.launcher, 'background', '--state', canonical].map(argument).join(' ');
   // Keep the task action alive across a supervisor crash. An authenticated
   // normal stop ends the action; no PID recovered from a file is authority.
-  const script = `$ErrorActionPreference='Stop'; Remove-Item Env:SKYNET_KEY -ErrorAction SilentlyContinue; $delay=1; while($true){$started=[DateTime]::UtcNow; & ${quote(installation.node)} ${quote(installation.launcher)} 'background' '--state' ${quote(canonical)}; if($LASTEXITCODE -eq 0){exit 0}; if(([DateTime]::UtcNow-$started).TotalSeconds -ge 30){$delay=1}; Start-Sleep -Seconds $delay; $delay=[Math]::Min(30,$delay*2)}`;
+  // The task's Hidden setting does not hide a console child. Start the exact
+  // registered executable without a shell or a new console and wait on the
+  // Process object we created. The outer PowerShell still requests Hidden;
+  // its initial Task Scheduler window behavior needs separate observation.
+  const script = `$ErrorActionPreference='Stop'; Remove-Item Env:SKYNET_KEY -ErrorAction SilentlyContinue; $delay=1; while($true){$started=[DateTime]::UtcNow; $startInfo=New-Object System.Diagnostics.ProcessStartInfo; $startInfo.FileName=${quote(installation.node)}; $startInfo.Arguments=${quote(argumentsText)}; $startInfo.UseShellExecute=$false; $startInfo.CreateNoWindow=$true; $startInfo.WindowStyle=[System.Diagnostics.ProcessWindowStyle]::Hidden; $ownedChild=New-Object System.Diagnostics.Process; $ownedChild.StartInfo=$startInfo; try{if(-not $ownedChild.Start()){throw 'Registered supervisor could not start'}; $ownedChild.WaitForExit(); $exitCode=$ownedChild.ExitCode}finally{$ownedChild.Dispose()}; if($exitCode -eq 0){exit 0}; if(([DateTime]::UtcNow-$started).TotalSeconds -ge 30){$delay=1}; Start-Sleep -Seconds $delay; $delay=[Math]::Min(30,$delay*2)}`;
   return { command: powershell(), arguments: `-NoProfile -NonInteractive -WindowStyle Hidden -EncodedCommand ${Buffer.from(script, 'utf16le').toString('base64')}` };
+}
+function legacySupervisorArguments(installation: Installation, canonical: string) {
+  const quote = (value: string) => `'${value.replaceAll("'", "''")}'`;
+  // Recognize only the previously shipped owned action; this is never started.
+  const script = `$ErrorActionPreference='Stop'; Remove-Item Env:SKYNET_KEY -ErrorAction SilentlyContinue; $delay=1; while($true){$started=[DateTime]::UtcNow; & ${quote(installation.node)} ${quote(installation.launcher)} 'background' '--state' ${quote(canonical)}; if($LASTEXITCODE -eq 0){exit 0}; if(([DateTime]::UtcNow-$started).TotalSeconds -ge 30){$delay=1}; Start-Sleep -Seconds $delay; $delay=[Math]::Min(30,$delay*2)}`;
+  return `-NoProfile -NonInteractive -WindowStyle Hidden -EncodedCommand ${Buffer.from(script, 'utf16le').toString('base64')}`;
 }
 export async function launchCurrentSession(state: string, installation: Installation) {
   // Node's hidden guardian survives the setup shell without PowerShell console
@@ -27,7 +41,7 @@ export async function launchCurrentSession(state: string, installation: Installa
 }
 async function windowsTask(state: string, mode: 'register' | 'start' | 'inspect' | 'remove', registration: Registration) {
   // All task fields are JSON data. No path or identifier is interpolated into shell code.
-  const script = `$ErrorActionPreference='Stop'; $r=Get-Content -LiteralPath $env:SKYNET_AUTOSTART_FILE -Raw | ConvertFrom-Json; $sid=[System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value;
+  const script = `$ErrorActionPreference='Stop'; $r=$env:SKYNET_AUTOSTART_REGISTRATION | ConvertFrom-Json; $sid=[System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value;
 $t=Get-ScheduledTask -TaskName $r.taskName -ErrorAction SilentlyContinue;
 if($t){if($t.Principal.UserId -like 'S-1-*'){$taskSid=$t.Principal.UserId}else{$taskSid=(New-Object System.Security.Principal.NTAccount($t.Principal.UserId)).Translate([System.Security.Principal.SecurityIdentifier]).Value}; if($t.Description -ne $r.description -or @($t.Actions).Count -ne 1 -or $t.Actions[0].Execute -ne $r.command -or $t.Actions[0].Arguments -ne $r.arguments -or $taskSid -ne $sid -or [string]$t.Principal.RunLevel -ne 'Limited' -or [string]$t.Principal.LogonType -ne 'Interactive'){throw 'Existing task ownership or privilege conflict; retained unchanged'}};
 switch($env:SKYNET_AUTOSTART_ACTION){
@@ -37,7 +51,7 @@ switch($env:SKYNET_AUTOSTART_ACTION){
 'remove' {if($t){Unregister-ScheduledTask -TaskName $r.taskName -Confirm:$false}; 'removed'}
 }`;
   const result = await execute(powershell(), ['-NoProfile', '-NonInteractive', '-WindowStyle', 'Hidden', '-EncodedCommand', Buffer.from(script, 'utf16le').toString('base64')],
-    { windowsHide: true, timeout: 15_000, maxBuffer: 8192, env: { ...process.env, SKYNET_KEY: undefined, SKYNET_AUTOSTART_ACTION: mode, SKYNET_AUTOSTART_FILE: join(state, 'autostart.json') } });
+    { windowsHide: true, timeout: 15_000, maxBuffer: 8192, env: { ...process.env, SKYNET_KEY: undefined, SKYNET_AUTOSTART_ACTION: mode, SKYNET_AUTOSTART_REGISTRATION: JSON.stringify(registration) } });
   return result.stdout.trim();
 }
 export async function installAutostart(state: string, installation: Installation) {
@@ -53,10 +67,10 @@ export async function installAutostart(state: string, installation: Installation
     arguments: action.arguments,
     description: `Skynet current-user collector ${tag}`, checkedAt: new Date().toISOString(), lifecycle };
   if (previous && previous.taskName === value.taskName && previous.command === value.command && previous.arguments === value.arguments) value.fallback = previous.fallback;
-  await atomicJson(join(state, 'autostart.json'), value);
-  try { await windowsTask(state, 'register', value); value.state = 'registered'; }
-  catch { value.state = 'degraded'; value.error = 'Windows user task registration was blocked or conflicts with an existing task. Collection can run in this login session. Inspect Task Scheduler permissions and rerun skynet setup; no elevation or policy change is required by Skynet.'; }
-  await atomicJson(join(state, 'autostart.json'), value); return value;
+  return registerTask(previous, value, legacySupervisorArguments(installation, canonical), {
+    task: (mode, registration) => windowsTask(state, mode, registration),
+    save: registration => atomicJson(join(state, 'autostart.json'), registration),
+  });
 }
 export async function startAutostart(state: string) {
   const value = await optionalJson(join(state, 'autostart.json')) as Registration | null;
