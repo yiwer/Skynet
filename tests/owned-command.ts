@@ -2,7 +2,7 @@ import {spawn,type ChildProcess} from 'node:child_process';
 
 export type CommandOptions={timeoutMs?:number;maxOutputBytes?:number;cwd?:string};
 export class OwnedCommandError extends Error {
-  constructor(public readonly reason:string,public readonly code:number|null,public readonly stderr:string){super(`Owned command ${reason}${code===null?'':` (${code})`}${stderr?`: ${stderr}`:''}`);}
+  constructor(public readonly reason:string,public readonly code:number|null,public readonly stderr:string,public readonly stdout=''){super(`Owned command ${reason}${code===null?'':` (${code})`}${stderr?`: ${stderr}`:''}`);}
 }
 function safe(text:string,env:NodeJS.ProcessEnv,input:string){
   const secrets=Object.entries(env).filter(([key,value])=>value&&/credential|password|secret|token|key|database_url/i.test(key)).map(([,value])=>value!);
@@ -18,7 +18,8 @@ export async function ownedCommand(file:string,args:string[],env:NodeJS.ProcessE
     const child=spawn(file,args,{env,cwd:options.cwd,windowsHide:true,stdio:['pipe','pipe','pipe']});
     const stdout:Buffer[]=[],stderr:Buffer[]=[];let outBytes=0,errBytes=0,reason:string|undefined,killTimer:NodeJS.Timeout|undefined;
     const finish=(code:number|null)=>{clearTimeout(timer);clearTimeout(killTimer);const error=safe(Buffer.concat(stderr).toString('utf8'),env,input);
-      if(reason||code!==0)reject(new OwnedCommandError(reason??'exited',code,error));else resolve({stdout:Buffer.concat(stdout).toString('utf8'),stderr:error});};
+      const output=Buffer.concat(stdout).toString('utf8');
+      if(reason||code!==0)reject(new OwnedCommandError(reason??'exited',code,error,safe(output,env,input)));else resolve({stdout:output,stderr:error});};
     const cancel=(why:string)=>{if(reason)return;reason=why;child.kill('SIGKILL');killTimer=setTimeout(()=>finish(null),2000);};
     const timer=setTimeout(()=>cancel('deadline exceeded'),timeoutMs);
     child.stdout.on('data',(bytes:Buffer)=>{outBytes+=bytes.length;if(outBytes>limit)cancel('stdout limit exceeded');else stdout.push(bytes);});
