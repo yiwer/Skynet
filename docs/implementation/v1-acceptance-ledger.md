@@ -23,7 +23,7 @@
 | AC-15 更正与版本隔离 | 原始快照不可变；[#24](issue-24.md) 持久 generation、parser/配置、失效租约、迟到旧 token、新输入去抖与非适用历史结果公开回归 | #30 更正和历史报告；真实运行验收 |
 | AC-16 认证撤销与共享读 | [#20](issue-20.md)：逐请求校验、共享读取、维护权限、审计 | 新增分析/报告/更正接口沿用边界并复验 |
 | AC-17 MCP 真实授权与查询 | [#26](issue-26.md)、[#27](issue-27.md)：两个 CLI 正常 OAuth、自然到期刷新、分页及导出；[#28](issue-28.md) 日报 HTTP/Web/OAuth MCP 固定版本、分页及重启一致 | 周报同入口；日报实际 G3 与部署域名 |
-| AC-18 真实分析与长会话 | [#22](issue-22.md) 已集成公开任务、独立实际 Claude Code worker、Web/MCP 结果与证据；支线 Windows/Linux 原生公开整链使用显式 loopback fixture 通过 | #21/G2 前置；指定千问 PAYG 模型、专用配置、核实价格与预算实测；#23 长会话 |
+| AC-18 真实分析与长会话 | [#22](issue-22.md) 公开任务与独立 Claude Code worker；[#23](issue-23.md) 支线实际 Windows Claude Code loopback 分段提取/汇总、原 UTF-16 引用、Web/MCP/完整导出及失败/跳过范围通过 | #21/G2 前置；指定千问 PAYG 模型、专用配置、核实价格与预算及真实长会话质量实测；支线合成链不关闭 G3 |
 | AC-19 分析失败隔离 | [#22](issue-22.md)、[#24](issue-24.md)：公开持久有限总尝试、全局并发、逐尝试预算预留、未知不退款、租约与转发 fencing、版本适用性、Web/MCP 队列；支线实际 CLI Windows/Linux loopback 无效引用/超时两次停止，原件上传/查询/导出仍可用 | 真实 PAYG 价格上界与账单、模型质量及 G2/G3验收；fixture 不认证真实计费 |
 | AC-20 指令隔离与防递归 | [#22](issue-22.md) 产品运行时禁用执行工具、hooks/auth/MCP 不继承，恶意材料及伪造引用在 Windows/Linux 实际 CLI loopback 公共链拒绝，无员工会话回流 | 真实千问 PAYG 模型与完整 G3 验收 |
 | AC-21 服务器备份恢复 | 单机容器持久卷重启演练；ACK 明示单副本 | #32 独立一致备份、新服务器恢复、报告引用、损坏检测及运行状态 |
@@ -98,3 +98,9 @@ recovery 合并后主线自身 typecheck/build/diffcheck 与 control保护5/5通
 最新较早节点 `9b90e7a` 的 [Linux CI](https://github.com/yiwer/Skynet/actions/runs/36677460451) 为27pass/1fail/0cancelled（106.54秒），失败是安装测试 `installation.test.ts:204` 期望禁用任务时包含 `not yet verified`；runtime 状态竞态由 #14 独立跟进。该结果不含本次 #24，不能用主线定向通过覆盖，也不把之前 f6ccbca 的28/28改写为最新完整通过。此前 Windows 初次维护1500ms控制无响应仍保留，后续独立 tight-loop 诊断继续。
 
 G0–G4、#21/G2、#22/#24 的真实 PAYG/G3均开放。#23长会话、#28日报及之后票据继续按依赖准备；未宣称 V1完成或关闭票据。
+
+## 2026-09-30 日报 / 长会话组合准备与失败保留
+
+安装状态观测6324d0a经9f06a49集成；旧Linux27/28以 [focused修订](issue-14-status-observation.md) 的实际失败/完成routing sweep解释为准，待新CI，不先改为通过。日报5399481经185f6af，后接长会话803f89b；文档冲突保留24当前适用版本、28固定版本与23原范围。主线自身typecheck/build/diffcheck通过，归属/报告等12/12（18.45秒）及组合长范围/报告等11/11（17.86秒）；本次主线实际Claude日报公开链1/1（19.92秒）eJcXIF，处理字段original-utf16-1、raw未知仍partial。没有重跑heavy完整Windows。
+
+23支线最新完整ordinary33项31pass/2fail/0cancel（237.08秒），安装GbzZun与插件j1GGMW均1500ms runtime-control无响应；该完整批次尚不包含日报，不改写为当前主线整套结果。既有recovery23/24及更早取消/失败批次同样保留，源故障继续独立诊断。G1/G2/G3及全部门槛仍开放。材料先作历史上下文后在原设备取得正常独立资格时的活动分类已交独立修订；冻结事件归属不被日报擅自重解释，G2不因计数/引用测试通过而签收。

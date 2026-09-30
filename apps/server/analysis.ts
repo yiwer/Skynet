@@ -29,11 +29,12 @@ export async function migrateAnalysis(db: Database) {
   await migrateQueue(client); await client.query('COMMIT');
   } catch (error) { await client.query('ROLLBACK'); throw error; } finally { client.release(); }
 }
-export type AnalysisInput = AnalysisRun['input'] & { events: (EvidenceLine & Partial<Pick<ActivityEvent, 'origin' | 'context' | 'sourceDate'>>)[] };
+export type AnalysisInput = AnalysisRun['input'] & { events: (EvidenceLine & Partial<Pick<ActivityEvent, 'origin' | 'context' | 'sourceDate'>>)[];
+  analysisContext?: { phase: 'extract' | 'aggregate'; findings?: { text: string; category: string; assessment: string }[] } };
 const runProjection = analysisProjection;
 export async function prepareAnalysisInput(db: Database, archive: ArchiveQuery, snapshotId: string, config: AnalysisRun['config']) {
     const record = await archive.snapshot(snapshotId);
-    if (record.manifest.byteLength > config.maxInputBytes) throw new HttpError(413, '该原件超过短会话分析限额；尚未分析，请使用后续长会话处理');
+    if (record.manifest.byteLength > config.maxSessionBytes) throw new HttpError(413, '该原件超过有界会话分析总字节限额；尚未调用模型，完整原件仍可导出');
     const { bytes } = await archive.exported(snapshotId, 'raw');
     if (digest(bytes) !== record.hash || bytes.length !== record.manifest.byteLength) throw new HttpError(409, '分析输入原件校验失败；没有调用模型');
     try { new TextDecoder('utf-8', { fatal: true }).decode(bytes); }
@@ -48,7 +49,7 @@ export async function prepareAnalysisInput(db: Database, archive: ArchiveQuery, 
         excludedMaterials: record.manifest.capture?.materials.length ?? 0, captureGaps: record.manifest.capture?.gaps ?? [],
         scope: '当前不可变主原件的全部已解析事件；未知行、未闭合末行及关联材料未进入本次分析；这不表示这些范围没有活动。' } };
     if (!input.eventCount) throw new HttpError(422, '原件没有可分析的已解析事件；仍可下载完整原件');
-    if (Buffer.byteLength(JSON.stringify(input)) > config.maxInputBytes) throw new HttpError(413, '规范化输入超过短会话限额；尚未分析');
+    if (input.eventCount > 4096 || Buffer.byteLength(JSON.stringify(input)) > config.maxSessionBytes * 2) throw new HttpError(413, '规范化输入超过会话总字节或事件限额；尚未调用模型');
     if (Buffer.byteLength(JSON.stringify({ ...input, events: undefined })) > 16 * 1024) throw new HttpError(413, '覆盖元数据超过短会话限额；尚未分析，完整清单仍可导出');
     return { record, input };
 }

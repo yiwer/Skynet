@@ -8,7 +8,7 @@
 
 用户要求继续剩余 tickets 直至 V1 完成。以干净的 `a4ca34c` 工作区恢复，沿用草稿 PR #55；该提交的 [Linux CI](https://github.com/yiwer/Skynet/actions/runs/36400612859/job/108857308920) 包含类型检查、构建和 17 项测试，全部通过。
 
-G0 增补、#14 维护与 Windows guardian / stdin UTF-8 修订、#19 主会话与正常独立资格材料的归属，以及 #22 短会话分析公开流程准备已合入。#14 recovery 支线完整24项为23 pass /1 initial-install runtime-control fail；确定性 fallback 崩溃恢复通过，但无响应故障的 tight-loop 诊断继续交接，失败记录保留。每项由独立分支实施、合并代理集成。后续按依赖核查分析、报告和灾备；未通过的前置门槛继续保持开放，准备代码不等于验收通过。真实 Desktop 隔离环境、千问专用配置/模型/测试预算、第二人复现与五个工作日试点仍需实际条件，不以合成回归代替。
+G0 增补、#14 维护与 Windows guardian / stdin UTF-8 修订、#19 主会话与正常独立资格材料的归属，#22 短会话、#23 长会话、#24 队列及 #28 日报公开流程准备均已合入。#14 recovery 支线完整24项为23 pass /1 initial-install runtime-control fail；确定性 fallback 崩溃恢复通过，但无响应故障的 tight-loop 诊断继续交接，失败记录保留。每项由独立分支实施、合并代理集成。后续按依赖核查分析、报告和灾备；未通过的前置门槛继续保持开放，准备代码不等于验收通过。真实 Desktop 隔离环境、千问专用配置/模型/测试预算、第二人复现与五个工作日试点仍需实际条件，不以合成回归代替。
 
 主会话归属集成提交 `1665d08` 的 [Linux CI](https://github.com/yiwer/Skynet/actions/runs/36670850420/job/109745319778) 已通过类型检查、构建与 19/19 普通流程回归；合并后的六项定向回归及真实 Claude 主会话、子会话续聊也通过。这是 #14 合并之前的 Linux 证据；Windows 安装/插件此前出现的后台无响应失败仍保留，不能据后续正常回归通过认定其根因已消除。
 
@@ -46,8 +46,11 @@ AC-01…AC-22 的已有证据和缺口集中列于 [V1 验收证据台账](../im
 - #27：组合内容搜索、历史代次和稳定原件定位已通过 `96c3d92` 合并。分支 14 项普通测试、两个真实 CLI 各 20 次 MCP 调用通过；合并后搜索/MCP/缓存 3 项回归通过，105 个独立会话跨 37 页完整命中。查询成员可跨重启继续，过期明确报错；320/375/1440px 布局已检查。
 - #22：`2af8421` 经 `73bc1bd` 合入短会话公开分析准备：POST 持久任务→隔离实际 Claude Code worker→HTTP/Web/MCP 结果与证据引用，未知、四级结论、失败与输入覆盖明确显示。原材料 raw 锚点与当前输入的语义 quote 偏移分别保留，不能相加。分支实际 Windows/Linux CLI 公共整链使用显式 loopback fixture 通过；不证明真实千问计费或模型质量。#21/G2、真实 PAYG 模型、专用凭据、核实价格与预算仍待实际条件，#22/G3 保持开放；见 [#22 记录](../implementation/issue-22.md)。
 - #24：`f2b9cf9` 经 `c281d7c` 合入持久队列准备：有限总尝试、全局并发与预算预留、租约/转发 fencing、晚结果与当前适用版本分离、parser/配置升级和旧协议保护、独立自动增量去抖、Web/MCP 同队列与资源状态。system 调度不冒充源员工，日报可自动创建目标；worker 不挂载原件。主线自身 typecheck/build/diffcheck 与队列/分析/MCP/旧会话（含自动增量与已确认 append）5/5通过（18.7秒）；实际 Windows/Linux CLI 双平台故障证据来自实现分支，均显式 loopback 合成 provider。真实发现并修复迁移与领取锁顺序死锁，保留 red/green 回归，不放宽超时。#21/G2 与真实 PAYG/G3仍开放，见 [#24 记录](../implementation/issue-24.md)。
+- #23：803f89b 已集成长会话有界原范围提取/汇总准备，UTF-16原句与 inputLocation 分离，失败/跳过/省略及聚合状态显式返回；日报保留该 processing 范围并标 partial。支线真实 Windows Claude CLI loopback 完整/坏段/超限17请求通过；支线普通33项31 pass /2 runtime-control fail保留，不代替主线完整验收。见 [#23](../implementation/issue-23.md)。
 - #28 日报准备已集成：北京时间09:00持久入队、自动 system 分析、来源员工/项目/日期的日报与原句、Web/MCP固定分页版本已实现；真实 Claude CLI loopback 的8会话/2项目/24事项整链通过，历史背景不计当天工作，未知及未完整处理标 partial。统计共用原事件账本；原生 token/文件/区间与按日覆盖待 #31，真实 G3 和所有门槛保持开放。见 [#28](../implementation/issue-28.md)，独立实现提交5399481已合入，正式验收仍开放。
 - #10、#14–#15、#19、#21、#23–#25、#28–#33：尚未完成；依赖与门槛继续按 ticket 图核查。
+
+#23 独立实现准备已基于 #24 最终 `f2b9cf9` 完成有界长会话 public trace：实际 Windows Claude Code 2.1.281 对本地合成服务分段提取/汇总，原 UTF-16 引用、跨段头尾事实、坏段与 skipped 范围、Web/MCP/原件导出定向通过，见 [#23 记录](../implementation/issue-23.md)。全尝试共享请求/租约/deadline/预算，不按段追加额度。支线完整 Windows 33 项为 **31 pass / 2 runtime-control fail / 0 cancel**，237.08s；新长会话/队列通过，维护 236.15s 通过，安装与插件 1500ms 无响应仍红并交接独立诊断。真实千问、质量和 G3 仍开放，等待集成复核。
 - G0–G4：未通过。原生恢复、真实分析、客户端 MCP 授权与五个工作日试点必须保留实测证据。
 - [草稿 PR #55](https://github.com/yiwer/Skynet/pull/55) 已保存实现与规格关闭引用；保持草稿，尚无 ticket 通过验收或被关闭。
 - 本地类型检查、构建、公开入口 E2E、Linux 容器持久卷重启验证及初次 GitHub CI 通过；[两路评审](../implementation/review-issue-4.md) 的可修复代码问题已在 `9ad3277` 修复，并通过 `920b92f` 合并，回归检查通过。
@@ -64,3 +67,9 @@ AC-01…AC-22 的已有证据和缺口集中列于 [V1 验收证据台账](../im
 ## 验收记录要求
 
 每个 ticket 记录实现提交、实际运行命令、环境、测试结果、未解决项和后续依赖。门槛未通过时保持草稿，不关闭规格与未验收 ticket。
+
+## 日报与长会话组合集成（2026-09-30）
+
+先 cherry-pick 独立安装状态观测6324d0a至9f06a49，再合日报5399481至185f6af，随后合长会话803f89b。仅 README / 台账 / 规划文档冲突，按 resolving-merge-conflicts 保留14失败、24队列、28日报与23长范围；源码无冲突，日报类型接入正式 AnalysisProcessing。主线自身 typecheck/build/diffcheck通过；日报/统计/归属/历史/材料/队列/MCP12/12（18.45秒），组合日报/长范围/队列/分析/MCP11/11（17.86秒）。实际Claude2.1.281日报公开8会话24事项/分页/调度/归属/restart/Web/MCP1/1（19.92秒）来自本次组合主线，eJcXIF；返回 original-utf16-1处理范围，原件有未解析行仍partial。长会话17请求实测来自23支线6PLN80，未冒充本次复跑。
+
+没有重跑heavy完整Windows；23支线31/33（237.08秒）、安装/插件1500ms控制故障及旧23/24/取消批次均保留，focused状态观测待新LinuxCI，旧27/28尚不被替代。原设备后资格材料的历史/活动分类另由19后续版本化修订，未在日报中改写既有origin/raw/report。G0–G4、PAYG质量/预算、DesktopUI与五个工作日均开放。

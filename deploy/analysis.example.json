@@ -13,6 +13,8 @@
   "pricingVerifiedAt": "2026-09-30T00:00:00.000Z",
   "inputTokensPerByteUpperBound": 1,
   "maxInputBytes": 65536,
+  "maxSessionBytes": 1048576,
+  "maxSegments": 4,
   "maxRequests": 3,
   "maxOutputTokens": 4096,
   "maxRequestBytes": 262144,

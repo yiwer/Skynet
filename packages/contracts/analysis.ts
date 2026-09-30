@@ -13,6 +13,10 @@ export const analysisOutputSchema = z.object({ items: z.array(z.object({
     textOffset: z.number().int().min(0), quote: z.string().min(1).max(512) }).strict()).max(3),
 }).strict()).max(28) }).strict();
 export type AnalysisOutput = z.infer<typeof analysisOutputSchema>;
+export type AnalysisPosition = { event: number; textOffset: number };
+export type AnalysisProcessing = { version: string; complete: boolean; aggregation: 'not-needed' | 'succeeded' | 'failed' | 'limited';
+  omittedFindings: number; ranges: { start: AnalysisPosition; end: AnalysisPosition;
+    state: 'extracted' | 'failed' | 'skipped'; reason?: string }[] };
 export type AnalysisItem = Omit<AnalysisOutput['items'][number], 'citations'> & { citations: (AnalysisOutput['items'][number]['citations'][number] & {
   snapshotId: string; location: EvidenceLocation; webPath: string; role: string; origin: EventOrigin | null; context: string;
   inputSnapshotId: string; inputLocation: EvidenceLocation;
@@ -25,12 +29,12 @@ export type AnalysisRun = { id: string; snapshotId: string; state: 'queued' | 'r
   attemptHistory: { number: number; state: string; reservedCny: number; requests: number | null; usage: unknown;
     error: string | null; startedAt: string; finishedAt: string | null }[];
   config: { mode: 'qwen-payg' | 'fixture'; model: string; runtimeVersion: string; promptVersion: string; configurationHash: string;
-    maxInputBytes: number; maxRequests: number; maxOutputTokens: number; timeoutSeconds: number; reservationCny: number; budgetCny: number; budgetId: string;
+    maxInputBytes: number; maxSessionBytes: number; maxSegments: number; maxRequests: number; maxOutputTokens: number; timeoutSeconds: number; reservationCny: number; budgetCny: number; budgetId: string;
     maxAttempts: number; concurrency: number; leaseSeconds: number; retryDelaySeconds: number; autoAnalyzeUpdates: boolean; autoDebounceSeconds: number };
   input: { snapshotId: string; hash: string; parserVersion: string; eventCount: number; source: string; sourceVersion: string;
     coverage: { unrecognizedLines: number; partialLine: boolean; excludedMaterials: number; captureGaps: unknown[]; scope: string } };
   result: { items: AnalysisItem[]; usage: { inputTokens: number | null; outputTokens: number | null; runtimeCostUsd: number | null;
-    providerBilledCny: null; requests: number }; fixture: boolean } | null;
+    providerBilledCny: null; requests: number }; fixture: boolean; processing?: AnalysisProcessing } | null;
 };
 export type AnalysisPage = { runs: AnalysisRun[]; nextOffset: number | null; availability: {
   ready: boolean; reason: string; mode?: 'qwen-payg' | 'fixture'; model?: string; runtimeVersion?: string;

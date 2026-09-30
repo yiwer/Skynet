@@ -26,8 +26,8 @@ export function SessionAnalysis({ snapshotId, request }: { snapshotId: string; r
   }
   return <section className="recovery" aria-label="会话分析"><h3>会话分析</h3>
     <p>{page?.availability.reason ?? '正在读取分析状态…'}</p>
-    <p className="muted small">分析固定主原件全部已解析事件。历史材料保留原归属；未知、缺失及关联材料不代表没有活动。结论不是工时、评分或排名。</p>
-    <button disabled={busy || !page?.availability.ready} onClick={start}>{busy ? '正在提交…' : '分析短会话'}</button>
+    <p className="muted small">分析固定主原件，长会话按有界原文段提取和汇总。历史材料保留原归属；未知、缺失、未处理范围及关联材料不代表没有活动。结论不是工时、评分或排名。</p>
+    <button disabled={busy || !page?.availability.ready} onClick={start}>{busy ? '正在提交…' : '分析会话'}</button>
     <button onClick={() => setRefresh(value => value + 1)}>刷新分析状态</button>
     {error && <p role="alert" className="error">{error}</p>}
     {page?.runs.map(run => <AnalysisResult key={run.id} run={run} retry={async () => {
@@ -40,6 +40,9 @@ export function SessionAnalysis({ snapshotId, request }: { snapshotId: string; r
 }
 function AnalysisResult({ run, retry }: { run: AnalysisRun; retry: () => Promise<void> }) {
   return <div className="analysis-result"><h4>{analysisStates[run.state]}{run.config.mode === 'fixture' ? ' · 合成演示，非正式验收' : ''}</h4>
+    {run.result?.processing && <div aria-label="分析处理范围"><p>{run.result.processing.complete ? '选定的已解析事件已完成提取' : '部分处理，不能视为完整会话分析'} · 汇总：{run.result.processing.aggregation} · {run.result.processing.omittedFindings} 项提取结论未纳入汇总。</p>
+      {run.result.processing.ranges.map((range, index) => <p key={index}>原事件 {range.start.event} 偏移 {range.start.textOffset} → {range.end.event} 偏移 {range.end.textOffset}：{range.state === 'extracted' ? '已提取' : range.state === 'failed' ? '失败' : '未处理'}{range.reason && ` · ${range.reason}`}</p>)}
+      <p className="muted small">事件索引从 0 开始，偏移为 UTF-16；完成仅指已解析主原件范围，未知行、末行、材料和采集缺口另列。</p></div>}
     <p>版本 {run.generation} · 尝试 {run.attempts}/{run.maxAttempts} · {run.applicable ? '适用于当前输入' : '尚未适用或属于历史版本'} · {run.actorKind === 'system' ? '系统自动触发' : '认证用户触发'}</p>
     {run.state === 'retry-wait' && <p>下次尝试：{new Date(run.nextAttemptAt).toLocaleString('zh-CN')}</p>}
     {['failed', 'retry-wait'].includes(run.state) && run.attempts < run.maxAttempts && <button onClick={retry}>在剩余次数内重试</button>}

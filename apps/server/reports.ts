@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { digest, type Database } from './database.js';
 import { HttpError } from './identities.js';
 import type { AnalysisService } from './analysis.js';
-import type { AnalysisRun } from '../../packages/contracts/analysis.js';
+import type { AnalysisRun, AnalysisProcessing } from '../../packages/contracts/analysis.js';
 import { beijingDate, dueReportDate, reportDate, type DailyItem, type DailyReport } from '../../packages/contracts/reports.js';
 import { ledgerCountProjection } from './provenance.js';
 
@@ -53,8 +53,7 @@ export function dailyItems(runs: AnalysisRun[], employeeId: string, date: string
 const definition = '记录、用户轮次（原件或材料行）、工具调用（解析 block）按不可变 eventId 去重，仅计原员工在本来源日期的已确认接入后活动。历史或关联上下文与未知单列；材料仅被保存不算活动。未确认复制保持独立，可能存在无法确认的重复。文件、原生 token、活动区间及按日设备覆盖尚未知；区间不是人工工时。无已确认记录不证明没有工作。';
 // Optional for historical short-session results. #23 owns the full per-range
 // contract; reports expose its compact scope plus the immutable analysis ID.
-type Processing = { version: string; complete: boolean; aggregation: string; omittedFindings: number;
-  ranges: { state: 'extracted' | 'failed' | 'skipped' }[] };
+type Processing = AnalysisProcessing;
 export function reportRunCoverage(run: AnalysisRun) {
   const processing = (run.result as (AnalysisRun['result'] & { processing?: Processing }))?.processing;
   const coverage = run.input.coverage;
