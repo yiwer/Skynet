@@ -80,4 +80,4 @@ AC-01…AC-22 的已有证据和缺口集中列于 [V1 验收证据台账](../im
 
 主线自身 `npm run typecheck`、`npm run build`、`git diff --check` 通过；`node --test dist/tests/control-spawn.test.js dist/tests/runtime-control.test.js dist/tests/autostart-registration.test.js` **14/14 PASS（39.63秒）**。本次隔离 fixture `rw1nib` 实际同步 spawn 阻塞2200ms，status8.04ms、stop2.19ms均在spawn返回前确认，真实pending-stop child退出0、原登记不变；`2DhhCy` 实际退出17后选定载荷恢复、正常停下；`zEh7J6` 的2500ms原生关闭等待在租约释放后才替换，`XwQOiK` 等待关闭期间stop可用且未启动替换。较慢本次总时间保留，不作性能验收。
 
-正确调用点 shim 的旧实现 RED 与修订 GREEN 证据见 [控制诊断](../implementation/runtime-control-diagnosis.md)；纯旧Task元数据迁移用替身，不代表实际OS任务演练。本次没有真实Task安装、maintenance、压力循环或完整Windows套件。先前31/33、23/24、1500ms故障及取消批次全部保留；`0743d4d` Linux36/36属于先前源码，不冒充本次92e3711的完整CI。真实隐藏Task观察、完整Windows与G0–G4仍待复核。
+正确调用点 shim 的旧实现 RED 与修订 GREEN 证据见 [控制诊断](../implementation/runtime-control-diagnosis.md)；纯旧Task元数据迁移用替身，不代表实际OS任务演练。集成节点 `6089062` 的 [Linux CI](https://github.com/yiwer/Skynet/actions/runs/36687101484/job/109795360132) 已通过类型检查、构建及 **45/45 测试（107.94秒，0 fail / 0 cancelled）**，包含控制线程和旧Task登记编排回归。本次没有真实Task安装、maintenance、压力循环或完整Windows套件；先前31/33、23/24、1500ms故障及取消批次全部保留。真实隐藏Task观察、完整Windows与G0–G4仍待复核。

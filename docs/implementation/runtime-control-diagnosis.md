@@ -153,6 +153,12 @@ supervisor exits zero only after native lease release. The retained actual
 finally releases its lease at lines 173–177; that is static compatibility
 evidence, not a new old-payload execution claim.
 
+Integrated commit `6089062` also passed Linux CI typecheck, build and
+**45/45 tests**, zero failures or cancellations, in 107.94 seconds:
+[CI job](https://github.com/yiwer/Skynet/actions/runs/36687101484/job/109795360132).
+This includes the launch-thread and Task-registration orchestration regressions;
+it does not execute a real Windows Task.
+
 Temporary diagnostic sources and compiled artifacts are retained only in
 `%TEMP%/skynet-v1-implementation/runtime-control-temporary-instrumentation`;
 the final product contains no DEBUG hooks. No real Task installation or

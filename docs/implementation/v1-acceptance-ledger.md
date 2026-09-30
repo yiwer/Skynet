@@ -109,4 +109,4 @@ G0–G4、#21/G2、#22/#24 的真实 PAYG/G3均开放。#23长会话、#28日报
 
 `b93ffeb` 经 `92e3711` 无冲突合入，主线自身类型检查、构建、diff检查及控制/launch-thread/旧Task登记纯编排 **14/14通过（39.63s）**。新证据 `%TEMP%/skynet-control-spawn-rw1nib`：实际spawn同步阻塞2200ms，status8.04ms、stop2.19ms，均在返回前确认；真实child退出0并释放角色租约。`2DhhCy` exit17恢复选定载荷；`zEh7J6` 与 `XwQOiK` 证明线程异常后2500ms原生租约释放前不替换，stop仍响应并最终退出。旧实现正确caller RED→GREEN见 [诊断](runtime-control-diagnosis.md)。
 
-本次没有实际Task安装或heavy完整Windows；纯Task元数据替身不算生命周期验收。此前Windows完整红/取消批次及0743d4d的Linux36/36都保留，未将旧CI或focused通过当新主线整套通过。真实隐藏Task、完整Windows、Desktop、PAYG与所有门槛继续开放。
+集成节点 `6089062` 的 [Linux CI](https://github.com/yiwer/Skynet/actions/runs/36687101484/job/109795360132) 已通过类型检查、构建及 **45/45（107.94秒，0 fail / 0 cancelled）**，包含后台控制线程及旧Task登记纯编排。本次没有实际Task安装或heavy完整Windows；纯Task元数据替身不算生命周期验收。此前Windows完整红/取消批次保留，真实隐藏Task、完整Windows、Desktop、PAYG与所有门槛继续开放。
