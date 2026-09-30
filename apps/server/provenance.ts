@@ -8,23 +8,14 @@ import type { Manifest } from '../../packages/contracts/archive.js';
 import type { EventOrigin, Provenance } from '../../packages/contracts/provenance.js';
 import { locatedOrigin, restoredMaterial, qualifiedMaterialPrefix } from './material-provenance.js';
 import { qualifyOriginalEvents, validQualificationBytes } from './qualification.js';
+import {nativeKey} from '../../packages/native/occurrences.js';
+import {completeOriginalLines} from '../../packages/native/raw-lines.js';
+import {verifyOriginIntegrity,verifySnapshotIntegrity,repairLegacyCarriers,recordPrimaryInputIntegrity} from './evidence-integrity.js';
 
 type Query = Pick<Database, 'query'> | Pick<pg.PoolClient, 'query'>;
 type Record = { id: string; device_id: string; manifest: Manifest; hash: string; committed_at?: Date };
 const unconfirmed = '没有经过服务器字节校验的跨设备谱系；保持独立。相同文字、会话 ID 或本地用户名不能证明同一次活动。';
 
-// Native occurrence identifiers are scoped to a bound device/source/session and
-// the complete exact raw record. Identical text alone is never an event key.
-function nativeKey(line: string, source: Manifest['source']): string | null {
-  try {
-    const value = JSON.parse(line);
-    if (source === 'claude-code-cli' && typeof value.uuid === 'string' && value.uuid.length) return `uuid:${value.uuid}`;
-    if (source !== 'claude-code-cli' && value.type === 'response_item' && typeof value.payload?.call_id === 'string') {
-      return `call:${value.payload.type}:${value.payload.call_id}`;
-    }
-  } catch { /* Unsupported source lines remain raw evidence. */ }
-  return null;
-}
 function commonCompleteLines(left: Buffer, right: Buffer) {
   let end = 0;
   while (end < Math.min(left.length, right.length) && left[end] === right[end]) end++;
@@ -34,6 +25,7 @@ function commonCompleteLines(left: Buffer, right: Buffer) {
 export async function assignOrigins(q: Query, raw: RawStore, record: Record, backfill = false) {
   const manifest = record.manifest;
   const bytes = await raw.read(record.device_id, record.hash);
+  const loadOrigins=async(id:string,materialId?:string)=>{await verifySnapshotIntegrity(q,raw,id,materialId);return eventOrigins(q,id,materialId);};
   const owner = (await q.query(`SELECT d.employee_id,e.name FROM devices d JOIN employees e ON e.id=d.employee_id WHERE d.id=$1`, [record.device_id])).rows[0];
   const claim = manifest.restoredFrom;
   let base: Record | undefined;
@@ -47,7 +39,7 @@ export async function assignOrigins(q: Query, raw: RawStore, record: Record, bac
       || base.manifest.source !== manifest.source || base.manifest.sourceSessionId !== manifest.sourceSessionId))) {
       throw new HttpError(409, '恢复来源快照不存在或来源身份不匹配；不能确认历史归属');
     }
-    const material = claim.materialId ? await restoredMaterial(q, raw, base, manifest, bytes, (id, materialId) => eventOrigins(q, id, materialId)) : undefined;
+    const material = claim.materialId ? await restoredMaterial(q, raw, base, manifest, bytes, loadOrigins) : undefined;
     materialMappings = material?.mappings ?? [];
     materialPrior = material?.origins;
     const original = material?.original ?? await raw.read(base.device_id, base.hash);
@@ -58,7 +50,7 @@ export async function assignOrigins(q: Query, raw: RawStore, record: Record, bac
     provenance = { version: 1, relation: 'verified-restoration', sourceSnapshotId: base.id, warning: material?.warning ?? null };
   } else {
     const qualified = await qualifiedMaterialPrefix(q, raw, record.device_id, manifest, bytes,
-      (id, materialId) => eventOrigins(q, id, materialId), backfill ? record.committed_at : undefined);
+      loadOrigins, backfill ? record.committed_at : undefined);
     if (qualified?.snapshotId) { materialPrior = qualified.origins; prefixLines = commonCompleteLines(qualified.bytes, bytes);
       provenance = { version: 1, relation: 'same-device-continuation', sourceSnapshotId: qualified.snapshotId, warning: qualified.warning }; }
     else if (qualified) provenance.warning = qualified.warning;
@@ -74,7 +66,7 @@ export async function assignOrigins(q: Query, raw: RawStore, record: Record, bac
       if (qualified?.warning) provenance.warning = [provenance.warning, qualified.warning].filter(Boolean).join(' ');
     }
   }
-  const prior = materialPrior ?? (base ? await eventOrigins(q, base.id) : []);
+  const prior = materialPrior ?? (base ? await loadOrigins(base.id) : []);
   const prefix = new Map(prior.map(event => [`${event.line}/${event.block}`, event]));
   // Repeating a restoration claim on a later material-only revision must not
   // turn the target device's already recorded suffix into new activity again.
@@ -85,12 +77,25 @@ export async function assignOrigins(q: Query, raw: RawStore, record: Record, bac
     [record.device_id, manifest.source, manifest.sourceSessionId, record.id, backfill ? record.committed_at : null])).rows[0];
     if (local) {
       localPrefixLines = commonCompleteLines(await raw.read(local.device_id, local.hash), bytes);
-      for (const event of await eventOrigins(q, local.id)) localPrefix.set(`${event.line}/${event.block}`, event);
+      for (const event of await loadOrigins(local.id)) localPrefix.set(`${event.line}/${event.block}`, event);
     }
   }
   const parsed = readEvidence(bytes, manifest.source);
+  if(!claim)await recordPrimaryInputIntegrity(q,record.id,bytes,manifest.source,parsed);
   const events = activityFor(parsed.events, manifest.enrolledAt).events;
-  const rawLines = bytes.toString('utf8').split('\n');
+  const rawLines = [...completeOriginalLines(bytes)];
+  if(!claim&&rawLines.some(line=>line.text===null))await q.query(`INSERT INTO qualification_reconcile_gaps(snapshot_id,reason) VALUES($1,$2) ON CONFLICT DO NOTHING`,
+    [record.id,'原来源主原件包含损坏的 UTF-8；原字节保留，损坏行不产生活动或精确资格证明']);
+  const previousIds=(await q.query(`SELECT n.event_id FROM native_event_occurrences n JOIN archive_event_origins o ON o.event_id=n.event_id
+    WHERE n.device_id=$1 AND n.source=$2 AND n.source_session_id=$3
+      AND NOT EXISTS(SELECT 1 FROM event_integrity i WHERE i.event_id=o.event_id AND i.version='original-utf8-1')
+    ORDER BY o.snapshot_id,o.material_id,o.line,o.block`,
+    [record.device_id,manifest.source,manifest.sourceSessionId])).rows.map(row=>row.event_id as string);
+  await verifyOriginIntegrity(q,raw,previousIds);
+  await repairLegacyCarriers(q,raw,undefined,{deviceId:record.device_id,source:manifest.source,sessionId:manifest.sourceSessionId});
+  const invalidKeys=new Set((await q.query(`SELECT n.occurrence_hash FROM native_event_occurrences n JOIN event_integrity i ON i.event_id=n.event_id
+    WHERE n.device_id=$1 AND n.source=$2 AND n.source_session_id=$3 AND i.version='original-utf8-1' AND NOT i.valid`,
+    [record.device_id,manifest.source,manifest.sourceSessionId])).rows.map(row=>row.occurrence_hash as string));
   const known = (await q.query(`SELECT n.occurrence_hash,o.event_id AS "eventId",o.snapshot_id AS "snapshotId",o.line,o.block,
     o.employee_id AS "employeeId",e.name AS employee,o.device_id AS "deviceId",o.project,o.context,o.source_date AS "sourceDate",o.material_id AS "materialId",o.text_offset AS "textOffset"
     FROM native_event_occurrences n JOIN effective_event_origins o ON o.event_id=n.event_id JOIN employees e ON e.id=o.employee_id
@@ -101,8 +106,11 @@ export async function assignOrigins(q: Query, raw: RawStore, record: Record, bac
     const inherited = (event.line <= prefixLines ? prefix.get(`${event.line}/${block}`) : undefined)
       ?? (event.line <= localPrefixLines ? localPrefix.get(`${event.line}/${block}`) : undefined);
     const line = rawLines[event.line - 1]!;
-    const occurrence = nativeKey(line, manifest.source);
-    const occurrenceHash = occurrence ? digest(JSON.stringify([occurrence, digest(line), block])) : null;
+    const occurrence = nativeKey(line.text!, manifest.source);
+    let occurrenceHash = occurrence ? digest(JSON.stringify([occurrence, digest(line.bytes), block])) : null;
+    // Retain valid old hashes/IDs. A legacy tolerant hash occupied by a corrupt
+    // original gets a separate exact-byte namespace; never replace its row.
+    if(occurrenceHash&&invalidKeys.has(occurrenceHash))occurrenceHash=digest(JSON.stringify([occurrence,digest(line.bytes),block,'original-utf8-1']));
     const existing = occurrenceHash ? occurrences.get(occurrenceHash) : undefined;
     if (inherited && existing && inherited.eventId !== existing.eventId) throw new HttpError(409, '稳定原生记录存在冲突的历史归属；保留原归属，不能覆盖');
     if (inherited) return { event, occurrenceHash, origin: { ...inherited, line: inherited.originLine, block: inherited.originBlock } };
@@ -133,6 +141,10 @@ export async function assignOrigins(q: Query, raw: RawStore, record: Record, bac
       ON CONFLICT DO NOTHING`, [JSON.stringify(page.filter(item => item.occurrenceHash).map(({ origin, occurrenceHash }) => ({ occurrence_hash: occurrenceHash, event_id: origin.eventId }))),
     record.device_id, manifest.source, manifest.sourceSessionId]);
   }
+  // A first material restoration may create new origins anchored in its parent
+  // descriptor, not this primary. Verify every mapped original; committed
+  // proofs are skipped before any raw read/hash.
+  await verifyOriginIntegrity(q,raw,origins.map(item=>item.origin.eventId));
   for (const mapping of materialMappings) {
     await q.query(`INSERT INTO material_qualifications(snapshot_id,material_id,device_id,source,source_session_id,hash,byte_length)
       VALUES($1,$2,$3,$4,$5,$6,$7) ON CONFLICT DO NOTHING`, [mapping.snapshotId, mapping.materialId, mapping.deviceId,
@@ -144,7 +156,7 @@ export async function assignOrigins(q: Query, raw: RawStore, record: Record, bac
     }
   }
   if(origins.some(({origin})=>origin.materialId&&origin.deviceId===record.device_id&&!origin.qualification)
-    && await validQualificationBytes(bytes)) await qualifyOriginalEvents(q,record,origins,line=>digest(rawLines[line-1]!));
+    && await validQualificationBytes(bytes)) await qualifyOriginalEvents(q,record,origins,line=>digest(rawLines[line-1]!.bytes));
   await q.query('UPDATE snapshots SET provenance=$2 WHERE id=$1', [record.id, provenance]);
   return provenance;
 }
@@ -154,7 +166,7 @@ export async function eventOrigins(q: Query, snapshotId: string, materialId?: st
     o.employee_id AS "employeeId",e.name AS employee,o.device_id AS "deviceId",o.project,o.context,o.source_date AS "sourceDate",o.material_id AS "materialId",o.text_offset AS "textOffset",
     CASE WHEN o.qualification_revision>0 THEN jsonb_build_object('revision',o.qualification_revision::text,'proofSnapshotId',o.proof_snapshot_id,
       'proofLine',o.proof_line,'proofBlock',o.proof_block,'enrolledAt',o.proof_enrolled_at) ELSE NULL END AS qualification
-    FROM ${materialId ? 'material_events' : 'snapshot_events'} s JOIN effective_event_origins o ON o.event_id=s.event_id JOIN employees e ON e.id=o.employee_id
+    FROM ${materialId ? 'material_events' : 'effective_snapshot_events'} s JOIN effective_event_origins o ON o.event_id=s.event_id JOIN employees e ON e.id=o.employee_id
     WHERE s.snapshot_id=$1 ${materialId ? 'AND s.material_id=$2' : ''} ORDER BY s.line,s.block`, materialId ? [snapshotId, materialId] : [snapshotId]);
   // Location in this snapshot is distinct from the original location of the event.
   return (rows.rows as (EventOrigin & { originLine: number; originBlock: number })[]).map(row => {
@@ -267,10 +279,13 @@ export async function archiveStatistics(db: Database, offset = 0) {
     count(*) FILTER (WHERE provenance->>'relation'<>'unconfirmed' AND provenance->>'warning' IS NOT NULL)::integer AS "uncertainRewriteSnapshots",
     (SELECT count(*)::integer FROM qualification_reconcile_gaps) AS "qualificationGaps",
     (SELECT last_error FROM qualification_reconcile WHERE id=1) AS "qualificationError" FROM snapshots`)).rows[0];
+  const integrity=(await db.query(`SELECT count(*) FILTER(WHERE i.event_id IS NULL)::integer AS "pendingIntegrityOrigins",
+    count(*) FILTER(WHERE i.valid=false)::integer AS "invalidIntegrityOrigins" FROM archive_event_origins o
+    LEFT JOIN event_integrity i ON i.event_id=o.event_id AND i.version='original-utf8-1'`)).rows[0];
   const rows = await db.query(`SELECT o.employee_id AS "employeeId",e.name AS employee,o.source_date AS date,
     ${ledgerCountProjection}
     FROM effective_event_origins o JOIN employees e ON e.id=o.employee_id GROUP BY o.employee_id,e.name,o.source_date
     ORDER BY e.name,o.employee_id,o.source_date NULLS LAST LIMIT 51 OFFSET $1`, [offset]);
-  return { timeZone: 'Asia/Shanghai', rows: rows.rows.slice(0, 50), warnings, nextOffset: rows.rows.length > 50 ? offset + 50 : null,
+  return { timeZone: 'Asia/Shanghai', rows: rows.rows.slice(0, 50), warnings:{...warnings,...integrity}, nextOffset: rows.rows.length > 50 ? offset + 50 : null,
     definition: '每个已确认原生事件只计一次；用户轮次按原件或材料行，工具调用按解析 block。按已确认活动、历史或关联上下文、未知分类；仅原来源独立采集且原始接入后来源时间明确的记录计活动。材料曾被保存或被他人续用不证明原来源活动；原来源后来独立采集可追加资格证明，保留原归属、日期与事件身份，重新判断活动分类。未独立采集的材料不计条目。未确认复制可能重复。不是工时、评分或排名。' };
 }

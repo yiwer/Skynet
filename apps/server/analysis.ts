@@ -41,8 +41,12 @@ export async function prepareAnalysisInput(db: Database, archive: ArchiveQuery, 
     try { new TextDecoder('utf-8', { fatal: true }).decode(bytes); }
     catch { throw new HttpError(422, '原件包含损坏的 UTF-8；没有调用模型，完整原始字节仍可存档、查询与导出'); }
     const parsed = readEvidence(bytes, record.source);
+    await archive.detail(snapshotId,0,true); // Verify legacy mapped originals before reading applicable origins.
+    const revision=await attributionRevision(db,snapshotId);
     const originRows = await eventOrigins(db, snapshotId);
-    const revision = originRows.reduce((latest,origin)=>{const next=BigInt(origin.qualification?.revision??'0');return next>latest?next:latest;},0n).toString();
+    if(await attributionRevision(db,snapshotId)!==revision)throw new HttpError(409,'原来源采集资格版本已更新（含原件完整性修订），请重新准备分析；尚未调用模型');
+    const keys=new Set(originRows.map(origin=>`${origin.line}/${origin.block}`));
+    if(parsed.events.some(event=>!keys.has(`${event.line}/${event.block??0}`)))throw new HttpError(422,'存在未确认完整原件归属的旧记录；原字节保留，未调用模型');
     const origins = new Map<string, EventOrigin>(originRows.map(origin => [`${origin.line}/${origin.block}`,
       { ...origin, line: origin.originLine, block: origin.originBlock }]));
     const attributed = activityFor(parsed.events, record.manifest.enrolledAt, undefined, origins);

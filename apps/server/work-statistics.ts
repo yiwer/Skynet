@@ -8,6 +8,12 @@ import type { WorkStatistics, StatisticReference, RecordedTokens } from '../../p
 import { nativeStatistics, statisticsExtractorVersion, type TokenComponents } from '../../packages/native-statistics.js';
 import { materialSource } from './material-provenance.js';
 import type { Provenance } from '../../packages/contracts/provenance.js';
+import {qualificationDaySql} from './qualification.js';
+import {setTimeout as pause} from 'node:timers/promises';
+import {unscopedRawGapsSql} from './evidence-integrity.js';
+
+class StatisticsBusy extends HttpError {constructor(){super(409,'统计版本正在更新，请稍后重试；旧固定版本仍可读取');}}
+export function transientStatistics(error:unknown){const value=error as {code?:string;constraint?:string};return error instanceof StatisticsBusy||value.code==='40001'||value.code==='23505'&&!!value.constraint?.startsWith('work_statistic_revisions');}
 
 type Event = { event_id: string; snapshot_id: string; material_id: string | null; device_id: string; line: number; block: number;
   source: Manifest['source']; source_session_id: string; role: string; timestamp: string | null; context: string; text_offset: number; project: string;
@@ -36,13 +42,11 @@ export function recordedIntervals(events: Pick<Event, 'device_id' | 'source' | '
 }
 
 export function workStatisticsService(db: Database, raw: RawStore) {
-  async function refresh(employeeId: string, date: string) {
-    const client = await db.connect();
-    try {
-      await client.query('BEGIN ISOLATION LEVEL REPEATABLE READ');
-      // Serialize just this employee/day revision; all reads share the same
-      // snapshot and this connection, never exhaust a pool via nested services.
-      await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1,7402131))', [`${employeeId}/${date}`]);
+  // The caller owns one repeatable transaction. Never acquire a second pool
+  // connection or commit a statistic before its referencing report is ready.
+  async function freeze(client:Pick<Database,'query'>,employeeId:string,date:string){
+      const lock=await client.query('SELECT pg_try_advisory_xact_lock(hashtextextended($1,7402131)) AS locked',[`${employeeId}/${date}`]);
+      if(!lock.rows[0].locked)throw new StatisticsBusy();
       const employee = (await client.query('SELECT name FROM employees WHERE id=$1', [employeeId])).rows[0];
       if (!employee) throw new HttpError(404, '员工不存在');
       const counts = (await client.query(`SELECT
@@ -55,14 +59,19 @@ export function workStatisticsService(db: Database, raw: RawStore) {
         FROM effective_event_origins WHERE employee_id=$1 AND source_date=$2`, [employeeId, date])).rows[0];
       const all = (await client.query(`SELECT * FROM effective_event_origins WHERE employee_id=$1 AND source_date=$2
         AND context='after-enrollment' ORDER BY event_id LIMIT 10001`, [employeeId, date])).rows as Event[];
-      const events = all.slice(0, 10000); let inputComplete = all.length <= 10000;
+      const integrity=(await client.query(`SELECT count(*)::integer AS gaps FROM archive_event_origins o WHERE employee_id=$1 AND source_date=$2
+        AND NOT EXISTS(SELECT 1 FROM event_integrity i WHERE i.event_id=o.event_id AND i.version='original-utf8-1' AND i.valid)`,[employeeId,date])).rows[0].gaps as number;
+      const attribution=(await client.query(`SELECT ${qualificationDaySql('$1','$2')} AS revision`,[employeeId,date])).rows[0].revision;
+      const unscoped=(await client.query(`SELECT ${unscopedRawGapsSql('$1')} AS gaps`,[employeeId])).rows[0].gaps as {count:string;revision:string};
+      const gapCount=Number(unscoped.count);
+      const events = all.slice(0, 10000); let inputComplete = all.length <= 10000 && integrity===0 && unscoped.count==='0';
       const sources = new Map<string, Event[]>();
       for (const event of events) {
         const key = `${event.snapshot_id}/${event.material_id ?? ''}`;
         sources.set(key, [...sources.get(key) ?? [], event]);
       }
       const paths = new Set<string>(); const fileKeys = new Set<string>(); const references: StatisticReference[] = [];
-      let unsupportedTools = 0; let fileComplete = inputComplete; let totalBytes = 0; let tokenComplete = inputComplete; let unknownUsageScopes = 0;
+      let unsupportedTools = 0; let fileComplete = inputComplete; let totalBytes = 0; let tokenComplete = inputComplete; let unknownUsageScopes = Number.isSafeInteger(gapCount)?gapCount:1;
       const usage = new Map<string, TokenComponents | null>();
       const inputKeys: unknown[] = [];
       for (const [index, [key, sourceEvents]] of [...sources.entries()].entries()) {
@@ -147,7 +156,7 @@ export function workStatisticsService(db: Database, raw: RawStore) {
       const content = { employeeId, employee: employee.name, date, ...counts, files: { observedCount: fileKeys.size, paths: [...paths].sort().slice(0, 40), complete: fileComplete && paths.size <= 40, unsupportedToolCalls: unsupportedTools },
         tokens, intervals: intervals.slice(0, 50), references: references.slice(0, 10000), sourceInputsComplete: inputComplete && intervals.length <= 50 && references.length <= 10000,
         definition, humanWorkHours: null, extractorVersion: statisticsExtractorVersion,
-        inputDigest: digest(JSON.stringify([events.map(event => [event.event_id, event.context, event.qualification_revision ?? '0']), inputKeys])) };
+        inputDigest: digest(JSON.stringify([events.map(event => [event.event_id, event.context, event.qualification_revision ?? '0']), inputKeys,attribution,integrity,unscoped,'original-utf8-1'])) };
       const version = digest(JSON.stringify(content));
       const known = (await client.query('SELECT payload FROM work_statistic_revisions WHERE employee_id=$1 AND date=$2 AND version=$3', [employeeId, date, version])).rows[0];
       let payload: WorkStatistics;
@@ -157,8 +166,16 @@ export function workStatisticsService(db: Database, raw: RawStore) {
         payload = { ...content, revision, version, createdAt: new Date().toISOString(), nextOffset: null };
         await client.query('INSERT INTO work_statistic_revisions(employee_id,date,revision,version,payload) VALUES($1,$2,$3,$4,$5)', [employeeId, date, revision, version, payload]);
       }
-      await client.query('COMMIT'); return payload;
-    } catch (error) { await client.query('ROLLBACK'); throw error; } finally { client.release(); }
+      return payload;
+  }
+  async function refresh(employeeId:string,date:string){
+    for(let attempt=0;attempt<3;attempt++){
+      const client=await db.connect();try{await client.query('BEGIN ISOLATION LEVEL REPEATABLE READ');const value=await freeze(client,employeeId,date);await client.query('COMMIT');return value;}
+      catch(error){await client.query('ROLLBACK');if(attempt===2||!transientStatistics(error))throw error;}
+      finally{client.release();}
+      await pause(25);
+    }
+    throw new StatisticsBusy();
   }
   async function read(employeeId: string, date: string, offset = 0, revision?: number): Promise<WorkStatistics> {
     reportDate.parse(date);
@@ -167,6 +184,6 @@ export function workStatisticsService(db: Database, raw: RawStore) {
     if (!payload) throw new HttpError(404, '统计版本不存在');
     return { ...payload, references: payload.references.slice(offset, offset + 20), nextOffset: offset + 20 < payload.references.length ? offset + 20 : null };
   }
-  return { read };
+  return { read,freeze };
 }
 export type WorkStatisticsService = ReturnType<typeof workStatisticsService>;

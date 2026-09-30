@@ -26,9 +26,11 @@ export async function migrateWorkViews(db: Database) {
     COMMIT;`); } catch (error) { await client.query('ROLLBACK'); throw error; } finally { client.release(); }
 }
 const identity = (selection: WorkViewSelection) => digest(JSON.stringify([selection.kind, selection.subject, selection.from, selection.to]));
-const qualificationForView = `(SELECT COALESCE(MAX(c.revision),0) FROM archive_event_origins qo JOIN event_qualifications c ON c.event_id=qo.event_id
+const qualificationForView = `((SELECT COALESCE(MAX(c.revision),0) FROM archive_event_origins qo JOIN event_qualifications c ON c.event_id=qo.event_id
   WHERE qo.source_date BETWEEN p.selection->>'from' AND p.selection->>'to' AND CASE WHEN p.selection->>'kind'='weekly'
-    THEN qo.employee_id::text=p.selection->>'subject' ELSE ${displayProjectSql('qo')}=p.selection->>'subject' END)`;
+    THEN qo.employee_id::text=p.selection->>'subject' ELSE ${displayProjectSql('qo')}=p.selection->>'subject' END)+(SELECT COALESCE(MAX(i.revision),0) FROM archive_event_origins qo JOIN event_integrity i ON i.event_id=qo.event_id AND i.version='original-utf8-1'
+  WHERE qo.source_date BETWEEN p.selection->>'from' AND p.selection->>'to' AND CASE WHEN p.selection->>'kind'='weekly'
+    THEN qo.employee_id::text=p.selection->>'subject' ELSE ${displayProjectSql('qo')}=p.selection->>'subject' END))`;
 const candidateRevisionSql=`(SELECT concat(count(*),'/',count(DISTINCT(o.employee_id,o.source_date))) FROM effective_event_origins o
   WHERE o.context='after-enrollment' AND o.source_date BETWEEN p.selection->>'from' AND p.selection->>'to' AND CASE WHEN p.selection->>'kind'='weekly'
     THEN o.employee_id::text=p.selection->>'subject' ELSE ${displayProjectSql('o')}=p.selection->>'subject' END)`;
@@ -138,7 +140,10 @@ export function workViewService(db: Database, daily: ReportService, clock: () =>
         refs.push({ employeeId: day.employeeId, employee: day.employee, date: day.date, state: staleQualification ? 'stale-qualification' : staleInput?'stale-input':day.state, revision: day.revision, version: day.version,
           dailyPath: dailyPath(day.employeeId, day.date, day.revision), originalEventHash: day.coverage?.originalEventHash ?? null,
           originalEventCount: day.coverage?.originalEventCount ?? null, qualificationRevision: day.coverage?.qualificationRevision ?? null,
-          expectedQualificationRevision: pair.qualification_revision, eligibleInputsComplete: !staleQualification && !staleInput && !!day.coverage?.eligibleInputsComplete });
+          expectedQualificationRevision: pair.qualification_revision, eligibleInputsComplete: !staleQualification && !staleInput && !!day.coverage?.eligibleInputsComplete,
+          ...(selection.kind==='weekly'&&day.coverage?.workStatistics?{workStatistics:day.coverage.workStatistics,
+            statistics:{files:day.statistics?.files??null,tokens:day.statistics?.tokens?(({definition:_definition,usageRecords:_records,unknownRecords:_unknown,...tokens})=>tokens)(day.statistics.tokens):null,
+              activityIntervalCount:day.statistics?.activityIntervals?.length??null,sourceInputsComplete:day.statistics?.sourceInputsComplete??false}}:{}) });
       }
       // Counts use only these frozen daily payloads, never the latest live ledger.
       const statisticsKnown = days.length > 0 && days.every(day => selection.kind === 'weekly' ? !!day.statistics : !!day.coverage?.projectStatisticsComplete);

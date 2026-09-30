@@ -1,12 +1,12 @@
-import { cp, lstat, mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
-import { dirname, join, resolve } from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
-import { createRequire } from 'node:module';
+import { lstat, mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { createHash, randomUUID } from 'node:crypto';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import {copyFrozenPayload,payloadRoot} from './frozen-payload.js';
 
-export const payloadRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
+export {payloadRoot};
 export function launcherText(runtime: string, maintenanceRuntime?: string) {
   if (maintenanceRuntime) return `#!/usr/bin/env node\n// Skynet owned stable launcher; contains no credentials.\nconst active = ${JSON.stringify(pathToFileURL(join(runtime, 'dist', 'apps', 'collector', 'cli.js')).href)};\nconst tools = ${JSON.stringify(pathToFileURL(join(maintenanceRuntime, 'dist', 'apps', 'collector', 'cli.js')).href)};\nawait import(['hook', 'run', 'restore'].includes(process.argv[2]) ? active : tools);\n`;
   return `#!/usr/bin/env node\n// Skynet owned stable launcher; contains no credentials.\nawait import(${JSON.stringify(pathToFileURL(join(runtime, 'dist', 'apps', 'collector', 'cli.js')).href)});\n`;
@@ -30,9 +30,7 @@ export async function runtimeDigest(runtime: string) {
 export async function stageRuntime(state: string, version: string) {
   const runtime = join(state, 'runtime', `${version}-${randomUUID()}`);
   await mkdir(join(runtime, 'dist', 'apps'), { recursive: true, mode: 0o700 });
-  await cp(join(payloadRoot, 'dist', 'apps', 'collector'), join(runtime, 'dist', 'apps', 'collector'), { recursive: true });
-  await cp(join(payloadRoot, 'dist', 'packages'), join(runtime, 'dist', 'packages'), { recursive: true });
-  await cp(dirname(createRequire(import.meta.url).resolve('zod/package.json')), join(runtime, 'node_modules', 'zod'), { recursive: true });
+  await copyFrozenPayload(runtime);
   await writeFile(join(runtime, 'package.json'), JSON.stringify({ type: 'module', version, captureFenceVersion: 1 }), { flag: 'wx', mode: 0o600 });
   for (const file of ['deployment.json', 'entry.json']) {
     const bytes = await readFile(join(payloadRoot, file)).catch(error => { if (error.code === 'ENOENT') return null; throw error; });

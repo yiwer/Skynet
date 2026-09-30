@@ -27,6 +27,7 @@ import { workStatisticsService } from './work-statistics.js';
 import { migrateWorkViews, workViewService } from './work-views.js';
 import { workViewQuery } from '../../packages/contracts/work-views.js';
 import { assertRestoreReady } from './backup-files.js';
+import {reconcileOriginIntegrity} from './evidence-integrity.js';
 
 export async function createApp(options: { db: Database; rawDirectory: string; webDirectory?: string; publicOrigin?: string; reportClock?: () => Date }) {
   const { db } = options;
@@ -40,10 +41,11 @@ export async function createApp(options: { db: Database; rawDirectory: string; w
   await migrateWorkViews(db);
   const raw = new RawStore(options.rawDirectory);
   await backfillOrigins(db, raw);
+  await reconcileOriginIntegrity(db,raw);
   const app = Fastify({ bodyLimit: CHUNK_BYTES, logger: false, requestTimeout: 30_000 });
   let qualifying: Promise<void> | undefined;
   const qualificationTimer=setInterval(()=>{
-    if(!qualifying)qualifying=reconcileOriginalQualifications(db,raw).catch(error=>{
+    if(!qualifying)qualifying=reconcileOriginIntegrity(db,raw).then(()=>reconcileOriginalQualifications(db,raw)).catch(error=>{
       app.log.error(error,'Legacy original-source qualification reconciliation failed');
     }).finally(()=>{qualifying=undefined;});
   },1000);qualificationTimer.unref();
@@ -187,7 +189,7 @@ export async function createApp(options: { db: Database; rawDirectory: string; w
   app.get('/api/me', { onRequest: readerGuard }, async request => reader(request.headers.authorization));
   const archive = archiveQuery(db, raw);
   const analysis = analysisService(db, archive);
-  const reports = reportService(db, analysis, options.reportClock);
+  const reports = reportService(db, analysis,workStatistics, options.reportClock);
   const workViews = workViewService(db, reports, options.reportClock);
   const reportQuery = z.object({ offset: z.coerce.number().int().min(0).max(100000).default(0),
     revision: z.coerce.number().int().min(1).optional() }).strict();

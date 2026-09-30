@@ -1,24 +1,32 @@
-import { mkdtemp, writeFile } from 'node:fs/promises';
-import { join, isAbsolute } from 'node:path';
-import { tmpdir } from 'node:os';
-import { spawn } from 'node:child_process';
-import { once } from 'node:events';
-import { performance } from 'node:perf_hooks';
-const launcher = process.argv[2];
-if (!launcher || !isAbsolute(launcher)) throw new Error('Pass an installed absolute skynet-launcher.mjs path');
-const state = await mkdtemp(join(tmpdir(), 'skynet-installed-hook-latency-'));
-const payload = JSON.stringify({ hook_event_name: 'UserPromptSubmit', session_id: 'synthetic-latency-session', transcript_path: join(state, 'unread-native.jsonl'), cwd: state });
-const samples = [];
-for (let index = 0; index < 200; index++) {
-  const started = performance.now();
-  const child = spawn(process.execPath, [launcher, 'hook', '--state', state], { windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });
-  let stdout = ''; let stderr = ''; child.stdout.on('data', part => stdout += part); child.stderr.on('data', part => stderr += part); child.stdin.end(payload);
-  const [code] = await once(child, 'exit'); if (code !== 0 || stdout || stderr) throw new Error('Installed hook did not finish silently with exit 0');
-  samples.push(performance.now() - started);
-}
-const sorted = [...samples].sort((a, b) => a - b);
-const result = { state, launcher, at: new Date().toISOString(), node: process.version, platform: process.platform, arch: process.arch,
-  count: samples.length, p50: sorted[99], p95: sorted[189], max: sorted[199], passed: sorted[189]! <= 100,
-  scope: 'installed stable launcher; includes process creation, launcher import and durable enqueue; no network or transcript read', samples };
-await writeFile(join(state, 'latency.json'), JSON.stringify(result, null, 2));
-console.log(JSON.stringify({ ...result, samples: undefined }));
+import {mkdir,mkdtemp,readFile,writeFile} from 'node:fs/promises';
+import {dirname,join,isAbsolute,resolve} from 'node:path';
+import {tmpdir} from 'node:os';
+import {fileURLToPath} from 'node:url';
+import {benchmarkEnvironment,measureHooks} from './hook-benchmark.js';
+import {ownedCommand} from './owned-command.js';
+
+const launcher=process.argv[2];
+if(!launcher||!isAbsolute(launcher))throw new Error('Pass an explicitly owned installed absolute skynet-launcher.mjs path');
+const explicitOutput=process.argv[3];if(explicitOutput&&!isAbsolute(explicitOutput))throw new Error('Optional evidence directory must be absolute and new');
+const output=explicitOutput??await mkdtemp(join(tmpdir(),'skynet-installed-hook-latency-'));
+if(explicitOutput)await mkdir(output);
+const state=join(output,'state');
+try{
+  const text=await readFile(launcher,'utf8');
+  const entries=[...text.matchAll(/file:\/\/[^\s"']+\/dist\/apps\/collector\/cli\.js/g)].map(match=>fileURLToPath(match[0]!));
+  if(!entries.length)throw new Error('Launcher must identify its frozen collector CLI to fingerprint measured bytes');
+  const cli=entries[0]!;const payloadRoot=resolve(dirname(cli),'../../..');
+  const extension=import.meta.url.endsWith('.ts')?'ts':'js';
+  const files=[launcher,cli,join(dirname(cli),'hook.js'),join(payloadRoot,'dist/packages/filesystem.js'),process.execPath,fileURLToPath(import.meta.url),
+    fileURLToPath(new URL(`./hook-benchmark.${extension}`,import.meta.url)),fileURLToPath(new URL(`./owned-command.${extension}`,import.meta.url))];
+  const environment=await benchmarkEnvironment(files);
+  const source=await ownedCommand('git',['rev-parse','HEAD'],process.env,'',{timeoutMs:10000}).then(value=>value.stdout.trim(),()=>null);
+  const thresholdMs=Number(process.env.SKYNET_HOOK_THRESHOLD_MS??100);
+  const result=await measureHooks({launcher,state,output,event:{hook_event_name:'UserPromptSubmit',session_id:'explicit-synthetic-installed-latency',transcript_path:join(state,'unread-native.jsonl'),cwd:state},
+    profile:'installed stable launcher; sequential synthetic hook on local storage; no daemon/network/transcript read',
+    environment:{...environment,invocationCheckoutHead:source,sourceIdentity:'Exact measured payload/script byte hashes; invocation checkout does not assert the installed build generation'},durability:'persisted',thresholdMs,
+    deadlineMs:Number(process.env.SKYNET_HOOK_DEADLINE_MS??60000)});
+  await writeFile(join(output,'latency.json'),JSON.stringify(result,null,2));
+  console.log(JSON.stringify({output,state,count:result.count,p95Ms:result.p95Ms,passed:result.passed,durableInventoryVerified:result.durableInventoryVerified,thresholdMs}));
+  if(!result.passed)process.exitCode=1;
+}catch(error){await writeFile(join(output,'measurement-failure.json'),JSON.stringify({complete:false,passed:false,error:(error as Error).message},null,2));console.error(`Hook measurement failed; retained evidence ${output}`);process.exitCode=1;}

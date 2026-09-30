@@ -1,12 +1,12 @@
-import { cp, mkdir, writeFile } from 'node:fs/promises';
+import { mkdir, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { createRequire } from 'node:module';
 import { deploymentSchema } from './installer.js';
 import { serverOrigin } from './install-state.js';
 import { packageEntrySchema } from './entries.js';
+import {copyFrozenPayload} from './frozen-payload.js';
 
 // Operator-only packaging. This creates a private local npm tarball; it never
 // publishes a registry package or places any employee credential in the payload.
@@ -21,12 +21,8 @@ export async function packAgent(output: string, origin: string, deploymentId: st
   return { package: join(directory, JSON.parse(result.stdout)[0].filename), deployment };
 }
 export async function writeAgentPayload(directory: string, deployment: ReturnType<typeof deploymentSchema.parse>, version = '0.1.0') {
-  const root = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
-  await cp(join(root, 'dist', 'apps', 'collector'), join(directory, 'dist', 'apps', 'collector'), { recursive: true });
-  await cp(join(root, 'dist', 'packages'), join(directory, 'dist', 'packages'), { recursive: true });
+  await copyFrozenPayload(directory);
   const require = createRequire(import.meta.url);
-  const zodRoot = dirname(require.resolve('zod/package.json'));
-  await cp(zodRoot, join(directory, 'node_modules', 'zod'), { recursive: true });
   await writeFile(join(directory, 'deployment.json'), JSON.stringify(deployment, null, 2));
   await writeFile(join(directory, 'package.json'), JSON.stringify({ name: '@skynet/agent', version, private: true,
     description: 'Deployment-specific Skynet collector; run skynet setup explicitly', type: 'module', engines: { node: '>=24 <25' },

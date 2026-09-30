@@ -52,7 +52,7 @@ export function activityFor(events: EvidenceLine[], enrolledAt: string | undefin
     const sourceDate = beijingDate(event.timestamp!);
     if (timestamp < first) { first = timestamp; summary.sourceFrom = event.timestamp; }
     if (timestamp > last) { last = timestamp; summary.sourceTo = event.timestamp; }
-    if (origin?.context === 'unknown-enrollment' || (!origin && boundary === null)) {
+    if (origin?.context === 'unknown-enrollment' || (!origin && (origins !== undefined || boundary === null))) {
       if (unique) summary.unknownEnrollmentRecords++;
       return { ...event, ...attachment, context: 'unknown-enrollment', sourceDate };
     }

@@ -4,6 +4,8 @@
 
 实现采用 [tracer-bullet ticket 图](tracer-bullet-tickets.md)，范围为 #4–#33；V2 的 #3 与 #34–#54 不在本次范围。每个实现任务使用独立 worktree，合并到同一草稿 PR。代码与合成测试通过不等同于真实客户端验收通过。
 
+当前主线 `594fec89f457aac35c2e0acc5a25cda9c2cab3d6` 已集成 #32 灾备与 #33 验收准备；[该源码 Linux CI](https://github.com/yiwer/Skynet/actions/runs/36710344930/job/109870368469) typecheck/build 与61/61通过，0失败/取消，210066.943933ms。主线公开 backup 窄回归4/4、33590ms来自 ROOT 实测，双实际CLI续聊1/1、13366.7888ms仍来自#32独立分支。最终评审修订在 `implement/v1-final-review-fixes`，尚未合入；[修订记录](../implementation/v1-review-fixes.md)按阶段保存固定源码及 RED/GREEN，[验收台账](../implementation/v1-acceptance-ledger.md)是唯一验收索引。后文各日期、未合入叙述和旧失败均为历史现场，不改写为新结果。最终 distinct merge/主线新CI由主线负责人记录后才能计为新证据；PR55和全部真实门槛保持开放。
+
 ## 恢复实施（2026-09-30）
 
 用户要求继续剩余 tickets 直至 V1 完成。以干净的 `a4ca34c` 工作区恢复，沿用草稿 PR #55；该提交的 [Linux CI](https://github.com/yiwer/Skynet/actions/runs/36400612859/job/108857308920) 包含类型检查、构建和 17 项测试，全部通过。
@@ -125,7 +127,7 @@ ROOT在 product `68ee347` 的冻结 compiled CLI/hook/filesystem 和产品 `laun
 
 这是隔离状态的正常快路径证据，不是安装完成、真实宿主或旧Linux四任务ENOSPC压力复测；历史P95 **111.35ms** 失败与max **1075.89ms** 长尾保留。没有Task/setup/maintenance/后台启动或付费调用；AC-22/G4及原文可见延迟分布仍待完整实测。
 
-## #32 完整支线交付（2026-09-30）
+## #32 完整支线交付历史（2026-09-30）
 
 独立支线 e366814→55308ae9 已完成 exported SQL snapshot+ALL chunks（含staged ACK）、fresh barePG/raw恢复、publication/reconcile/启动拒绝/旧claims预算与当前heartbeat fencing、实际UID1000私有named卷。固定日周项目与更正历史、原件/可读/原生导出逐字保留；dump后枚举前公开提交C不混入备份。阶段4公开链1/1、20.32秒；阶段5实际Codex0.157.1/Claude2.1.281各3 loopback请求，从恢复服务器下载包并在原home/workspace不可用时续聊，1/1、13.37秒。
 

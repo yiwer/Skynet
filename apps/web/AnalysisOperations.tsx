@@ -15,7 +15,8 @@ export function AnalysisOperations({ request }: {request: (path: string, signal?
     void read(); return () => { abort.abort(); clearTimeout(timer); };
   }, [offset]);
   return <section aria-label="分析队列与资源"><h1>分析队列与资源</h1>
-    <p>{data?.availability.reason ?? '读取状态…'}</p>{error && <p role="alert">{error}</p>}
+    {!data&&!error&&<p role="status">读取状态…</p>}{data&&<p>{data.availability.reason}</p>}
+    {error&&<p role="alert">{error}{data?'；以下保留上次成功读取的状态，当前状态尚未核实。':'；状态尚未读到，稍后自动重试。'}</p>}
     <p>{data?.definition}</p><p>提供商实付：未知；失败期间原件可继续同步、查询和导出。</p>
     <ul>{data?.counts.map(row => <li key={row.state}>{analysisStates[row.state]}：{row.count}</li>)}</ul>
     <h2>运行时配置</h2><ul>{data?.workers.map(worker => <li key={worker.id}>{worker.online ? '在线' : '离线'} · {worker.config.mode === 'fixture' ? '合成演示，非正式验收' : '千问按量'} · {worker.config.model}

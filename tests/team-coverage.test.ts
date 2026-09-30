@@ -8,9 +8,11 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { mcpSandbox } from './mcp-support.js';
 import { beijingDate } from '../packages/contracts/reports.js';
+import {monday,addDays} from '../packages/contracts/work-views.js';
 import { readAnalysisConfig, publicConfig } from '../apps/analysis/config.js';
 import { analysisQueue } from '../apps/analysis/queue.js';
 import { executeAnalysis } from '../apps/analysis/execute.js';
+import {readRecoveryPackage} from '../packages/recovery.js';
 
 const hash = (value: string | Buffer) => createHash('sha256').update(value).digest('hex');
 const json = (value: unknown): RequestInit => ({ method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(value) });
@@ -119,7 +121,15 @@ test('public coverage matrix, frozen source-day statistics and original evidence
       inputCnyPerMillion: 0, outputCnyPerMillion: 0, maxRequests: 3, maxOutputTokens: 4096, maxAttempts: 1, timeoutSeconds: 30, autoAnalyzeUpdates: false }));
     const config = await readAnalysisConfig(configPath); const queue = analysisQueue(s.testDatabase, config, 'coverage-synthetic-runner');
     await s.testDatabase.query('INSERT INTO analysis_workers(id,config) VALUES($1,$2)', ['coverage-synthetic-runner', publicConfig(config)]);
-    assert.equal((await api(`/api/daily-reports/${A.employeeId}/${day}`, A.readerCredential, json({}))).status, 202);
+    // Necessary old-payload migration fixture: no statistic pointer existed in
+    // that format. It must remain null and byte-for-byte fixed after new writes.
+    const legacyPayload={employeeId:A.employeeId,employee:'覆盖甲：有活动与缺口',date:day,timeZone:'Asia/Shanghai',revision:0,version:null,state:'unavailable',createdAt:null,items:[],nextOffset:null,refreshPending:false,
+      statistics:{records:4,userTurns:2,toolCalls:2,historicalRecords:0,unknownRecords:0,files:null,tokens:null,activityIntervals:null,humanWorkHours:null,definition:'合成旧格式；统计未绑定，未知不是零'},
+      coverage:{messages:['合成旧格式固定报告'],inputs:[],originalEventIdsSample:[],originalEventCount:4,originalEventHash:hash('legacy synthetic event scope'),originalEventHashComplete:true,eligibleInputsComplete:false,dailyDeviceCoverage:'unknown',fixture:true}};
+    await s.testDatabase.query('INSERT INTO daily_report_revisions(id,employee_id,date,revision,version,payload) VALUES($1,$2,$3,1,$4,$5)',[randomUUID(),A.employeeId,day,hash(JSON.stringify(legacyPayload)),legacyPayload]);
+    const legacyPath=`/api/daily-reports/${A.employeeId}/${day}?revision=1`,legacyText=await(await api(legacyPath)).text();assert.equal(JSON.parse(legacyText).statistics.tokens,null);assert.equal(JSON.parse(legacyText).coverage.workStatistics,undefined);
+    const concurrent=await Promise.all([api(`/api/daily-reports/${A.employeeId}/${day}`, A.readerCredential, json({})),api(statsPath)]);
+    assert.equal(concurrent[0]!.status,202);assert.ok([200,409].includes(concurrent[1]!.status),'nonwaiting statistic serialization never produces a pool/unique failure');
     let dailyReport: any;
     for (let attempt = 0; attempt < 70; attempt++) {
       await s.testDatabase.query("UPDATE analysis_workers SET updated_at=now() WHERE id='coverage-synthetic-runner'");
@@ -142,6 +152,17 @@ test('public coverage matrix, frozen source-day statistics and original evidence
     assert.equal(dailyReport.coverage.fixture, true);
     const mcpDaily = await client.callTool({ name: 'read_daily_report', arguments: { employeeId: A.employeeId, date: day, revision: dailyReport.revision } });
     const frozenDaily = await (await api(`/api/daily-reports/${A.employeeId}/${day}?revision=${dailyReport.revision}`)).json();
+    assert.ok(frozenDaily.coverage.workStatistics,'a new daily version must freeze a statistic revision, not permanent unknowns');
+    const fixedStatistic=frozenDaily.coverage.workStatistics;
+    const boundStatistic=await(await api(statsPath+`&revision=${fixedStatistic.revision}`)).json();
+    assert.equal(boundStatistic.version,fixedStatistic.version);assert.equal(boundStatistic.employeeId,A.employeeId);assert.equal(boundStatistic.date,day);
+    assert.deepEqual(frozenDaily.statistics.tokens,boundStatistic.tokens);assert.equal(frozenDaily.statistics.files.observedCount,boundStatistic.files.observedCount);assert.deepEqual(frozenDaily.statistics.activityIntervals,boundStatistic.intervals);
+    assert.equal(await(await api(legacyPath)).text(),legacyText,'old unbound payload is never filled from latest statistics');
+    const week=monday(day),weeklyPath='/api/work-view?'+new URLSearchParams({kind:'weekly',subject:A.employeeId,from:week,to:addDays(week,6)});
+    assert.equal((await api(weeklyPath,undefined,json({}))).status,202);let weekly:any;
+    for(let tick=0;tick<20;tick++){weekly=await(await api(weeklyPath)).json();if(weekly.coverage?.days.find((row:any)=>row.date===day)?.workStatistics)break;await new Promise(resolve=>setTimeout(resolve,100));}
+    const fixedDay=weekly.coverage.days.find((row:any)=>row.date===day);assert.deepEqual(fixedDay.workStatistics,fixedStatistic);assert.deepEqual(fixedDay.statistics.files,frozenDaily.statistics.files);assert.equal(fixedDay.statistics.tokens.total,frozenDaily.statistics.tokens.total);
+    const frozenWeekly=await(await api(weeklyPath+`&revision=${weekly.revision}`)).text();
     assert.deepEqual(JSON.parse((mcpDaily.content as { text: string }[])[0]!.text), frozenDaily);
     const requestsBeforeMatrix = s.traffic.filter(item => item.method === 'POST' && item.path.startsWith('/api/daily-reports/')).length;
     browser = await chromium.launch({ headless: true }); const page = await browser.newPage({ ignoreHTTPSErrors: true });
@@ -160,6 +181,9 @@ test('public coverage matrix, frozen source-day statistics and original evidence
     const dailyPanel = page.getByRole('region', { name: '日工作' });
     assert.equal(await dailyPanel.getByLabel('来源日期', { exact: true }).inputValue(), day); await expect(dailyPanel.getByRole('combobox')).toHaveValue(A.employeeId);
     await expect(dailyPanel.getByLabel('历史版本（留空读取最新）')).toHaveValue(String(dailyReport.revision));
+    await dailyPanel.getByText(new RegExp(`^核查固定统计 v${fixedStatistic.revision}`)).click();
+    await expect(dailyPanel.getByRole('link',{name:'synthetic/code.ts',exact:true})).toBeVisible();
+    await expect(dailyPanel.getByText(`统计版本 ${fixedStatistic.version}；区间不是人工工时。`,{exact:true})).toBeVisible();
     await page.getByRole('button', { name: '团队覆盖', exact: true }).click();
     const projectLink = page.getByRole('link', { name: '查看项目工作：/synthetic/coverage', exact: true }).first();
     await expect(projectLink).toHaveAttribute('href', `#work?${new URLSearchParams({ kind: 'project', subject: '/synthetic/coverage', from: day, to: day })}`);
@@ -181,6 +205,39 @@ test('public coverage matrix, frozen source-day statistics and original evidence
       assert.ok(dimensions.contentWidth <= width, JSON.stringify(dimensions)); layouts.push(dimensions);
       await page.screenshot({ path: join(evidence, `coverage-${width}.png`), fullPage: true });
     }
+    // No semantic origin can carry these bounds. Normal metadata/Token rows are
+    // not a gap; a partial or malformed business record must change completeness
+    // and report input identity without inventing its source date/activity.
+    const gapSession=randomUUID();const gapPrefix=bytes({timestamp,type:'session_meta',payload:{id:gapSession,cwd:'/synthetic',source:'cli',cli_version:'0.157.1'}});
+    const stableStatistics=await(await api(statsPath)).json();
+    const legalAuxiliary=Buffer.concat([gapPrefix,bytes(tokenRow(timestamp,120))]);
+    const legalAuxiliarySnapshot=await upload(a,legalAuxiliary,undefined,{sourceSessionId:gapSession});
+    assert.equal((await(await api(statsPath)).json()).version,stableStatistics.version,'legal zero-event metadata/Token auxiliary rows do not fabricate a parse gap or activity');
+    const zeroOriginGaps:any[]=[];
+    for(const [kind,suffix]of [['partial',Buffer.from(JSON.stringify(user('未闭合合成原件')).slice(0,-5))],['malformed',Buffer.from('{"type":"response_item","payload":INVALID}\n')],
+      ['unsupported',bytes({type:'response_item',payload:{type:'message',role:'user',content:[{type:'unknown_image',data:'synthetic-unsupported-format'}]}})]] as const){
+      const gapBytes=Buffer.concat([gapPrefix,suffix]);const gapSnapshot=await upload(a,gapBytes,undefined,{sourceSessionId:gapSession});
+      const gapStatistics=await(await api(statsPath)).json();
+      assert.equal(gapStatistics.sourceInputsComplete,false,`${kind} current primary without semantic origins must remain incomplete`);
+      assert.equal(gapStatistics.files.complete,false);assert.equal(gapStatistics.tokens.total,null);assert.notEqual(gapStatistics.inputDigest,stableStatistics.inputDigest);
+      assert.deepEqual([gapStatistics.records,gapStatistics.userTurns,gapStatistics.toolCalls],[stableStatistics.records,stableStatistics.userTurns,stableStatistics.toolCalls]);
+      const detail=await(await api(`/api/snapshots/${gapSnapshot}`)).json();assert.equal(detail.events.length,0);
+      assert.deepEqual(Buffer.from(await(await api(`/api/snapshots/${gapSnapshot}/raw`)).arrayBuffer()),gapBytes);
+      const recovery=readRecoveryPackage(Buffer.from(await(await api(`/api/snapshots/${gapSnapshot}/recovery`)).arrayBuffer()));
+      assert.deepEqual(recovery.bytes,gapBytes);assert.equal(recovery.manifest.hash,hash(gapBytes),'recovery keeps damaged/partial original bytes rather than making a complete transcript');
+      assert.equal((await(await api(`/api/daily-reports/${A.employeeId}/${day}`)).json()).refreshPending,true);
+      await s.testDatabase.query("UPDATE analysis_workers SET updated_at=now() WHERE id='coverage-synthetic-runner'");
+      assert.equal((await api(`/api/daily-reports/${A.employeeId}/${day}`,undefined,json({}))).status,202);let gapReport:any;
+      for(let tick=0;tick<30;tick++){gapReport=await(await api(`/api/daily-reports/${A.employeeId}/${day}`)).json();if(gapReport.coverage?.workStatistics?.version===gapStatistics.version)break;await new Promise(resolve=>setTimeout(resolve,100));}
+      assert.equal(gapReport.state,'partial');assert.equal(gapReport.coverage.workStatistics.version,gapStatistics.version);
+      assert.equal(gapReport.statistics.tokens.total,null);assert.equal((await(await api(`/api/analysis/${frozenDaily.coverage.inputs.find((value:any)=>value.analysisId).analysisId}`)).json()).applicable,true);
+      assert.deepEqual(await(await api(`/api/daily-reports/${A.employeeId}/${day}?revision=${frozenDaily.revision}`)).json(),frozenDaily);
+      assert.equal(await(await api(weeklyPath+`&revision=${weekly.revision}`)).text(),frozenWeekly);
+      zeroOriginGaps.push({kind,gapSnapshot,gapStatistics,reportRevision:gapReport.revision,rawSha256:hash(gapBytes)});
+    }
+    await upload(a,legalAuxiliary,undefined,{sourceSessionId:gapSession,qualifiedAt:new Date(Date.parse(timestamp)+1).toISOString()});
+    const repairedInputStatistics=await(await api(statsPath)).json();assert.equal(repairedInputStatistics.sourceInputsComplete,true);assert.equal(repairedInputStatistics.tokens.total,stableStatistics.tokens.total);
+    assert.equal((await(await api(`/api/snapshots/${legalAuxiliarySnapshot}/recovery`)).json()).manifest.hash,hash(legalAuxiliary),'public recovery preserves the fixed zero-event original');
     const corruptId = randomUUID(); const corruptPrefix = bytes({ timestamp, type: 'session_meta', payload: { id: corruptId, cwd: '/synthetic', source: 'cli', cli_version: '0.157.1' } });
     const corrupt = Buffer.concat([corruptPrefix, Buffer.from(`{"timestamp":"${timestamp}","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"`),
       Buffer.from([0xff]), Buffer.from('"}]}}\n'), bytes(tokenRow(timestamp, 120))]);
@@ -189,11 +246,20 @@ test('public coverage matrix, frozen source-day statistics and original evidence
     assert.equal(corruptStatistics.tokens.total, null); assert.equal(corruptStatistics.files.complete, false); assert.equal(corruptStatistics.sourceInputsComplete, false);
     assert.deepEqual(Buffer.from(await (await api(`/api/snapshots/${corruptSnapshot}/raw`)).arrayBuffer()), corrupt);
     assert.equal((await api('/api/sessions')).status, 200); assert.equal((await api('/health')).status, 200);
+    assert.equal((await(await api(`/api/daily-reports/${A.employeeId}/${day}`)).json()).refreshPending,true,'a no-semantic-origin current raw gap changes report input revision without guessing its source day');
+    await s.testDatabase.query("UPDATE analysis_workers SET updated_at=now() WHERE id='coverage-synthetic-runner'");
+    assert.equal((await api(`/api/daily-reports/${A.employeeId}/${day}`,undefined,json({}))).status,202);let changedReport:any;
+    for(let tick=0;tick<20;tick++){changedReport=await(await api(`/api/daily-reports/${A.employeeId}/${day}`)).json();if(changedReport.coverage?.workStatistics?.version===corruptStatistics.version)break;await new Promise(resolve=>setTimeout(resolve,100));}
+    assert.ok(changedReport.revision>frozenDaily.revision);assert.equal(changedReport.statistics.tokens.total,null);assert.equal(changedReport.coverage.workStatistics.version,corruptStatistics.version);assert.equal(changedReport.state,'partial');
+    const unchanged=await(await api(`/api/analysis/${frozenDaily.coverage.inputs.find((value:any)=>value.analysisId).analysisId}`)).json();assert.equal(unchanged.applicable,true,'an independent corrupt session does not invalidate an unchanged snapshot analysis');
+    assert.equal(await(await api(legacyPath)).text(),legacyText);assert.deepEqual(await(await api(`/api/daily-reports/${A.employeeId}/${day}?revision=${dailyReport.revision}`)).json(),frozenDaily);
+    assert.equal(await(await api(weeklyPath+`&revision=${weekly.revision}`)).text(),frozenWeekly);
+    const mcpLegacy=await client.callTool({name:'read_daily_report',arguments:{employeeId:A.employeeId,date:day,revision:1}});assert.deepEqual(JSON.parse((mcpLegacy.content as{text:string}[])[0]!.text),JSON.parse(legacyText));
     await s.restart();
     assert.deepEqual(await (await api(statsPath + `&revision=${statistics.revision}`)).json(), statistics);
     assert.equal((await (await api(`/api/team-coverage?date=${day}`)).json()).rows.find((row: any) => row.employeeId === A.employeeId).cells.at(-1).collection, 'gap-observed');
     await writeFile(join(evidence, 'public-flow.json'), JSON.stringify({ snapshotId, restored, matrix: httpMatrix, statistics, bStatistics, parentSnapshot, proofSnapshot, materialStatistics, corruptSnapshot, corruptStatistics, dailyReport, layouts,
-      boundary: 'Public authenticated synthetic upload and native-record-schema rows, immutable export, Web/OAuth MCP and restart; no real provider/model/paid call or Task setup.' }, null, 2));
+      zeroOriginGaps,boundary: 'Public authenticated synthetic upload and native-record-schema rows, immutable export, Web/OAuth MCP and restart; no real provider/model/paid call or Task setup.' }, null, 2));
     console.log(`Coverage public-flow evidence: ${evidence}`);
   } finally { await browser?.close(); await client?.close(); await s.close(); }
 });

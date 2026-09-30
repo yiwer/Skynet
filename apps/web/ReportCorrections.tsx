@@ -18,7 +18,7 @@ export function ReportCorrections({report,fixed,request,onChanged}:{report:Daily
   const text=(value:ReportCorrection)=>value.kind==='note'?value.note:value.kind==='theme'?`工作主题：${value.theme}`:value.kind==='project'?`显示项目：${value.project||'未归类项目'}`:'请求重新分析';
   return <section aria-label="分析更正"><h3>说明与分析更正</h3><p>人工说明、主题和显示项目归类单列保存。原件、来源项目、员工归属和本日总计数不变；新版项目计数按原事件唯一分配。重新分析保留原分析和预算预留。</p>
     {!fixed&&report.revision>0&&<><label>更正原因<input value={reason} maxLength={1000} onChange={event=>setReason(event.target.value)}/></label>
-      <label>追加说明<textarea value={note} maxLength={2000} onChange={event=>setNote(event.target.value)}/></label><button disabled={busy||!reason.trim()||!note.trim()} onClick={()=>submit('note')}>保存说明并生成新版</button>
+      <label htmlFor="correction-note">追加说明</label><textarea id="correction-note" value={note} maxLength={2000} onChange={event=>setNote(event.target.value)}/><button disabled={busy||!reason.trim()||!note.trim()} onClick={()=>submit('note')}>保存说明并生成新版</button>
       <label>待归类主题<select value={selected} onChange={event=>setSelected(event.target.value)}><option value="">选择当前页主题</option>{groups.map(group=>{const [project,theme]=JSON.parse(group);return <option key={group} value={group}>{project||'未归类项目'} · {theme}</option>;})}</select></label>
       <label>更正后的工作主题<input value={theme} maxLength={500} onChange={event=>setTheme(event.target.value)}/></label><button disabled={busy||!reason.trim()||!theme.trim()||!selected} onClick={()=>submit('theme')}>保存主题归类</button>
       <label>更正后的显示项目<input value={project} maxLength={1024} onChange={event=>setProject(event.target.value)}/></label><button disabled={busy||!reason.trim()||!selected} onClick={()=>submit('project')}>保存项目归类</button><p>显示项目留空表示未归类；原始来源项目仍可核查。</p>

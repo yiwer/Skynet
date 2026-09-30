@@ -11,9 +11,11 @@ import { analysisService, migrateAnalysis } from '../apps/server/analysis.js';
 import { archiveQuery } from '../apps/server/archive-query.js';
 import { RawStore } from '../apps/server/raw-store.js';
 import { createSandbox } from './support.js';
+import {cleanupOwned} from './owned-command.js';
 
 test('public durable queue fences duplicate leases, late writes, new inputs, retries and unknown billing', {timeout: 90000}, async () => {
   const sandbox = await createSandbox(); const db = connect(sandbox.env.DATABASE_URL!);
+  let primary:unknown;
   try {
     const employee = await sandbox.provision('队列合成员工'); const origin = await sandbox.startServer();
     // Match production lock order: a claimant has targets, then needs jobs. Restart
@@ -97,7 +99,7 @@ test('public durable queue fences duplicate leases, late writes, new inputs, ret
     for (let tick=0;tick<20;tick++) { const runs=(await (await api(`/api/snapshots/${final.snapshotId}/analysis`)).json()).runs;
       if (runs.length) { automatic=runs[0];break; } await setTimeout(250); }
     assert.ok(automatic,'background poll prepares latest input without manual request'); assert.equal(automatic.trigger,'incremental'); assert.equal(automatic.actorKind,'system');
-    assert.equal((await db.query('SELECT count(*)::int AS count FROM analysis_jobs WHERE snapshot_id=$1',[intermediate.snapshotId])).rows[0].count,0);
+    assert.deepEqual((await(await api(`/api/snapshots/${intermediate.snapshotId}/analysis`)).json()).runs,[]);
     const automaticClaim = await qa.claim(); assert.equal(automaticClaim!.id,automatic.id); await qa.finish(automaticClaim!,null,'synthetic automatic fault');
     await db.query("UPDATE analysis_targets SET parser_version='old-parser' WHERE desired_snapshot_id=$1",[final.snapshotId]);
     const refreshed = await (await api(`/api/snapshots/${final.snapshotId}/analysis`,undefined,{})).json();
@@ -114,7 +116,7 @@ test('public durable queue fences duplicate leases, late writes, new inputs, ret
     assert.equal((await (await api(`/api/analysis/${refreshed.id}`)).json()).attempts,0);
     const corrupt = await upload(undefined,'x',true);
     const rejected = await api(`/api/snapshots/${corrupt.snapshotId}/analysis`,undefined,{}); assert.equal(rejected.status,422); assert.match((await rejected.json()).error,/UTF-8/);
-    assert.equal((await db.query('SELECT count(*)::int AS count FROM analysis_jobs WHERE snapshot_id=$1',[corrupt.snapshotId])).rows[0].count,0);
+    assert.deepEqual((await(await api(`/api/snapshots/${corrupt.snapshotId}/analysis`)).json()).runs,[]);
     assert.deepEqual(Buffer.from(await (await api(`/api/snapshots/${corrupt.snapshotId}/raw`)).arrayBuffer()),corrupt.bytes);
     assert.deepEqual(Buffer.from(await (await api(`/api/snapshots/${first.snapshotId}/raw`)).arrayBuffer()),first.bytes);
     assert.equal((await api('/api/sessions')).status,200);
@@ -134,12 +136,13 @@ test('public durable queue fences duplicate leases, late writes, new inputs, ret
     assert.equal((await api(`/api/analysis/${moneyJob.id}/retry`,undefined,{})).status,200);
     assert.equal(await monetaryQueue.claim(),null); const capped=await (await api(`/api/analysis/${moneyJob.id}`)).json();
     assert.equal(capped.state,'failed');assert.match(capped.error,/预算/);assert.equal(capped.attempts,1);
-    assert.equal((await db.query('SELECT reserved_cny FROM analysis_budgets WHERE id=$1',['synthetic-arithmetic'])).rows[0].reserved_cny,'0.03328');
+    const retainedReservation=(await(await api('/api/analysis/operations')).json()).budgets.find((budget:any)=>budget.id==='synthetic-arithmetic');
+    assert.equal(retainedReservation.reservedCny,'0.03328');
     const oversized = await upload(undefined,'x'.repeat(money.maxSessionBytes+1));
     assert.equal((await api(`/api/snapshots/${oversized.snapshotId}/analysis`,undefined,{})).status,413);
     await writeFile(join(sandbox.directory,'analysis-queue-evidence.json'),JSON.stringify({ops,oldSuccess,automatic,newGeneration,capped,
-      retainedReservation:(await db.query('SELECT reserved_cny FROM analysis_budgets WHERE id=$1',['synthetic-arithmetic'])).rows[0],
+      retainedReservation,
       corruptBytesPreserved:true,inputOverLimitRejected:true},null,2));
     console.log(`Queue evidence: ${sandbox.directory}`);
-  } finally { await db.end(); await sandbox.close(); }
+  } catch(error){primary=error;throw error;} finally { await cleanupOwned([()=>db.end(),()=>sandbox.close()],primary); }
 });

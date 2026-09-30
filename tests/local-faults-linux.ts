@@ -9,10 +9,15 @@ import { setTimeout } from 'node:timers/promises';
 import { performance } from 'node:perf_hooks';
 import { createApp } from '../apps/server/app.js';
 import { connect } from '../apps/server/database.js';
+import {benchmarkEnvironment,measureHooks} from './hook-benchmark.js';
+import {ownedCommand,stopOwnedChild} from './owned-command.js';
+import {fileURLToPath} from 'node:url';
 
 assert.equal(process.platform, 'linux'); assert.equal(process.getuid!(), 1000);
 let input = ''; for await (const chunk of process.stdin) input += chunk;
 const config = JSON.parse(input);
+const outerDeadline=performance.now()+150000;
+const remaining=()=>{const value=Math.floor(outerDeadline-performance.now());if(value<=0)throw new Error('Owned local-fault suite overall deadline exceeded');return value;};
 const db = connect(config.database);
 const app = await createApp({ db, rawDirectory: '/work/raw', webDirectory: '/skynet/dist/web' });
 await app.listen({ host: '0.0.0.0', port: 3000 });
@@ -41,15 +46,10 @@ const provider = createServer(async (request, response) => {
 provider.listen(0, '127.0.0.1'); await once(provider, 'listening');
 const nativeEnv = { ...env, ANTHROPIC_BASE_URL: `http://127.0.0.1:${(provider.address() as any).port}` };
 async function run(file: string, args: string[], data = '', childEnv = env) {
-  return new Promise<{ stdout: string; stderr: string }>((resolve, reject) => {
-    const child = spawn(file, args, { env: childEnv, cwd: project, stdio: ['pipe', 'pipe', 'pipe'] }); let stdout = ''; let stderr = '';
-    const timer = globalThis.setTimeout(() => { child.kill('SIGKILL'); reject(new Error(`Owned process timed out: ${file}`)); }, 40_000);
-    child.stdout.on('data', part => stdout += part); child.stderr.on('data', part => stderr += part);
-    child.on('error', reject); child.on('close', code => { clearTimeout(timer); code === 0 ? resolve({ stdout, stderr }) : reject(new Error(`Process ${file} failed ${code}: ${stderr} ${stdout}`)); }); child.stdin.end(data);
-  });
+  return ownedCommand(file,args,childEnv,data,{cwd:project,timeoutMs:Math.min(40000,remaining()),maxOutputBytes:1048576});
 }
 async function poll<T>(operation: () => Promise<T>, match: (value: T) => boolean, label: string) {
-  for (let attempt = 0; attempt < 200; attempt++) { const value = await operation(); if (match(value)) return value; await setTimeout(100); }
+  for (let attempt = 0; attempt < 200; attempt++) { remaining();const value = await operation(); if (match(value)) return value; await setTimeout(100); }
   throw new Error(`Timed out: ${label}`);
 }
 const api = async (path: string) => { const response = await fetch(`${origin}${path}`, { headers: { Authorization: `Bearer ${config.reader}` } }); assert.equal(response.status, 200); return response; };
@@ -75,7 +75,7 @@ await run(process.execPath, [cli, 'setup', '--state', state], JSON.stringify({ s
   nativeRoot: `${native}/projects`, source: 'claude-code-cli', sourceVersion: '2.1.281', sourceOs: 'linux' }));
 await writeFile(`${native}/settings.json`, JSON.stringify({ hooks: Object.fromEntries(['SessionStart', 'UserPromptSubmit', 'Stop', 'SessionEnd'].map(name => [name,
   [{ hooks: [{ type: 'command', command: `${process.execPath} ${cli} hook --state ${state}` }] }]])) }));
-const collector = spawn(process.execPath, [cli, 'run', '--state', state], { env, stdio: 'ignore' });
+const collector = spawn(process.execPath, [cli, 'run', '--state', state], { env, windowsHide:true,stdio: 'ignore' });
 const A = randomUUID(); const B = randomUUID(); let paused = false;
 try {
   await nativeRun(A, 'baseline'); const initial: any = await poll(() => snapshot(A), Boolean, 'baseline archive'); const aPath = await sourcePath(A);
@@ -87,10 +87,14 @@ try {
   const fullReport = await device(); assert.equal(fullReport.capture[0].report.locallyPersisted, false);
   const fullNative = await nativeRun(B, 'disk-full'); assert.equal(await snapshot(B), undefined, 'failed hook enqueue cannot be claimed as archived');
   assert.ok(JSON.stringify(fullNative).includes('local diagnostics could not be saved'), 'full disk warning survives in native hook result');
-  const elapsed: number[] = [];
-  const event = JSON.stringify({ hook_event_name: 'Stop', session_id: B, transcript_path: await sourcePath(B), cwd: project });
-  for (let sample = 0; sample < 200; sample++) { const started = performance.now(); await run(process.execPath, [cli, 'hook', '--state', state], event); elapsed.push(performance.now() - started); }
-  elapsed.sort((a, b) => a - b);
+  await mkdir('/evidence/hook-enospc',{recursive:true});
+  const event={hook_event_name:'Stop',session_id:B,transcript_path:await sourcePath(B),cwd:project};
+  const hookMeasurement=await measureHooks({launcher:cli,state,output:'/evidence/hook-enospc',event,env,
+    profile:'Linux native local faults; current collector running; sequential direct CLI under actual2MiB tmpfs ENOSPC; not installed stable launcher or historical four-job pressure',
+    environment:await benchmarkEnvironment([cli,'/skynet/dist/apps/collector/hook.js','/skynet/dist/packages/filesystem.js',fileURLToPath(import.meta.url),'/skynet/dist/tests/hook-benchmark.js','/skynet/dist/tests/owned-command.js',process.execPath]),
+    expectedStderr:'Skynet: host activity was not queued and local diagnostics could not be saved; check storage and skynet status.\n',durability:'unavailable-enospc',
+    thresholdMs:config.hookThresholdMs??null,deadlineMs:Math.min(60000,remaining())});
+  assert.equal(hookMeasurement.passed,true,'Hook measurement incomplete or explicitly requested threshold failed; see ordered200-sample evidence');
   await unlink('/fault/fill');
   await nativeRun(B, 'disk-recovered', true); const uploadedB: any = await poll(() => snapshot(B), Boolean, 'resumed still-readable bytes automatically archived');
   const bBytes = await readFile(await sourcePath(B));
@@ -113,7 +117,10 @@ try {
   const evidence = { source: 'Claude Code CLI 2.1.281 Linux x64', uid: process.getuid!(), image: 'skynet-analysis-probe:2.1.281',
     actualErrors: [fullCode, 'EACCES', 'ENOENT'], fixedTmpfsBytes: 2 * 1024 * 1024, filledBytes: filled, paidCalls: 0,
     nativeCompleted: ['baseline', 'disk-full', 'disk-recovered', 'permission-denied', 'before-source-deletion', 'source-deleted'],
-    fullDiskHook: { samples: elapsed.length, p50Ms: elapsed[99], p95Ms: elapsed[189], maxMs: elapsed.at(-1), remoteWait: false },
+    fullDiskHook: { samples: hookMeasurement.count, p50Ms:hookMeasurement.p50Ms,p95Ms:hookMeasurement.p95Ms,maxMs:hookMeasurement.maxMs,
+      orderedSamples:hookMeasurement.samples,environment:hookMeasurement.metadata.environment,profile:hookMeasurement.metadata.profile,
+      durableInventoryVerified:false,durability:hookMeasurement.durability,thresholdMs:hookMeasurement.metadata.thresholdMs,
+      thresholdPassed:hookMeasurement.thresholdPassed,remoteWait:false },
     fullDiskReport: fullReport, finalDevice: await device(), snapshotId: finalA.id, initialSnapshotId: initial.id, backfilledSnapshotId: uploadedB.id,
     lostUnarchivedBytes: lostBytes.length - archivedBeforeDelete.length, rawStillExact: true,
     limits: 'No Windows DACL equivalence; no source scan after entirely lost hooks; reusing B produces its normal qualification. A inaccessible while B works. Full disk + offline + process death cannot guarantee durable diagnostics.' };
@@ -122,6 +129,6 @@ try {
   await poll(async () => { try { await readFile('/evidence/finish'); return true; } catch { return false; } }, Boolean, 'host Web verification');
   console.log(JSON.stringify({ state: 'passed', snapshotId: finalA.id }));
 } finally {
-  if (paused) collector.kill('SIGCONT'); collector.kill('SIGTERM'); await once(collector, 'exit');
+  if (paused) collector.kill('SIGCONT'); await stopOwnedChild(collector);
   await new Promise<void>(resolve => provider.close(() => resolve())); await app.close(); await db.end();
 }

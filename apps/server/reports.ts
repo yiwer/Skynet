@@ -6,6 +6,10 @@ import type { AnalysisRun, AnalysisProcessing } from '../../packages/contracts/a
 import { beijingDate, dueReportDate, reportDate, correctionInput, type ReportCorrection, type DailyItem, type DailyReport } from '../../packages/contracts/reports.js';
 import { ledgerCountProjection } from './provenance.js';
 import {readEvidence} from './evidence.js';
+import {qualificationDaySql} from './qualification.js';
+import {transientStatistics,type WorkStatisticsService} from './work-statistics.js';
+import {statisticsExtractorVersion} from '../../packages/native-statistics.js';
+import {unscopedRawGapsSql} from './evidence-integrity.js';
 
 // This is a report display classification, never a rewrite of an origin. The
 // last authenticated project correction assigns each eligible event exactly once.
@@ -67,8 +71,7 @@ const definition = '记录、用户轮次（原件或材料行）、工具调用
 // Optional for historical short-session results. #23 owns the full per-range
 // contract; reports expose its compact scope plus the immutable analysis ID.
 type Processing = AnalysisProcessing;
-const qualificationForPeriod = `(SELECT COALESCE(MAX(c.revision),0) FROM archive_event_origins o JOIN event_qualifications c ON c.event_id=o.event_id
-  WHERE o.employee_id=p.employee_id AND o.source_date=p.date)`;
+const qualificationForPeriod = qualificationDaySql('p.employee_id','p.date');
 export function reportRunCoverage(run: AnalysisRun) {
   const processing = (run.result as (AnalysisRun['result'] & { processing?: Processing }))?.processing;
   const coverage = run.input.coverage;
@@ -79,19 +82,20 @@ export function reportRunCoverage(run: AnalysisRun) {
       omittedFindings: processing.omittedFindings, extractedRanges: processing.ranges.filter(range => range.state === 'extracted').length,
       failedRanges: processing.ranges.filter(range => range.state === 'failed').length, skippedRanges: processing.ranges.filter(range => range.state === 'skipped').length } : undefined };
 }
-export function reportService(db: Database, analysis: AnalysisService, clock: () => Date = () => new Date()) {
+export function reportService(db: Database, analysis: AnalysisService,statistics:WorkStatisticsService,clock: () => Date = () => new Date()) {
   const parserVersions=['codex-cli','codex-desktop','claude-code-cli'].map(source=>readEvidence(Buffer.alloc(0),source as 'codex-cli').parserVersion);
   async function sourceRevision(query: Pick<Database,'query'>,employeeId:string,date:string) {
     const row=(await query.query(`SELECT
-      (SELECT MAX(s.committed_at)::text FROM effective_event_origins o JOIN snapshot_events se ON se.event_id=o.event_id JOIN snapshots s ON s.id=se.snapshot_id
+      (SELECT MAX(s.committed_at)::text FROM effective_event_origins o JOIN effective_snapshot_events se ON se.event_id=o.event_id JOIN snapshots s ON s.id=se.snapshot_id
         WHERE o.employee_id=$1 AND o.source_date=$2 AND o.context='after-enrollment') AS carrier,
       (SELECT count(*)::text FROM effective_event_origins o WHERE o.employee_id=$1 AND o.source_date=$2 AND o.context='after-enrollment') AS events,
       (SELECT count(*)::text FROM effective_event_origins o WHERE o.employee_id=$1 AND o.source_date IS NULL) AS undated,
-      (SELECT COALESCE(MAX(c.revision),0)::text FROM archive_event_origins o JOIN event_qualifications c ON c.event_id=o.event_id WHERE o.employee_id=$1 AND o.source_date=$2) AS qualification,
+      ${qualificationDaySql('$1','$2')} AS qualification,
+      ${unscopedRawGapsSql('$1')} AS unscoped_raw_gaps,
       (SELECT MAX(t.updated_at)::text FROM analysis_targets t JOIN snapshots s ON s.id=t.desired_snapshot_id WHERE EXISTS(
-        SELECT 1 FROM snapshot_events se JOIN effective_event_origins o ON o.event_id=se.event_id WHERE se.snapshot_id=s.id AND o.employee_id=$1 AND o.source_date=$2 AND o.context='after-enrollment')) AS targets,
+        SELECT 1 FROM effective_snapshot_events se JOIN effective_event_origins o ON o.event_id=se.event_id WHERE se.snapshot_id=s.id AND o.employee_id=$1 AND o.source_date=$2 AND o.context='after-enrollment')) AS targets,
       (SELECT string_agg(DISTINCT config->>'configurationHash',',' ORDER BY config->>'configurationHash') FROM analysis_workers WHERE updated_at>now()-interval '15 seconds') AS config`,[employeeId,date])).rows[0];
-    return digest(JSON.stringify({row,parserVersions}));
+    return digest(JSON.stringify({row,parserVersions,statisticsExtractorVersion}));
   }
   async function validate(employeeId: string, date: string) {
     reportDate.parse(date);
@@ -200,12 +204,12 @@ export function reportService(db: Database, analysis: AnalysisService, clock: ()
       // Each event's latest exact carrier is chosen, including restored primary
       // copies. Original origin coordinates/ownership stay frozen in analysis input.
       const snapshots = events.length > 10000 ? [] : (await client.query(`SELECT DISTINCT s.id,s.hash FROM effective_event_origins o
-        CROSS JOIN LATERAL (SELECT ss.id,ss.hash FROM snapshot_events se JOIN snapshots ss ON ss.id=se.snapshot_id
+        CROSS JOIN LATERAL (SELECT ss.id,ss.hash FROM effective_snapshot_events se JOIN snapshots ss ON ss.id=se.snapshot_id
           WHERE se.event_id=o.event_id ORDER BY ss.committed_at DESC,ss.id DESC LIMIT 1) s
         WHERE o.employee_id=$1 AND o.source_date=$2 AND o.context='after-enrollment' ORDER BY s.id LIMIT 101`, [employeeId, date])).rows;
       const overflow = events.length > 10000 || snapshots.length > 100;
       const messages = ['只总结本来源日期的已确认活动；背景引用不计当天工作。', '按日设备覆盖、未解析原件与遗漏活动尚未证实；零已确认记录不代表无活动。',
-        '文件、原生 token 和活动区间等待完整统计接口；未知不等于零。'];
+        '文件与 Token 为来源记录量；活动区间是已记录活动点，人工工时未知。统计原句使用本版固定统计引用。'];
       if (undated) messages.push(`${undated} 条来源日期未知，不能任意归入本日。`);
       if (overflow) messages.push('本日输入超出 10000 事件 / 100 主原件处理边界；保留统计，未完整生成主题。');
       if (!projectStatisticsComplete) messages.push('逐项目计数超过 100 项 / 16KiB 元数据边界；未覆盖项目计数保持未知，员工本日总计数仍保留。');
@@ -236,7 +240,7 @@ export function reportService(db: Database, analysis: AnalysisService, clock: ()
       const items = dailyItems(runs.filter(run => run.state === 'succeeded' && run.applicable), employeeId, date, ids,projects);
       for(const item of items){const correction=allCorrections.find(value=>value.kind==='theme'&&item.activityEventIds.some(id=>value.eventIds.includes(id)));
         if(correction?.kind==='theme'){item.originalTheme=item.theme;item.theme=correction.theme;item.themeAssociation='manual-correction';item.correctionId=correction.id;}}
-      const state: DailyReport['state'] = waiting ? 'waiting-analysis' : incomplete ? (runs.some(run => run.state === 'succeeded' && run.applicable) ? 'partial' : 'unavailable')
+      let state: DailyReport['state'] = waiting ? 'waiting-analysis' : incomplete ? (runs.some(run => run.state === 'succeeded' && run.applicable) ? 'partial' : 'unavailable')
         : events.length && !items.length ? 'partial' : 'ready';
       if (events.length && !items.length && !waiting) messages.push('没有可用于本日目标、行动、结果或阻塞的分析引用；不能推断这些事项为零。');
       for (const run of runs) {
@@ -248,12 +252,16 @@ export function reportService(db: Database, analysis: AnalysisService, clock: ()
           messages.push(`分析 ${run.id}：${processing.extractedRanges} 范围提取、${processing.failedRanges} 失败、${processing.skippedRanges} 跳过，聚合 ${processing.aggregation}，省略 ${processing.omittedFindings} 项。仅保留本日已证实原句，未覆盖范围未知。`);
       }
       const originalEventHash = digest(JSON.stringify([...ids]));
+      const recorded=await statistics.freeze(client,employeeId,date);
+      const {paths:_paths,...files}=recorded.files;
+      if(!recorded.sourceInputsComplete){messages.push('确定性统计仍有原件、完整性或处理边界缺口；可观察值不代表全部工作。');if(state==='ready')state='partial';}
       const payload: DailyReport = { employeeId, employee: employee.name, date, timeZone: 'Asia/Shanghai', revision: 0, version: null,
         state, createdAt: null, items, nextOffset: null, refreshPending: false,
         corrections,correctionCount:Number(correctionRows[0]?.total??0),
-        statistics: { ...counts, files: null, tokens: null, activityIntervals: null, humanWorkHours: null, definition },
+        statistics: { ...counts, files, tokens: recorded.tokens, activityIntervals: recorded.intervals,sourceInputsComplete:recorded.sourceInputsComplete,humanWorkHours: null, definition },
         coverage: { messages: [...new Set(messages)], inputs, qualificationRevision, sourceRevision:sourceVersion, originalEventIdsSample: [...ids].slice(0, 20), originalEventCount: counts.records,
           projectStatistics, projectStatisticsComplete,
+          workStatistics:{employeeId,date,revision:recorded.revision,version:recorded.version},
           originalEventHash, originalEventHashComplete: events.length <= 10000, eligibleInputsComplete: !incomplete && !waiting,
           dailyDeviceCoverage: 'unknown', fixture: runs.some(run => run.result?.fixture || run.config.mode === 'fixture') } };
       // Bound public metadata separately from paged conclusions; retain exact
@@ -273,7 +281,7 @@ export function reportService(db: Database, analysis: AnalysisService, clock: ()
       await client.query('ROLLBACK');
       // A newer public refresh generation won while this repeatable input was
       // being analyzed. Its durable pending request will be handled by the poll.
-      if ((error as { code?: string }).code === '40001') return;
+      if (transientStatistics(error)) return;
       throw error;
     } finally { client.release(); }
   }
