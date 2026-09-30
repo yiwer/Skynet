@@ -149,6 +149,22 @@ export async function createApp(options: { db: Database; rawDirectory: string; w
   app.get('/api/me', { onRequest: readerGuard }, async request => reader(request.headers.authorization));
   const archive = archiveQuery(db, raw);
   const analysis = analysisService(db, archive);
+  // Preparation happens after archive commit, on a separate bounded poll; never on ACK.
+  let preparing: Promise<void> | undefined;
+  const analysisTimer = setInterval(() => {
+    if (!preparing) preparing = analysis.enqueueLatestIfReady().catch(() => {}).finally(() => { preparing = undefined; });
+  }, 1000);
+  analysisTimer.unref();
+  app.addHook('onClose', async () => { clearInterval(analysisTimer); await preparing; });
+  app.get('/api/analysis/operations', { onRequest: readerGuard }, async request => {
+    const { offset } = z.object({ offset: z.coerce.number().int().min(0).max(100000).default(0) }).strict().parse(request.query);
+    return analysis.operations(offset);
+  });
+  app.post('/api/analysis/:id/retry', { onRequest: readerGuard }, async request => {
+    z.object({}).strict().parse(request.body ?? {});
+    const actor = await reader(request.headers.authorization);
+    return analysis.retry(z.uuid().parse((request.params as { id: string }).id), actor.id);
+  });
   app.get('/api/snapshots/:id/analysis', { onRequest: readerGuard }, async request => {
     const id = z.uuid().parse((request.params as { id: string }).id);
     const { offset } = z.object({ offset: z.coerce.number().int().min(0).max(100000).default(0) }).strict().parse(request.query);

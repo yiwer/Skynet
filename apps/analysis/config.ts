@@ -18,6 +18,9 @@ const schema = z.object({
   maxRequests: z.number().int().min(1).max(5).default(3), maxOutputTokens: z.number().int().min(512).max(8192).default(4096),
   maxRequestBytes: z.number().int().min(32_768).max(1_048_576).default(262_144),
   timeoutSeconds: z.number().int().min(5).max(300).default(90),
+  maxAttempts: z.number().int().min(1).max(3).default(2), concurrency: z.number().int().min(1).max(4).default(1),
+  leaseSeconds: z.number().int().min(5).max(30).default(10), retryDelaySeconds: z.number().int().min(1).max(30).default(3),
+  autoAnalyzeUpdates: z.boolean().default(true), autoDebounceSeconds: z.number().int().min(1).max(60).default(3),
 }).strict();
 export type AnalysisConfig = z.infer<typeof schema> & { origin: string; reservationCny: number; configurationHash: string; credentialFingerprint: string | null };
 export function dedicatedPaygKey(value: string) {
@@ -54,6 +57,8 @@ export async function readAnalysisConfig(path: string): Promise<AnalysisConfig> 
     configurationHash: digest(JSON.stringify({ ...config, origin, credentialFingerprint, promptVersion: PROMPT_VERSION })) };
 }
 export function publicConfig(config: AnalysisConfig) {
-  const { mode, model, runtimeVersion, maxInputBytes, maxRequests, maxOutputTokens, timeoutSeconds, reservationCny, budgetCny, configurationHash } = config;
-  return { mode, model, runtimeVersion, maxInputBytes, maxRequests, maxOutputTokens, timeoutSeconds, reservationCny, budgetCny, configurationHash, promptVersion: PROMPT_VERSION };
+  const { mode, model, runtimeVersion, maxInputBytes, maxRequests, maxOutputTokens, timeoutSeconds, reservationCny, budgetCny, budgetId, configurationHash,
+    maxAttempts, concurrency, leaseSeconds, retryDelaySeconds, autoAnalyzeUpdates, autoDebounceSeconds } = config;
+  return { mode, model, runtimeVersion, maxInputBytes, maxRequests, maxOutputTokens, timeoutSeconds, reservationCny, budgetCny, budgetId, configurationHash, promptVersion: PROMPT_VERSION,
+    maxAttempts, concurrency, leaseSeconds, retryDelaySeconds, autoAnalyzeUpdates, autoDebounceSeconds };
 }

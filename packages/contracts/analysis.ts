@@ -17,10 +17,16 @@ export type AnalysisItem = Omit<AnalysisOutput['items'][number], 'citations'> & 
   snapshotId: string; location: EvidenceLocation; webPath: string; role: string; origin: EventOrigin | null; context: string;
   inputSnapshotId: string; inputLocation: EvidenceLocation;
 })[]; classificationAdjusted: boolean };
-export type AnalysisRun = { id: string; snapshotId: string; state: 'queued' | 'running' | 'succeeded' | 'failed';
+export type AnalysisRun = { id: string; snapshotId: string; state: 'queued' | 'running' | 'retry-wait' | 'superseded' | 'succeeded' | 'failed';
   createdAt: string; startedAt: string | null; finishedAt: string | null; error: string | null;
+  attempts: number; maxAttempts: number; nextAttemptAt: string; leaseUntil: string | null; deadline: string | null; generation: number;
+  trigger: 'manual' | 'incremental' | 'scheduled'; applicable: boolean; desiredSnapshotId: string | null; targetError: string | null;
+  actorId: string | null; actorKind: 'user' | 'system';
+  attemptHistory: { number: number; state: string; reservedCny: number; requests: number | null; usage: unknown;
+    error: string | null; startedAt: string; finishedAt: string | null }[];
   config: { mode: 'qwen-payg' | 'fixture'; model: string; runtimeVersion: string; promptVersion: string; configurationHash: string;
-    maxInputBytes: number; maxRequests: number; maxOutputTokens: number; timeoutSeconds: number; reservationCny: number; budgetCny: number };
+    maxInputBytes: number; maxRequests: number; maxOutputTokens: number; timeoutSeconds: number; reservationCny: number; budgetCny: number; budgetId: string;
+    maxAttempts: number; concurrency: number; leaseSeconds: number; retryDelaySeconds: number; autoAnalyzeUpdates: boolean; autoDebounceSeconds: number };
   input: { snapshotId: string; hash: string; parserVersion: string; eventCount: number; source: string; sourceVersion: string;
     coverage: { unrecognizedLines: number; partialLine: boolean; excludedMaterials: number; captureGaps: unknown[]; scope: string } };
   result: { items: AnalysisItem[]; usage: { inputTokens: number | null; outputTokens: number | null; runtimeCostUsd: number | null;
@@ -29,3 +35,10 @@ export type AnalysisRun = { id: string; snapshotId: string; state: 'queued' | 'r
 export type AnalysisPage = { runs: AnalysisRun[]; nextOffset: number | null; availability: {
   ready: boolean; reason: string; mode?: 'qwen-payg' | 'fixture'; model?: string; runtimeVersion?: string;
 } };
+export type AnalysisOperations = {
+  availability: AnalysisPage['availability']; counts: {state: AnalysisRun['state']; count: number}[];
+  workers: {id: string; config: AnalysisRun['config']; updatedAt: string; online: boolean}[];
+  budgets: {id: string; reservedCny: string}[];
+  targets: {id: string; desiredSnapshotId: string; generation: number; configurationHash: string; applicableJobId: string | null; error: string | null}[];
+  runs: (AnalysisRun & {resultAvailable: boolean})[]; nextOffset: number | null; providerBilledCny: null; definition: string;
+};

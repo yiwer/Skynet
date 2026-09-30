@@ -2,10 +2,16 @@ import { createServer } from 'node:http';
 import { randomUUID } from 'node:crypto';
 
 // Explicit synthetic Anthropic-compatible server. Never proxies or loads a real credential.
-export function analysisFixture(output: unknown, sentinel: string) {
+export function analysisFixture(output: unknown, sentinel: string, controlToken?: string) {
   const requests: { path: string; body: any }[] = []; let mode: 'ok' | 'malicious' | 'bad-citation' | 'hang' = 'ok';
   const server = createServer(async (request, response) => {
     try {
+      if (controlToken && request.url === '/test/mode' && request.headers['x-fixture-control'] === controlToken) {
+        const chunks: Buffer[] = []; for await (const part of request) chunks.push(part);
+        const value = JSON.parse(Buffer.concat(chunks).toString('utf8'));
+        if (!['ok', 'malicious', 'bad-citation', 'hang'].includes(value.mode)) { response.writeHead(400); response.end(); return; }
+        mode = value.mode; response.writeHead(200); response.end(); return;
+      }
       const chunks: Buffer[] = []; for await (const part of request) chunks.push(part);
       const body = JSON.parse(Buffer.concat(chunks).toString('utf8')); requests.push({ path: request.url!, body });
       if (request.url !== '/v1/messages') { response.writeHead(404); response.end(); return; }
@@ -33,7 +39,7 @@ export function analysisFixture(output: unknown, sentinel: string) {
 }
 // Standalone non-root Linux fixture lives only in the test database network namespace.
 if (process.argv[2] === '--standalone') {
-  const fixture = analysisFixture(JSON.parse(process.argv[3]!), '/tmp/SKYNET_ANALYSIS_MUST_NOT_EXIST'); fixture.setMode('malicious');
+  const fixture = analysisFixture(JSON.parse(process.argv[3]!), '/tmp/SKYNET_ANALYSIS_MUST_NOT_EXIST', process.argv[4]); fixture.setMode('malicious');
   fixture.server.listen(39999, '127.0.0.1', () => console.log('Synthetic loopback analysis fixture ready'));
   process.once('SIGTERM', () => { fixture.server.closeAllConnections(); fixture.server.close(); });
 }

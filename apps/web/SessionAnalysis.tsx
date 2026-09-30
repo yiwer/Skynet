@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { analysisLabels, assessmentLabels, type AnalysisPage, type AnalysisRun } from '../../packages/contracts/analysis.js';
 import { evidenceLink } from '../../packages/contracts/search.js';
 
-const states = { queued: '等待分析', running: '正在分析', succeeded: '分析已完成', failed: '分析失败' };
+export const analysisStates = { queued: '等待分析', running: '正在分析', 'retry-wait': '等待有限重试', superseded: '版本已过期', succeeded: '分析已完成', failed: '分析失败' };
 export function SessionAnalysis({ snapshotId, request }: { snapshotId: string; request: (path: string, signal?: AbortSignal, method?: 'POST') => Promise<Response> }) {
   const [page, setPage] = useState<AnalysisPage | null>(null); const [error, setError] = useState('');
   const [refresh, setRefresh] = useState(0); const [busy, setBusy] = useState(false); const [offset, setOffset] = useState(0);
@@ -14,7 +14,7 @@ export function SessionAnalysis({ snapshotId, request }: { snapshotId: string; r
         if (abort.signal.aborted) return;
         setPage(previous => ({ ...value, runs: offset ? [...(previous?.runs ?? []).filter(run => !value.runs.some(next => next.id === run.id)), ...value.runs] : value.runs }));
         setError('');
-        if (value.runs.some(run => run.state === 'queued' || run.state === 'running')) timer = setTimeout(read, 1500);
+        if (value.runs.some(run => ['queued', 'running', 'retry-wait'].includes(run.state))) timer = setTimeout(read, 1500);
       } catch (failure) { if (!abort.signal.aborted) setError((failure as Error).message); }
     }
     void read(); return () => { abort.abort(); clearTimeout(timer); };
@@ -30,13 +30,19 @@ export function SessionAnalysis({ snapshotId, request }: { snapshotId: string; r
     <button disabled={busy || !page?.availability.ready} onClick={start}>{busy ? '正在提交…' : '分析短会话'}</button>
     <button onClick={() => setRefresh(value => value + 1)}>刷新分析状态</button>
     {error && <p role="alert" className="error">{error}</p>}
-    {page?.runs.map(run => <AnalysisResult key={run.id} run={run} />)}
+    {page?.runs.map(run => <AnalysisResult key={run.id} run={run} retry={async () => {
+      try { await request(`/api/analysis/${run.id}/retry`, undefined, 'POST'); setRefresh(value => value + 1); }
+      catch (failure) { setError((failure as Error).message); }
+    }} />)}
     {page?.runs.length === 0 && <p className="muted">当前快照尚无分析结果。原件可继续查询和导出。</p>}
     {page?.nextOffset !== null && page?.nextOffset !== undefined && <button onClick={() => setOffset(page.nextOffset!)}>加载更多分析</button>}
   </section>;
 }
-function AnalysisResult({ run }: { run: AnalysisRun }) {
-  return <div className="analysis-result"><h4>{states[run.state]}{run.config.mode === 'fixture' ? ' · 合成演示，非正式验收' : ''}</h4>
+function AnalysisResult({ run, retry }: { run: AnalysisRun; retry: () => Promise<void> }) {
+  return <div className="analysis-result"><h4>{analysisStates[run.state]}{run.config.mode === 'fixture' ? ' · 合成演示，非正式验收' : ''}</h4>
+    <p>版本 {run.generation} · 尝试 {run.attempts}/{run.maxAttempts} · {run.applicable ? '适用于当前输入' : '尚未适用或属于历史版本'} · {run.actorKind === 'system' ? '系统自动触发' : '认证用户触发'}</p>
+    {run.state === 'retry-wait' && <p>下次尝试：{new Date(run.nextAttemptAt).toLocaleString('zh-CN')}</p>}
+    {['failed', 'retry-wait'].includes(run.state) && run.attempts < run.maxAttempts && <button onClick={retry}>在剩余次数内重试</button>}
     <p className="muted small">{run.config.model} · Claude Code {run.config.runtimeVersion} · {run.config.promptVersion} · {run.input.parserVersion}</p>
     <p>输入覆盖：{run.input.eventCount} 条已解析事件；{run.input.coverage.unrecognizedLines} 行未解析；{run.input.coverage.partialLine ? '存在未闭合末行' : '无未闭合末行'}；
       {run.input.coverage.excludedMaterials} 项关联材料未分析；{run.input.coverage.captureGaps.length} 项存档缺口。</p>
