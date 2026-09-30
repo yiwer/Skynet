@@ -3,7 +3,7 @@ import { isAbsolute } from 'node:path';
 import { z } from 'zod';
 import { digest } from '../server/database.js';
 
-export const PROMPT_VERSION = 'short-session-2';
+export const PROMPT_VERSION = 'original-segments-1';
 export const QWEN_ORIGIN = 'https://maas.qianwenaiapi.com/apps/anthropic';
 const absolute = z.string().min(1).refine(isAbsolute, 'Use an absolute analysis-only path');
 const schema = z.object({
@@ -15,7 +15,9 @@ const schema = z.object({
   pricingEvidence: z.string().min(1).max(1024).optional(), pricingVerifiedAt: z.iso.datetime().optional(),
   inputTokensPerByteUpperBound: z.number().min(1).max(16).default(1),
   maxInputBytes: z.number().int().min(1024).max(131_072).default(65_536),
-  maxRequests: z.number().int().min(1).max(5).default(3), maxOutputTokens: z.number().int().min(512).max(8192).default(4096),
+  maxSessionBytes: z.number().int().min(1024).max(8_388_608).default(1_048_576),
+  maxSegments: z.number().int().min(1).max(16).default(4),
+  maxRequests: z.number().int().min(1).max(32).default(3), maxOutputTokens: z.number().int().min(512).max(8192).default(4096),
   maxRequestBytes: z.number().int().min(32_768).max(1_048_576).default(262_144),
   timeoutSeconds: z.number().int().min(5).max(300).default(90),
   maxAttempts: z.number().int().min(1).max(3).default(2), concurrency: z.number().int().min(1).max(4).default(1),
@@ -57,8 +59,8 @@ export async function readAnalysisConfig(path: string): Promise<AnalysisConfig> 
     configurationHash: digest(JSON.stringify({ ...config, origin, credentialFingerprint, promptVersion: PROMPT_VERSION })) };
 }
 export function publicConfig(config: AnalysisConfig) {
-  const { mode, model, runtimeVersion, maxInputBytes, maxRequests, maxOutputTokens, timeoutSeconds, reservationCny, budgetCny, configurationHash,
+  const { mode, model, runtimeVersion, maxInputBytes, maxSessionBytes, maxSegments, maxRequests, maxOutputTokens, timeoutSeconds, reservationCny, budgetCny, configurationHash,
     maxAttempts, concurrency, leaseSeconds, retryDelaySeconds, autoAnalyzeUpdates, autoDebounceSeconds } = config;
-  return { mode, model, runtimeVersion, maxInputBytes, maxRequests, maxOutputTokens, timeoutSeconds, reservationCny, budgetCny, configurationHash, promptVersion: PROMPT_VERSION,
+  return { mode, model, runtimeVersion, maxInputBytes, maxSessionBytes, maxSegments, maxRequests, maxOutputTokens, timeoutSeconds, reservationCny, budgetCny, configurationHash, promptVersion: PROMPT_VERSION,
     maxAttempts, concurrency, leaseSeconds, retryDelaySeconds, autoAnalyzeUpdates, autoDebounceSeconds };
 }
