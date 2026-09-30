@@ -10,6 +10,7 @@ import { connect,digest } from '../apps/server/database.js';
 import { createApp } from '../apps/server/app.js';
 import { analysisQueue } from '../apps/analysis/queue.js';
 import { readAnalysisConfig,publicConfig } from '../apps/analysis/config.js';
+import {OwnedCommandError} from './owned-command.js';
 
 test('operator reconciles only published verified backups and never reports stale running state',{timeout:360000},async()=>{
   const s=await mcpSandbox();
@@ -40,7 +41,7 @@ test('operator reconciles only published verified backups and never reports stal
     const crashScript=`import {backupArchive,restoreArchive} from './dist/apps/server/server-backup.js';let text='';process.stdin.setEncoding('utf8');for await(const part of process.stdin)text+=part;const {phase,...options}=JSON.parse(text);const observer={stage:stage=>{if(stage===phase)process.exit(86)}};await(options.action==='backup'?backupArchive(process.env.DATABASE_URL,options,observer):restoreArchive(process.env.DATABASE_URL,options,observer));`;
     let published=initial.receipt.id;
     for(const phase of ['before-publication','after-publication']){
-      await assert.rejects(helper.run({...backupCommand,phase},s.containerDatabaseUrl,sourceMounts,crashScript),/failed\(86\)/);
+      await assert.rejects(helper.run({...backupCommand,phase},s.containerDatabaseUrl,sourceMounts,crashScript),error=>error instanceof OwnedCommandError&&error.reason==='exited'&&error.code===86);
       const before=await(await api('/api/server/operations')).json();assert.equal(before.latestAttempt.state,'in-progress');assert.equal(before.latestBackup.id,published);
       const crashedId=before.latestAttempt.id;
       if(phase==='before-publication')await assert.rejects(helper.run({action:'verify',bundleDirectory:'/bundle'},s.containerDatabaseUrl,[{source:join(backupDirectory,`.pending-${crashedId}`),target:'/bundle',readonly:true}]),/backup-operation-failed/,'pending bundle stays unusable even under a bind-mount alias');
@@ -53,7 +54,7 @@ test('operator reconciles only published verified backups and never reports stal
     const restored=await createSandbox(),targetDb=connect(restored.env.DATABASE_URL!);
     try{
       const mounts=[{source:join(backupDirectory,published),target:'/bundle',readonly:true},{source:restored.env.RAW_DIRECTORY!,target:'/raw'}];
-      await assert.rejects(helper.run({action:'restore',bundleDirectory:'/bundle',rawDirectory:'/raw',phase:'restore-dump-loaded'},restored.containerDatabaseUrl,mounts,crashScript),/failed\(86\)/);
+      await assert.rejects(helper.run({action:'restore',bundleDirectory:'/bundle',rawDirectory:'/raw',phase:'restore-dump-loaded'},restored.containerDatabaseUrl,mounts,crashScript),error=>error instanceof OwnedCommandError&&error.reason==='exited'&&error.code===86);
       assert.equal((await targetDb.query('SELECT state,lease_until>now() AS future FROM analysis_jobs WHERE id=$1',[claim.id])).rows[0].future,true);
       await assert.rejects(createApp({db:targetDb,rawDirectory:restored.env.RAW_DIRECTORY!}),/服务器恢复尚未完成/,'dump-loaded target cannot serve before captured claims are fenced');
       assert.equal(JSON.parse(await readFile(join(restored.env.RAW_DIRECTORY!,'.skynet-restore-pending.json'),'utf8')).backupId,published);
@@ -79,7 +80,7 @@ test('operator reconciles only published verified backups and never reports stal
       const origin=await healthy.startServer();assert.equal((await fetch(origin+'/api/server/operations',{headers:{Authorization:`Bearer ${employee.readerCredential}`}})).status,200);
       const imported=await helper.run({action:'reconcile',backupDirectory:'/backups'},healthy.containerDatabaseUrl,[{source:backupDirectory,target:'/backups',readonly:true}]);assert.equal(JSON.parse(imported).imported,0);
     }finally{await healthyDb.end();await healthy.close();}
-    await assert.rejects(helper.run({...backupCommand,phase:'after-publication'},s.containerDatabaseUrl,sourceMounts,crashScript),/failed\(86\)/);
+    await assert.rejects(helper.run({...backupCommand,phase:'after-publication'},s.containerDatabaseUrl,sourceMounts,crashScript),error=>error instanceof OwnedCommandError&&error.reason==='exited'&&error.code===86);
     const damagedId=(await(await api('/api/server/operations')).json()).latestAttempt.id;
     await writeFile(join(backupDirectory,damagedId,'database.dump'),Buffer.from('synthetic corruption'));
     const damaged=JSON.parse(await helper.run({action:'reconcile',backupDirectory:'/backups'},s.containerDatabaseUrl,[{source:backupDirectory,target:'/backups',readonly:true}]));assert.equal(damaged.rejected,1);assert.equal((await(await api('/api/server/operations')).json()).latestBackup.id,published,'damaged bundle never overwrites successful receipt metadata');

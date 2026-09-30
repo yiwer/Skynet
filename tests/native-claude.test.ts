@@ -192,7 +192,7 @@ test(`${scenario}: ordinary Claude hooks archive two projects and a server-only 
     if (subagent) assert.ok(detail.manifest.capture.materials.some((item: any) => item.role === 'subagent'));
     await writeFile(join(directory, 'native-details.json'), JSON.stringify(detail, null, 2));
     const readable = await (await fetch(`${origin}/api/snapshots/${session.id}/readable`, { headers })).text();
-    assert.ok(readable.includes('claude-jsonl-2') && readable.includes(marker));
+    assert.ok(readable.includes('claude-jsonl-3') && readable.includes(marker));
     browser = await chromium.launch();
     const page = await browser.newPage(); await page.goto(origin);
     await page.getByLabel('个人读取凭据').fill(reader.readerCredential); await page.getByRole('button', { name: '进入存档' }).click();
