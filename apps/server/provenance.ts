@@ -10,7 +10,7 @@ import { locatedOrigin, restoredMaterial, qualifiedMaterialPrefix } from './mate
 import { qualifyOriginalEvents, validQualificationBytes } from './qualification.js';
 import {nativeKey} from '../../packages/native/occurrences.js';
 import {completeOriginalLines} from '../../packages/native/raw-lines.js';
-import {verifyOriginIntegrity,verifySnapshotIntegrity,repairLegacyCarriers} from './evidence-integrity.js';
+import {verifyOriginIntegrity,verifySnapshotIntegrity,repairLegacyCarriers,recordPrimaryInputIntegrity} from './evidence-integrity.js';
 
 type Query = Pick<Database, 'query'> | Pick<pg.PoolClient, 'query'>;
 type Record = { id: string; device_id: string; manifest: Manifest; hash: string; committed_at?: Date };
@@ -81,6 +81,7 @@ export async function assignOrigins(q: Query, raw: RawStore, record: Record, bac
     }
   }
   const parsed = readEvidence(bytes, manifest.source);
+  if(!claim)await recordPrimaryInputIntegrity(q,record.id,bytes,manifest.source,parsed);
   const events = activityFor(parsed.events, manifest.enrolledAt).events;
   const rawLines = [...completeOriginalLines(bytes)];
   if(!claim&&rawLines.some(line=>line.text===null))await q.query(`INSERT INTO qualification_reconcile_gaps(snapshot_id,reason) VALUES($1,$2) ON CONFLICT DO NOTHING`,

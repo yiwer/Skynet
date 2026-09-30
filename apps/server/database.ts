@@ -61,6 +61,7 @@ export async function migrate(db: Database) {
     ALTER TABLE snapshots ADD COLUMN IF NOT EXISTS source text GENERATED ALWAYS AS (manifest->>'source') STORED;
     CREATE UNIQUE INDEX IF NOT EXISTS snapshots_source_identity ON snapshots(device_id,source,source_session_id,manifest_hash);
     CREATE INDEX IF NOT EXISTS snapshots_source_hash ON snapshots(device_id,source,source_session_id,hash);
+    CREATE INDEX IF NOT EXISTS snapshots_current_native_scope ON snapshots(device_id,source,source_session_id,committed_at DESC,id DESC);
     CREATE TABLE IF NOT EXISTS snapshot_uploads (
       device_id uuid NOT NULL REFERENCES devices(id), upload_id uuid NOT NULL,
       manifest_hash text NOT NULL, snapshot_id uuid NOT NULL REFERENCES snapshots(id),
@@ -130,6 +131,11 @@ export async function migrate(db: Database) {
       snapshot_id uuid PRIMARY KEY REFERENCES snapshots(id),reason text NOT NULL
     );
     ALTER TABLE qualification_reconcile_gaps ADD COLUMN IF NOT EXISTS revision bigserial;
+    CREATE TABLE IF NOT EXISTS snapshot_input_integrity (
+      revision bigserial PRIMARY KEY,snapshot_id uuid NOT NULL REFERENCES snapshots(id),version text NOT NULL,
+      complete boolean NOT NULL,unrecognized_lines integer NOT NULL,partial_line boolean NOT NULL,
+      checked_at timestamptz NOT NULL DEFAULT now(),UNIQUE(snapshot_id,version)
+    );
     CREATE OR REPLACE VIEW effective_event_origins AS SELECT o.event_id,o.snapshot_id,o.line,o.block,o.employee_id,o.device_id,o.project,
         o.source,o.source_session_id,o.role,o.timestamp,o.source_date,COALESCE(c.context,o.context) AS context,o.material_id,o.text_offset,
         o.context AS base_context,COALESCE(c.revision,0) AS qualification_revision,c.proof_snapshot_id,c.proof_line,c.proof_block,c.enrolled_at AS proof_enrolled_at

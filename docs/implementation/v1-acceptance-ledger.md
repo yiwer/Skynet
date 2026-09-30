@@ -182,4 +182,6 @@ E5正常hook的外部`performance/hook-baseline.mjs`固定main路径/产品68com
 3. 第二位操作者复现安装/修复/升级/卸载和#32新服务器恢复；登记备份故障域/试点负载，采集安装与原文可见延迟。
 4. G0–G3通过后授权连续5个工作日试点，负责人核对验收产出物，在[Issue #1](https://github.com/yiwer/Skynet/issues/1)签收。
 
-下一步：最终修订clean源码交独立Standards/Spec review，distinct merger合入后由主线负责人记录实际新CI；真人与连续运行条件具备后按R1…R8推进门槛，保持PR草稿与未验收tickets开放。
+clean dc225d3完整Standards PASS；完整Spec确认原五项但新增零semantic-origin未闭合/畸形JSON/未知格式P2。该项公开RED1/1、10824.5366ms与首次修订失败1/1、11302.6532ms均保留；后续三类输入及合法metadata/Token控制公开1/1、12263.0214ms通过，旧日周/原件恢复/独立分析不变。最终有界primary证明与既存材料/完整性回归4/4、20522.0602ms、type/build/diff通过，精确源码边界及旧大夹具未知padding失败3/4见E9[阶段7](v1-review-fixes.md)。尚待新clean delta独立复核，不把dc完整Spec称通过。
+
+下一步：最终修订clean源码交独立Standards/Spec delta review，distinct merger合入后由主线负责人记录实际新CI；真人与连续运行条件具备后按R1…R8推进门槛，保持PR草稿与未验收tickets开放。

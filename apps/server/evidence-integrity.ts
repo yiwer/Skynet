@@ -1,20 +1,61 @@
 import type pg from 'pg';
 import {digest,type Database} from './database.js';
 import {RawStore} from './raw-store.js';
-import {decodeOriginalLine,originalByteLines} from '../../packages/native/raw-lines.js';
+import {decodeOriginalLine,originalByteLines,completeOriginalLines} from '../../packages/native/raw-lines.js';
+import type {Source} from '../../packages/contracts/archive.js';
 import {nativeKey} from '../../packages/native/occurrences.js';
 import {readEvidence} from './evidence.js';
 import {activityFor} from '../../packages/activity.js';
 type Query=Pick<Database,'query'>|Pick<pg.PoolClient,'query'>;
 export const integrityVersion='original-utf8-1';
-/** A corrupt primary with no readable event has no business source date. Keep
+export const inputIntegrityVersion='native-input-1';
+/** An incomplete or not-yet-verified primary has no known business source date. Keep
  * its current native scope unknown instead of assigning it a fabricated date
  * or silently declaring every employee/day source input complete. A later
- * legal current primary removes the current gap; old raw/diagnostics stay. */
-export const unscopedRawGapsSql=(employee:string)=>`(SELECT jsonb_build_object('count',count(*)::text,'revision',COALESCE(MAX(g.revision),0)::text) FROM
+ * verified complete current primary removes this signal; old raw/proofs stay. */
+export const unscopedRawGapsSql=(employee:string)=>`(SELECT jsonb_build_object('count',count(*) FILTER(WHERE p.complete IS NOT TRUE)::text,
+  'revision',COALESCE(MAX(p.revision) FILTER(WHERE p.complete IS NOT TRUE),0)::text) FROM
   (SELECT DISTINCT ON(s.device_id,s.source,s.source_session_id) s.* FROM snapshots s JOIN devices d ON d.id=s.device_id
     WHERE d.employee_id=${employee} ORDER BY s.device_id,s.source,s.source_session_id,s.committed_at DESC,s.id DESC)s
-  JOIN qualification_reconcile_gaps g ON g.snapshot_id=s.id WHERE s.manifest->'restoredFrom' IS NULL AND g.reason LIKE '%UTF-8%')`;
+  LEFT JOIN snapshot_input_integrity p ON p.snapshot_id=s.id AND p.version='${inputIntegrityVersion}' WHERE s.manifest->'restoredFrom' IS NULL)`;
+
+/** Known auxiliary formats do not need a business event to be readable. This
+ * grants neither activity nor Token values; the statistic extractor still
+ * validates versions, counters, dates and baseline attribution separately. */
+export function primaryInputCoverage(bytes:Buffer,source:Source,parsed=readEvidence(bytes,source)){
+  let auxiliary=0;
+  for(const line of completeOriginalLines(bytes)){
+    if(line.text===null||!line.text.trim())continue;
+    try{const row=JSON.parse(line.text);
+      if(source!=='claude-code-cli'&&row?.type==='event_msg'&&row.payload?.type==='token_count'
+        &&row.payload.info&&typeof row.payload.info==='object'&&!Array.isArray(row.payload.info)
+        &&row.payload.info.total_token_usage&&typeof row.payload.info.total_token_usage==='object'&&!Array.isArray(row.payload.info.total_token_usage))auxiliary++;
+      if(source==='claude-code-cli'&&row?.type==='queue-operation'&&['enqueue','dequeue','remove'].includes(row.operation)&&typeof row.sessionId==='string')auxiliary++;
+    }catch{/* Malformed original stays a gap. */}
+  }
+  const unrecognizedLines=Math.max(0,parsed.unrecognizedLines-auxiliary);
+  return {complete:unrecognizedLines===0&&!parsed.partialLine,unrecognizedLines,partialLine:parsed.partialLine};
+}
+export async function recordPrimaryInputIntegrity(q:Query,snapshotId:string,bytes:Buffer,source:Source,parsed?:ReturnType<typeof readEvidence>){
+  const proof=primaryInputCoverage(bytes,source,parsed);
+  await q.query(`INSERT INTO snapshot_input_integrity(snapshot_id,version,complete,unrecognized_lines,partial_line) VALUES($1,$2,$3,$4,$5)
+    ON CONFLICT(snapshot_id,version) DO NOTHING`,[snapshotId,inputIntegrityVersion,proof.complete,proof.unrecognizedLines,proof.partialLine]);
+}
+
+/** Current normal originals lacking this generation are pending, not complete.
+ * Two objects/128MiB per tick; no native directories, event fabrication or old
+ * snapshot/payload mutation. Proofs include zero-event inputs. */
+async function reconcilePrimaryInputs(q:Query,raw:RawStore){
+  const rows=(await q.query(`SELECT s.id,s.device_id,s.hash,s.source,s.manifest FROM snapshots s
+    WHERE s.manifest->'restoredFrom' IS NULL AND NOT EXISTS(SELECT 1 FROM snapshot_input_integrity p WHERE p.snapshot_id=s.id AND p.version=$1)
+      AND NOT EXISTS(SELECT 1 FROM snapshots newer WHERE newer.device_id=s.device_id AND newer.source=s.source AND newer.source_session_id=s.source_session_id
+        AND (newer.committed_at,newer.id)>(s.committed_at,s.id))
+    ORDER BY s.committed_at,s.id LIMIT 2`,[inputIntegrityVersion])).rows;
+  let total=0;
+  for(const row of rows){const length=row.manifest.byteLength;if(length>64*1024*1024||total+length>128*1024*1024)continue;
+    const bytes=await raw.read(row.device_id,row.hash);total+=bytes.length;await recordPrimaryInputIntegrity(q,row.id,bytes,row.source);
+  }
+}
 
 /** Append exact-original validity proofs; never change the immutable ledger.
  * Pending legacy rows cannot contribute current counts until verified. */
@@ -105,6 +146,7 @@ export async function repairLegacyCarriers(q:Query,raw:RawStore,snapshotId?:stri
 /** Missing proofs are a durable work queue. Two original objects /1000 rows per
  * tick, at most128MiB of raw, no host-directory scan or historical re-upload. */
 export async function reconcileOriginIntegrity(q:Query,raw:RawStore){
+  await reconcilePrimaryInputs(q,raw);
   const rows=(await q.query(`SELECT o.event_id,o.device_id,COALESCE(m.value->>'hash',s.hash) AS hash FROM archive_event_origins o
     JOIN snapshots s ON s.id=o.snapshot_id LEFT JOIN LATERAL jsonb_array_elements(s.manifest->'capture'->'materials')m(value) ON m.value->>'id'=o.material_id
     WHERE NOT EXISTS(SELECT 1 FROM event_integrity i WHERE i.event_id=o.event_id AND i.version=$1) ORDER BY o.event_id LIMIT 1000`,[integrityVersion])).rows;

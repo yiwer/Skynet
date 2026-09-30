@@ -18,6 +18,7 @@ import { monday, addDays, type WorkView } from '../packages/contracts/work-views
 import type { ClaimedAnalysis } from '../apps/analysis/queue.js';
 import { reconcileOriginalQualifications } from '../apps/server/provenance.js';
 import { RawStore } from '../apps/server/raw-store.js';
+import {readEvidence} from '../apps/server/evidence.js';
 
 const json = (value: unknown): RequestInit => ({method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(value)});
 const encoded = (...rows: unknown[]) => Buffer.from(rows.map(row=>JSON.stringify(row)).join('\n')+'\n');
@@ -180,9 +181,15 @@ test('legacy material qualification reconciles >16MiB committed original primary
     const parentId=randomUUID();const childId=randomUUID();const parentPath=join(rootA,`${parentId}.jsonl`);const childPath=join(rootA,`${childId}.jsonl`);
     const header=(id:string,extra={})=>({type:'session_meta',payload:{id,cli_version:'0.157.1',source:'cli',...extra}});
     const row=(text:string)=>({type:'response_item',timestamp:after,payload:{type:'message',role:'user',content:[{type:'input_text',text}]}});
-    const padding=encoded({type:'unrecognized-padding',data:'x'.repeat(1000)});
+    // Keep this a complete, legal large primary. Unknown-format padding is
+    // correctly incomplete and is covered separately by the public gap test.
+    const paddingLength=encoded({type:'unrecognized-padding',data:'x'.repeat(1000)}).length;
+    const paddingRow={type:'session_meta',payload:{id:childId},data:''};
+    const padding=encoded({...paddingRow,data:'x'.repeat(paddingLength-encoded(paddingRow).length)});assert.equal(padding.length,paddingLength);
     const childBytes=Buffer.concat([encoded(header(childId),row('大型旧件首事件')),Buffer.from(padding.toString().repeat(Math.ceil(17*1024*1024/padding.length))),encoded(row('大型旧件尾事件'))]);
     assert.ok(childBytes.length>16*1024*1024);
+    assert.ok(childBytes.length>17*1024*1024);
+    const parsed=readEvidence(childBytes,'codex-cli');assert.equal(parsed.events.length,2);assert.equal(parsed.unrecognizedLines,0);assert.equal(parsed.partialLine,false);
     await writeFile(childPath,childBytes);await writeFile(parentPath,encoded(header(parentId,{forked_from_id:childId})));
     const native=new DatabaseSync(join(s.directory,'legacy-A','state_5.sqlite'));native.exec('CREATE TABLE threads(id TEXT PRIMARY KEY,rollout_path TEXT)');native.prepare('INSERT INTO threads VALUES(?,?)').run(childId,childPath);native.close();
     async function capture(state:string,id:string,path:string,project:string) {

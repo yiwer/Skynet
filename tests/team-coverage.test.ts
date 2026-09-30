@@ -12,6 +12,7 @@ import {monday,addDays} from '../packages/contracts/work-views.js';
 import { readAnalysisConfig, publicConfig } from '../apps/analysis/config.js';
 import { analysisQueue } from '../apps/analysis/queue.js';
 import { executeAnalysis } from '../apps/analysis/execute.js';
+import {readRecoveryPackage} from '../packages/recovery.js';
 
 const hash = (value: string | Buffer) => createHash('sha256').update(value).digest('hex');
 const json = (value: unknown): RequestInit => ({ method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(value) });
@@ -204,6 +205,39 @@ test('public coverage matrix, frozen source-day statistics and original evidence
       assert.ok(dimensions.contentWidth <= width, JSON.stringify(dimensions)); layouts.push(dimensions);
       await page.screenshot({ path: join(evidence, `coverage-${width}.png`), fullPage: true });
     }
+    // No semantic origin can carry these bounds. Normal metadata/Token rows are
+    // not a gap; a partial or malformed business record must change completeness
+    // and report input identity without inventing its source date/activity.
+    const gapSession=randomUUID();const gapPrefix=bytes({timestamp,type:'session_meta',payload:{id:gapSession,cwd:'/synthetic',source:'cli',cli_version:'0.157.1'}});
+    const stableStatistics=await(await api(statsPath)).json();
+    const legalAuxiliary=Buffer.concat([gapPrefix,bytes(tokenRow(timestamp,120))]);
+    const legalAuxiliarySnapshot=await upload(a,legalAuxiliary,undefined,{sourceSessionId:gapSession});
+    assert.equal((await(await api(statsPath)).json()).version,stableStatistics.version,'legal zero-event metadata/Token auxiliary rows do not fabricate a parse gap or activity');
+    const zeroOriginGaps:any[]=[];
+    for(const [kind,suffix]of [['partial',Buffer.from(JSON.stringify(user('未闭合合成原件')).slice(0,-5))],['malformed',Buffer.from('{"type":"response_item","payload":INVALID}\n')],
+      ['unsupported',bytes({type:'response_item',payload:{type:'message',role:'user',content:[{type:'unknown_image',data:'synthetic-unsupported-format'}]}})]] as const){
+      const gapBytes=Buffer.concat([gapPrefix,suffix]);const gapSnapshot=await upload(a,gapBytes,undefined,{sourceSessionId:gapSession});
+      const gapStatistics=await(await api(statsPath)).json();
+      assert.equal(gapStatistics.sourceInputsComplete,false,`${kind} current primary without semantic origins must remain incomplete`);
+      assert.equal(gapStatistics.files.complete,false);assert.equal(gapStatistics.tokens.total,null);assert.notEqual(gapStatistics.inputDigest,stableStatistics.inputDigest);
+      assert.deepEqual([gapStatistics.records,gapStatistics.userTurns,gapStatistics.toolCalls],[stableStatistics.records,stableStatistics.userTurns,stableStatistics.toolCalls]);
+      const detail=await(await api(`/api/snapshots/${gapSnapshot}`)).json();assert.equal(detail.events.length,0);
+      assert.deepEqual(Buffer.from(await(await api(`/api/snapshots/${gapSnapshot}/raw`)).arrayBuffer()),gapBytes);
+      const recovery=readRecoveryPackage(Buffer.from(await(await api(`/api/snapshots/${gapSnapshot}/recovery`)).arrayBuffer()));
+      assert.deepEqual(recovery.bytes,gapBytes);assert.equal(recovery.manifest.hash,hash(gapBytes),'recovery keeps damaged/partial original bytes rather than making a complete transcript');
+      assert.equal((await(await api(`/api/daily-reports/${A.employeeId}/${day}`)).json()).refreshPending,true);
+      await s.testDatabase.query("UPDATE analysis_workers SET updated_at=now() WHERE id='coverage-synthetic-runner'");
+      assert.equal((await api(`/api/daily-reports/${A.employeeId}/${day}`,undefined,json({}))).status,202);let gapReport:any;
+      for(let tick=0;tick<30;tick++){gapReport=await(await api(`/api/daily-reports/${A.employeeId}/${day}`)).json();if(gapReport.coverage?.workStatistics?.version===gapStatistics.version)break;await new Promise(resolve=>setTimeout(resolve,100));}
+      assert.equal(gapReport.state,'partial');assert.equal(gapReport.coverage.workStatistics.version,gapStatistics.version);
+      assert.equal(gapReport.statistics.tokens.total,null);assert.equal((await(await api(`/api/analysis/${frozenDaily.coverage.inputs.find((value:any)=>value.analysisId).analysisId}`)).json()).applicable,true);
+      assert.deepEqual(await(await api(`/api/daily-reports/${A.employeeId}/${day}?revision=${frozenDaily.revision}`)).json(),frozenDaily);
+      assert.equal(await(await api(weeklyPath+`&revision=${weekly.revision}`)).text(),frozenWeekly);
+      zeroOriginGaps.push({kind,gapSnapshot,gapStatistics,reportRevision:gapReport.revision,rawSha256:hash(gapBytes)});
+    }
+    await upload(a,legalAuxiliary,undefined,{sourceSessionId:gapSession,qualifiedAt:new Date(Date.parse(timestamp)+1).toISOString()});
+    const repairedInputStatistics=await(await api(statsPath)).json();assert.equal(repairedInputStatistics.sourceInputsComplete,true);assert.equal(repairedInputStatistics.tokens.total,stableStatistics.tokens.total);
+    assert.equal((await(await api(`/api/snapshots/${legalAuxiliarySnapshot}/recovery`)).json()).manifest.hash,hash(legalAuxiliary),'public recovery preserves the fixed zero-event original');
     const corruptId = randomUUID(); const corruptPrefix = bytes({ timestamp, type: 'session_meta', payload: { id: corruptId, cwd: '/synthetic', source: 'cli', cli_version: '0.157.1' } });
     const corrupt = Buffer.concat([corruptPrefix, Buffer.from(`{"timestamp":"${timestamp}","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"`),
       Buffer.from([0xff]), Buffer.from('"}]}}\n'), bytes(tokenRow(timestamp, 120))]);
@@ -225,7 +259,7 @@ test('public coverage matrix, frozen source-day statistics and original evidence
     assert.deepEqual(await (await api(statsPath + `&revision=${statistics.revision}`)).json(), statistics);
     assert.equal((await (await api(`/api/team-coverage?date=${day}`)).json()).rows.find((row: any) => row.employeeId === A.employeeId).cells.at(-1).collection, 'gap-observed');
     await writeFile(join(evidence, 'public-flow.json'), JSON.stringify({ snapshotId, restored, matrix: httpMatrix, statistics, bStatistics, parentSnapshot, proofSnapshot, materialStatistics, corruptSnapshot, corruptStatistics, dailyReport, layouts,
-      boundary: 'Public authenticated synthetic upload and native-record-schema rows, immutable export, Web/OAuth MCP and restart; no real provider/model/paid call or Task setup.' }, null, 2));
+      zeroOriginGaps,boundary: 'Public authenticated synthetic upload and native-record-schema rows, immutable export, Web/OAuth MCP and restart; no real provider/model/paid call or Task setup.' }, null, 2));
     console.log(`Coverage public-flow evidence: ${evidence}`);
   } finally { await browser?.close(); await client?.close(); await s.close(); }
 });
