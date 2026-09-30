@@ -96,7 +96,10 @@ test('fresh restore preserves authenticated Web/MCP fixed report history, quotes
       const restored=JSON.parse(await helper.run({action:'restore',bundleDirectory:'/bundle',rawDirectory:'/data/raw'},bare.containerDatabaseUrl,[{source:join(backupDirectory,backup.receipt.id),target:'/bundle',readonly:true},{source:bare.env.RAW_DIRECTORY!,target:'/data/raw'}]));
       fresh=await mcpSandbox({sandbox:bare});const read=(path:string)=>fresh!.api(path,employee.readerCredential);
       assert.equal((await read(`/api/snapshots/${outside.snapshotId}`)).status,404,'source snapshot committed between SQL dump and raw enumeration stays outside restored SQL/raw boundary');
-      assert.equal((await fresh.testDatabase.query('SELECT count(*)::int AS count FROM chunks WHERE hash=$1',[digest(outsideBytes)])).rows[0].count,0);
+      const restoredInventory=(await(await read('/api/server/operations')).json()).storage;
+      assert.equal(restoredInventory.committedObjects,backup.receipt.objects);assert.equal(restoredInventory.committedBytes,backup.receipt.bytes);assert.equal(restoredInventory.stagedObjects,0);
+      const missingHash=await fresh.api('/api/snapshots',device.deviceCredential,json({protocolVersion:1,sourceSessionId:randomUUID(),source:'codex-cli',sourceVersion:'0.157.1',sourceOs:'win32',project:'/synthetic/outside-backup-boundary',hash:digest(outsideBytes),byteLength:outsideBytes.length,qualifiedAt:new Date().toISOString(),capability:'unverified'}));
+      assert.equal(missingHash.status,409,'restored public snapshot cannot commit the later hash without upload');
       for(const [index,path]of fixedPaths.entries())assert.equal(await(await read(path)).text(),oldBodies[index],'full immutable report response exact after restore');
       assert.equal(await(await read(dailyPath+'/corrections')).text(),history,'authenticated actor/reason/time and correction history exact');
       const currentDetail=await(await read(`/api/snapshots/${ack.snapshotId}`)).json();assert.deepEqual(currentDetail.events,detail.events);assert.deepEqual(currentDetail.manifest,detail.manifest);
