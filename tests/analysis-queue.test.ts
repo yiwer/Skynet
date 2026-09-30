@@ -135,7 +135,7 @@ test('public durable queue fences duplicate leases, late writes, new inputs, ret
     assert.equal(await monetaryQueue.claim(),null); const capped=await (await api(`/api/analysis/${moneyJob.id}`)).json();
     assert.equal(capped.state,'failed');assert.match(capped.error,/预算/);assert.equal(capped.attempts,1);
     assert.equal((await db.query('SELECT reserved_cny FROM analysis_budgets WHERE id=$1',['synthetic-arithmetic'])).rows[0].reserved_cny,'0.03328');
-    const oversized = await upload(undefined,'x'.repeat(money.maxInputBytes+1));
+    const oversized = await upload(undefined,'x'.repeat(money.maxSessionBytes+1));
     assert.equal((await api(`/api/snapshots/${oversized.snapshotId}/analysis`,undefined,{})).status,413);
     await writeFile(join(sandbox.directory,'analysis-queue-evidence.json'),JSON.stringify({ops,oldSuccess,automatic,newGeneration,capped,
       retainedReservation:(await db.query('SELECT reserved_cny FROM analysis_budgets WHERE id=$1',['synthetic-arithmetic'])).rows[0],

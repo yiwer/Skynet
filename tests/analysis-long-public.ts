@@ -113,7 +113,11 @@ export async function longAnalysisPublic(native: boolean) {
     browser=await chromium.launch();const context=await browser.newContext();const page=await context.newPage();await context.route('**/*',async route=>{if(new URL(route.request().url()).origin!==sandbox.origin)return route.abort();const response=await sandbox.fetchTls(route.request().url(),{method:route.request().method(),headers:await route.request().allHeaders(),body:route.request().postData()});const headers:Record<string,string>={};response.headers.forEach((v,k)=>{headers[k]=v;});await route.fulfill({status:response.status,headers,body:Buffer.from(await response.arrayBuffer())});});
     await page.goto(`${sandbox.origin}/#${archived.snapshotId}`);await page.getByLabel('个人读取凭据').fill(reader.readerCredential);await page.getByRole('button',{name:'进入存档',exact:true}).click();
     const panel=page.getByRole('region',{name:'会话分析',exact:true});await expect(panel.getByLabel('分析处理范围')).toContainText('已完成提取');
-    await panel.getByRole('link',{name:'查看原句 · 第 2 行',exact:true}).last().click();await expect(page.getByRole('region',{name:'命中证据',exact:true})).toContainText('END_PROOF🛰');
+    await panel.getByRole('link',{name:'查看原句 · 第 2 行',exact:true}).last().click();await expect(page.getByRole('region',{name:'命中证据',exact:true})).toContainText('BEGIN_PROOF🛰');
+    // Raw JSON anchors cannot add semantic offsets through escaped text. The separate
+    // immutable-input link must jump directly to the exact quoted end of a giant event.
+    await page.getByRole('region',{name:'会话分析',exact:true}).getByRole('link',{name:'查看本次输入中的精确原句',exact:true}).last().click();
+    await expect(page.getByRole('region',{name:'命中证据',exact:true})).toContainText('END_PROOF🛰');
     await page.goto(`${sandbox.origin}/#${partial.snapshotId}`);await expect(page.getByRole('region',{name:'会话分析',exact:true})).toContainText('部分处理，不能视为完整会话分析');
     assert.deepEqual(Buffer.from(await(await sandbox.api(`/api/snapshots/${archived.snapshotId}/raw`,reader.readerCredential)).arrayBuffer()),archived.bytes);
     if(native) {assert.ok(fixture.requests.length>3);assert.deepEqual(await readdir(jobs),[]);}
