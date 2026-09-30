@@ -138,3 +138,9 @@ clean `519d59f` 无冲突合入 `eb69a46`，保留Linux49/49与运行时/资格/
 ## 迟到数据与人工更正主线 Linux CI（2026-09-30）
 
 `68ee347` 的 [Linux CI](https://github.com/yiwer/Skynet/actions/runs/36697980515/job/109830431425) 已通过类型检查、构建与 **56/56（146.80秒，0 fail / 0 cancelled）**，包含 #30 审计、首次迟到活动及完整更正流程。日志保存 `F:/GenCode/Skynet-evidence/v1-2026-09-30/ci-68ee347-linux.log`。主线本地12/12与支线实际Claude loopback54.37秒分别保留来源；未复跑Task、maintenance或完整Windows。#32在独立树实施，G0–G4与历史失败继续开放。
+
+## 静默 hook 基线补采（2026-09-30）
+
+ROOT在 product `68ee347` 的冻结 compiled CLI/hook/filesystem 和产品 `launcherText` 分派下，使用全新自有 explicit-state 测量 **200次真实进程启动+本地入队**。Windows11 Pro10.0.26200、Node24.12.0、i7-14700K/28逻辑CPU；主机并发工作未控制。P50 **52.53ms**、P95 **67.17ms**、最大 **137.34ms**；200/200唯一样本确实保留在spool、无hook-gap、无原件读取/网络。每个child有3秒上限、windowsHide，完整结果与源/载荷哈希在 `F:/GenCode/Skynet-evidence/v1-2026-09-30/performance/hook-db721967-432e-4b2a-9f4f-cf7030ac2fb8/result.json`；复跑脚本 `performance/hook-baseline.mjs`。
+
+这是隔离状态的正常快路径证据，不是安装完成、真实宿主或旧Linux四任务ENOSPC压力复测；历史P95 **111.35ms** 失败与max **1075.89ms** 长尾保留。没有Task/setup/maintenance/后台启动或付费调用；AC-22/G4及原文可见延迟分布仍待完整实测。
