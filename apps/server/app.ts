@@ -17,19 +17,29 @@ import { enrollDevice } from './enrollment.js';
 import { captureHealthSchema } from '../../packages/contracts/capture-health.js';
 import { saveCaptureHealth, readCaptureHealth } from './capture-health.js';
 import { analysisService, migrateAnalysis } from './analysis.js';
-import { backfillOrigins } from './provenance.js';
+import { backfillOrigins, reconcileOriginalQualifications } from './provenance.js';
 import { migrateReports, reportService } from './reports.js';
 import { reportDate } from '../../packages/contracts/reports.js';
+import { migrateWorkViews, workViewService } from './work-views.js';
+import { workViewQuery } from '../../packages/contracts/work-views.js';
 
-export async function createApp(options: { db: Database; rawDirectory: string; webDirectory?: string; publicOrigin?: string }) {
+export async function createApp(options: { db: Database; rawDirectory: string; webDirectory?: string; publicOrigin?: string; reportClock?: () => Date }) {
   const { db } = options;
   await migrate(db);
   await migrateArchiveSearch(db);
   await migrateAnalysis(db);
   await migrateReports(db);
+  await migrateWorkViews(db);
   const raw = new RawStore(options.rawDirectory);
   await backfillOrigins(db, raw);
   const app = Fastify({ bodyLimit: CHUNK_BYTES, logger: false, requestTimeout: 30_000 });
+  let qualifying: Promise<void> | undefined;
+  const qualificationTimer=setInterval(()=>{
+    if(!qualifying)qualifying=reconcileOriginalQualifications(db,raw).catch(error=>{
+      app.log.error(error,'Legacy original-source qualification reconciliation failed');
+    }).finally(()=>{qualifying=undefined;});
+  },1000);qualificationTimer.unref();
+  app.addHook('onClose',async()=>{clearInterval(qualificationTimer);await qualifying;});
   app.setErrorHandler((error, _request, reply) => {
     if (error instanceof z.ZodError) return reply.code(400).send({ error: '请求格式无效' });
     const code = (error as { statusCode?: number }).statusCode ?? 500;
@@ -152,7 +162,8 @@ export async function createApp(options: { db: Database; rawDirectory: string; w
   app.get('/api/me', { onRequest: readerGuard }, async request => reader(request.headers.authorization));
   const archive = archiveQuery(db, raw);
   const analysis = analysisService(db, archive);
-  const reports = reportService(db, analysis);
+  const reports = reportService(db, analysis, options.reportClock);
+  const workViews = workViewService(db, reports, options.reportClock);
   const reportQuery = z.object({ offset: z.coerce.number().int().min(0).max(100000).default(0),
     revision: z.coerce.number().int().min(1).optional() }).strict();
   app.get('/api/daily-reports', { onRequest: readerGuard }, async request => reports.list(reportQuery.parse(request.query).offset));
@@ -167,10 +178,22 @@ export async function createApp(options: { db: Database; rawDirectory: string; w
     const { employeeId, date } = z.object({ employeeId: z.uuid(), date: reportDate }).parse(request.params);
     return reply.code(202).send(await reports.request(employeeId, date));
   });
+  app.get('/api/work-views', { onRequest: readerGuard }, async request => {
+    const { offset } = reportQuery.parse(request.query); return workViews.list(offset);
+  });
+  app.get('/api/work-projects', { onRequest: readerGuard }, async request => workViews.projects(reportQuery.parse(request.query).offset));
+  app.get('/api/work-view', { onRequest: readerGuard }, async request => {
+    const { offset, revision, ...selection } = workViewQuery.parse(request.query); return workViews.read(selection, offset, revision);
+  });
+  app.post('/api/work-view', { onRequest: readerGuard }, async (request, reply) => {
+    z.object({}).strict().parse(request.body ?? {});
+    const selection = workViewQuery.omit({ offset: true, revision: true }).parse(request.query);
+    return reply.code(202).send(await workViews.request(selection));
+  });
   let reporting = false;
   const tickReports = async () => {
     if (reporting) return; reporting = true;
-    try { await reports.tick(); } catch (error) { app.log.error(error, 'Daily report scheduling failed'); }
+    try { await reports.tick(); await workViews.tick(); } catch (error) { app.log.error(error, 'Report scheduling failed'); }
     finally { reporting = false; }
   };
   const reportTimer = setInterval(() => { void tickReports(); }, 5000); reportTimer.unref();
@@ -260,7 +283,7 @@ export async function createApp(options: { db: Database; rawDirectory: string; w
     const file = await archive.exported((request.params as { id: string }).id, format);
     return reply.header('Content-Disposition', `attachment; filename="${file.filename}"`).type(file.contentType).send(file.bytes);
   });
-  if (options.publicOrigin) await registerMcp(app, db, archive, options.publicOrigin, analysis, reports);
+  if (options.publicOrigin) await registerMcp(app, db, archive, options.publicOrigin, analysis, reports, workViews);
   if (options.webDirectory) {
     await app.register(fastifyStatic, { root: resolve(options.webDirectory), wildcard: false });
   }

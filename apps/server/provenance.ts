@@ -7,6 +7,7 @@ import { activityFor } from '../../packages/activity.js';
 import type { Manifest } from '../../packages/contracts/archive.js';
 import type { EventOrigin, Provenance } from '../../packages/contracts/provenance.js';
 import { locatedOrigin, restoredMaterial, qualifiedMaterialPrefix } from './material-provenance.js';
+import { qualifyOriginalEvents, validQualificationBytes } from './qualification.js';
 
 type Query = Pick<Database, 'query'> | Pick<pg.PoolClient, 'query'>;
 type Record = { id: string; device_id: string; manifest: Manifest; hash: string; committed_at?: Date };
@@ -92,7 +93,7 @@ export async function assignOrigins(q: Query, raw: RawStore, record: Record, bac
   const rawLines = bytes.toString('utf8').split('\n');
   const known = (await q.query(`SELECT n.occurrence_hash,o.event_id AS "eventId",o.snapshot_id AS "snapshotId",o.line,o.block,
     o.employee_id AS "employeeId",e.name AS employee,o.device_id AS "deviceId",o.project,o.context,o.source_date AS "sourceDate",o.material_id AS "materialId",o.text_offset AS "textOffset"
-    FROM native_event_occurrences n JOIN archive_event_origins o ON o.event_id=n.event_id JOIN employees e ON e.id=o.employee_id
+    FROM native_event_occurrences n JOIN effective_event_origins o ON o.event_id=n.event_id JOIN employees e ON e.id=o.employee_id
     WHERE n.device_id=$1 AND n.source=$2 AND n.source_session_id=$3`, [record.device_id, manifest.source, manifest.sourceSessionId])).rows;
   const occurrences = new Map<string, EventOrigin>(known.map(row => [row.occurrence_hash, row as EventOrigin]));
   const origins = events.map(event => {
@@ -142,14 +143,18 @@ export async function assignOrigins(q: Query, raw: RawStore, record: Record, bac
         ON CONFLICT DO NOTHING`, [JSON.stringify(mapping.origins.slice(offset, offset + 1000).map(event => ({ line: event.line, block: event.block, event_id: event.eventId }))), mapping.snapshotId, mapping.materialId]);
     }
   }
+  if(origins.some(({origin})=>origin.materialId&&origin.deviceId===record.device_id&&!origin.qualification)
+    && await validQualificationBytes(bytes)) await qualifyOriginalEvents(q,record,origins,line=>digest(rawLines[line-1]!));
   await q.query('UPDATE snapshots SET provenance=$2 WHERE id=$1', [record.id, provenance]);
   return provenance;
 }
 
 export async function eventOrigins(q: Query, snapshotId: string, materialId?: string) {
   const rows = await q.query(`SELECT s.line,s.block,o.event_id AS "eventId",o.snapshot_id AS "snapshotId",o.line AS "originLine",o.block AS "originBlock",
-    o.employee_id AS "employeeId",e.name AS employee,o.device_id AS "deviceId",o.project,o.context,o.source_date AS "sourceDate",o.material_id AS "materialId",o.text_offset AS "textOffset"
-    FROM ${materialId ? 'material_events' : 'snapshot_events'} s JOIN archive_event_origins o ON o.event_id=s.event_id JOIN employees e ON e.id=o.employee_id
+    o.employee_id AS "employeeId",e.name AS employee,o.device_id AS "deviceId",o.project,o.context,o.source_date AS "sourceDate",o.material_id AS "materialId",o.text_offset AS "textOffset",
+    CASE WHEN o.qualification_revision>0 THEN jsonb_build_object('revision',o.qualification_revision::text,'proofSnapshotId',o.proof_snapshot_id,
+      'proofLine',o.proof_line,'proofBlock',o.proof_block,'enrolledAt',o.proof_enrolled_at) ELSE NULL END AS qualification
+    FROM ${materialId ? 'material_events' : 'snapshot_events'} s JOIN effective_event_origins o ON o.event_id=s.event_id JOIN employees e ON e.id=o.employee_id
     WHERE s.snapshot_id=$1 ${materialId ? 'AND s.material_id=$2' : ''} ORDER BY s.line,s.block`, materialId ? [snapshotId, materialId] : [snapshotId]);
   // Location in this snapshot is distinct from the original location of the event.
   return (rows.rows as (EventOrigin & { originLine: number; originBlock: number })[]).map(row => {
@@ -173,6 +178,80 @@ export async function backfillOrigins(db: Database, raw: RawStore) {
   finally { client.release(); }
 }
 
+/** Upgrade already committed original-source primaries in short durable batches.
+ * No native directory is read and no unqualified session is imported. */
+export async function reconcileOriginalQualifications(db: Database, raw: RawStore) {
+  const client = await db.connect();
+  try {
+    await client.query('BEGIN');
+    // Same ordering as archive origin assignment; never hold the queue/report lock.
+    await client.query('SELECT pg_advisory_xact_lock(7402119)');
+    const cursor = (await client.query(`SELECT *,to_char(cutoff AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS cutoff_time,
+      to_char(last_committed_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS last_time
+      FROM qualification_reconcile WHERE id=1 FOR UPDATE`)).rows[0];
+    if (cursor.complete) { await client.query('COMMIT'); return; }
+    const rows = (await client.query(`SELECT s.id,s.device_id,s.manifest,s.hash,s.committed_at,d.enrolled_at,
+      to_char(s.committed_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS cursor_time
+      FROM snapshots s JOIN devices d ON d.id=s.device_id
+      WHERE s.provenance IS NOT NULL AND NOT(s.manifest ? 'restoredFrom') AND d.enrolled_at IS NOT NULL
+      AND s.committed_at<=$1 AND ($2::timestamptz IS NULL OR (s.committed_at,s.id)>($2::timestamptz,$3::uuid))
+      AND EXISTS(SELECT 1 FROM snapshot_events se JOIN archive_event_origins o ON o.event_id=se.event_id
+        WHERE se.snapshot_id=s.id AND o.material_id IS NOT NULL AND o.device_id=s.device_id
+        AND NOT EXISTS(SELECT 1 FROM event_qualifications c WHERE c.event_id=o.event_id))
+      ORDER BY s.committed_at,s.id LIMIT 2`,[cursor.cutoff_time,cursor.last_time,cursor.last_snapshot_id])).rows;
+    for (const record of rows) {
+      const bytes=await raw.read(record.device_id,record.hash);
+      if (!await validQualificationBytes(bytes)) {
+        await client.query(`INSERT INTO qualification_reconcile_gaps(snapshot_id,reason) VALUES($1,$2) ON CONFLICT DO NOTHING`,
+          [record.id,'旧资格原件包含损坏的 UTF-8；原字节与归属保留，未凭替换字符追加精确资格证明']);
+      } else {
+        const manifest={...record.manifest,enrolledAt:record.enrolled_at.toISOString()} as Manifest;
+        // Page only eligible immutable mappings. Seek their exact raw records;
+        // do not expand unrelated JSON, attachments or all primary events again.
+        let lastLine=0,lastBlock=-1,rawLine=1,start=0;let currentLine=0,currentEvents:ReturnType<typeof activityFor>['events']=[];
+        while(true) {
+          const page=(await client.query(`SELECT se.line,se.block,o.event_id AS "eventId",o.snapshot_id AS "snapshotId",o.device_id AS "deviceId",
+            o.material_id AS "materialId",o.source_date AS "sourceDate",o.timestamp
+            FROM snapshot_events se JOIN archive_event_origins o ON o.event_id=se.event_id
+            WHERE se.snapshot_id=$1 AND o.material_id IS NOT NULL AND o.device_id=$2 AND o.source=$3 AND o.source_session_id=$4
+            AND (se.line,se.block)>($5,$6) AND NOT EXISTS(SELECT 1 FROM event_qualifications c WHERE c.event_id=o.event_id)
+            ORDER BY se.line,se.block LIMIT 1000`,[record.id,record.device_id,manifest.source,manifest.sourceSessionId,lastLine,lastBlock])).rows;
+          if(!page.length&&lastLine===0)throw new Error(`Legacy mapping scope mismatch: ${record.id}, ${manifest.source}, ${manifest.sourceSessionId}`);
+          const proofs:{event:ReturnType<typeof activityFor>['events'][number];origin:EventOrigin}[]=[];
+          const hashes=new Map<number,string>();
+          for(const origin of page) {
+            while(rawLine<origin.line) {
+              const end=bytes.indexOf(10,start);if(end<0)throw new Error('Stored qualification mapping exceeds complete raw records');start=end+1;rawLine++;
+              if(rawLine%1000===0)await new Promise<void>(resolve=>setImmediate(resolve));
+            }
+            const end=bytes.indexOf(10,start);if(end<0)throw new Error('Stored qualification record is incomplete');
+            if(currentLine!==origin.line) {
+              currentEvents=activityFor(readEvidence(bytes.subarray(start,end+1),manifest.source).events,manifest.enrolledAt).events;
+              currentLine=origin.line;
+            }
+            const event=currentEvents.find(item=>(item.block??0)===origin.block);
+            if(!event||event.timestamp!==origin.timestamp||event.sourceDate!==origin.sourceDate)throw new Error('Stored qualification event does not match exact native record');
+            proofs.push({event:{...event,line:origin.line},origin});hashes.set(origin.line,digest(bytes.subarray(start,end)));
+          }
+          const appended=await qualifyOriginalEvents(client,{...record,manifest},proofs,line=>hashes.get(line)!);
+          if(proofs.length&&appended!==proofs.length)throw new Error(`Legacy qualification mapping incomplete: ${appended}/${proofs.length}`);
+          if(page.length<1000)break;
+          const last=page.at(-1)!;lastLine=last.line;lastBlock=last.block;
+          await new Promise<void>(resolve=>setImmediate(resolve));
+        }
+      }
+      await client.query('UPDATE qualification_reconcile SET last_committed_at=$1,last_snapshot_id=$2 WHERE id=1',[record.cursor_time,record.id]);
+    }
+    if(rows.length<2)await client.query('UPDATE qualification_reconcile SET complete=true WHERE id=1');
+    await client.query('UPDATE qualification_reconcile SET last_error=NULL WHERE id=1');
+    await client.query('COMMIT');
+  } catch(error) {
+    await client.query('ROLLBACK');
+    await client.query("UPDATE qualification_reconcile SET last_error='旧资格后台核查未完成；原归属保留，请检查原件完整性与服务日志' WHERE id=1");
+    throw error;
+  } finally {client.release();}
+}
+
 // Shared deterministic event ledger counts. Reports select a bounded employee/day
 // and use the activity columns; the archive view also exposes historical/unknown.
 export const ledgerCountProjection = `count(*)::integer AS records,count(DISTINCT(o.snapshot_id,o.material_id,o.line)) FILTER (WHERE o.role='user')::integer AS "userTurns",
@@ -185,11 +264,13 @@ export const ledgerCountProjection = `count(*)::integer AS records,count(DISTINC
 
 export async function archiveStatistics(db: Database, offset = 0) {
   const warnings = (await db.query(`SELECT count(*) FILTER (WHERE provenance->>'relation'='unconfirmed')::integer AS "unconfirmedRelationSnapshots",
-    count(*) FILTER (WHERE provenance->>'relation'<>'unconfirmed' AND provenance->>'warning' IS NOT NULL)::integer AS "uncertainRewriteSnapshots" FROM snapshots`)).rows[0];
+    count(*) FILTER (WHERE provenance->>'relation'<>'unconfirmed' AND provenance->>'warning' IS NOT NULL)::integer AS "uncertainRewriteSnapshots",
+    (SELECT count(*)::integer FROM qualification_reconcile_gaps) AS "qualificationGaps",
+    (SELECT last_error FROM qualification_reconcile WHERE id=1) AS "qualificationError" FROM snapshots`)).rows[0];
   const rows = await db.query(`SELECT o.employee_id AS "employeeId",e.name AS employee,o.source_date AS date,
     ${ledgerCountProjection}
-    FROM archive_event_origins o JOIN employees e ON e.id=o.employee_id GROUP BY o.employee_id,e.name,o.source_date
+    FROM effective_event_origins o JOIN employees e ON e.id=o.employee_id GROUP BY o.employee_id,e.name,o.source_date
     ORDER BY e.name,o.employee_id,o.source_date NULLS LAST LIMIT 51 OFFSET $1`, [offset]);
   return { timeZone: 'Asia/Shanghai', rows: rows.rows.slice(0, 50), warnings, nextOffset: rows.rows.length > 50 ? offset + 50 : null,
-    definition: '每个已确认原生事件只计一次；用户轮次按原件或材料行，工具调用按解析 block。按已确认活动、历史或关联上下文、未知分类；仅独立采集且原始接入后来源时间明确的记录计活动。材料曾被保存不证明独立活动，确认续用的旧材料记录保留来源日期并计历史或未知；未独立采集的材料不计条目。未确认复制可能重复。不是工时、评分或排名。' };
+    definition: '每个已确认原生事件只计一次；用户轮次按原件或材料行，工具调用按解析 block。按已确认活动、历史或关联上下文、未知分类；仅原来源独立采集且原始接入后来源时间明确的记录计活动。材料曾被保存或被他人续用不证明原来源活动；原来源后来独立采集可追加资格证明，保留原归属、日期与事件身份，重新判断活动分类。未独立采集的材料不计条目。未确认复制可能重复。不是工时、评分或排名。' };
 }

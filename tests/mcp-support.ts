@@ -9,7 +9,7 @@ import { connect } from '../apps/server/database.js';
 import { command, createSandbox } from './support.js';
 const headersObject = (headers: Headers) => { const result: Record<string, string> = {}; headers.forEach((value, key) => { result[key] = value; }); return result; };
 
-export async function mcpSandbox() {
+export async function mcpSandbox(options: { reportClock?: () => Date } = {}) {
   const sandbox = await createSandbox();
   const openssl = process.env.SKYNET_OPENSSL ?? (process.platform === 'win32' ? 'C:/Program Files/Git/usr/bin/openssl.exe' : 'openssl');
   const ca = join(sandbox.directory, 'test-ca.pem'); const key = join(sandbox.directory, 'test-key.pem');
@@ -33,7 +33,10 @@ export async function mcpSandbox() {
   });
   proxy.listen(0, '127.0.0.1'); await once(proxy, 'listening');
   const origin = `https://127.0.0.1:${(proxy.address() as { port: number }).port}`;
-  let app = await createApp({ db, rawDirectory: sandbox.env.RAW_DIRECTORY!, webDirectory: 'dist/web', publicOrigin: origin });
+  let app = await createApp({ db, rawDirectory: sandbox.env.RAW_DIRECTORY!, webDirectory: 'dist/web', publicOrigin: origin, reportClock: options.reportClock });
+  const serverErrors:{code:string|undefined;message:string}[]=[];
+  const observeErrors=()=>app.addHook('onError',async(_request,_reply,error)=>{serverErrors.push({code:error.code,message:error.message});});
+  observeErrors();
   await app.listen({ host: '127.0.0.1', port: 0 }); target = app.listeningOrigin;
   const agent = new Agent({ ca: await readFile(ca), keepAlive: true });
   const fetchTls = async (input: string | URL | Request, init: RequestInit = {}): Promise<Response> => {
@@ -89,10 +92,11 @@ export async function mcpSandbox() {
       return callback;
     } finally { await context.close(); }
   }
-  return { ...sandbox, origin, ca, traffic, fetchTls, authorizationPage,
+  return { ...sandbox, origin, ca, traffic, fetchTls, authorizationPage, testDatabase: db, serverErrors,
     api: (path: string, token?: string, init: RequestInit = {}) => fetchTls(origin + path, {
       ...init, headers: { ...init.headers, ...(token ? { Authorization: `Bearer ${token}` } : {}) } }),
-    restart: async () => { await app.close(); app = await createApp({ db, rawDirectory: sandbox.env.RAW_DIRECTORY!, webDirectory: 'dist/web', publicOrigin: origin });
+    restart: async () => { await app.close(); app = await createApp({ db, rawDirectory: sandbox.env.RAW_DIRECTORY!, webDirectory: 'dist/web', publicOrigin: origin, reportClock: options.reportClock });
+      observeErrors();
       await app.listen({ host: '127.0.0.1', port: 0 }); target = app.listeningOrigin; },
     close: async () => { await browser?.close(); agent.destroy(); await app.close(); await db.end(); await new Promise<void>(resolve => proxy.close(() => resolve())); await sandbox.close(); },
   };

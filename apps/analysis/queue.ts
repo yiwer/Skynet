@@ -4,11 +4,16 @@ import type { Database } from '../server/database.js';
 import type { AnalysisConfig } from './config.js';
 import type { AnalysisInput } from '../server/analysis.js';
 import type { AnalysisRun } from '../../packages/contracts/analysis.js';
+import { attributionRevisionSql } from '../server/qualification.js';
 
-export async function analysisTransaction<T>(db: Database, operation: (client: PoolClient) => Promise<T>): Promise<T> {
+export async function analysisTransaction<T>(db: Database, operation: (client: PoolClient) => Promise<T>, lockOrigins = false): Promise<T> {
   const client = await db.connect();
-  try { await client.query('BEGIN'); await client.query('SELECT pg_advisory_xact_lock(7402123)');
-    await client.query("SELECT set_config('skynet.analysis_protocol','2',true)");
+  try { await client.query('BEGIN');
+    // Only request preparation couples origin revision and target/job creation.
+    // Acquire archive before queue; archive writers never acquire the queue lock.
+    if(lockOrigins)await client.query('SELECT pg_advisory_xact_lock(7402119)');
+    await client.query('SELECT pg_advisory_xact_lock(7402123)');
+    await client.query("SELECT set_config('skynet.analysis_protocol','3',true)");
     const value = await operation(client); await client.query('COMMIT'); return value;
   } catch (error) { await client.query('ROLLBACK'); throw error; } finally { client.release(); }
 }
@@ -27,6 +32,7 @@ export async function migrateQueue(client: PoolClient) {
     ALTER TABLE analysis_jobs ADD COLUMN IF NOT EXISTS worker_id text;
     ALTER TABLE analysis_jobs ADD COLUMN IF NOT EXISTS trigger text NOT NULL DEFAULT 'manual';
     ALTER TABLE analysis_targets ADD COLUMN IF NOT EXISTS parser_version text NOT NULL DEFAULT 'unknown';
+    ALTER TABLE analysis_targets ADD COLUMN IF NOT EXISTS attribution_revision bigint NOT NULL DEFAULT 0;
     CREATE TABLE IF NOT EXISTS analysis_attempts(id uuid PRIMARY KEY,job_id uuid NOT NULL REFERENCES analysis_jobs(id),
       number integer NOT NULL,run_token uuid NOT NULL UNIQUE,worker_id text NOT NULL,state text NOT NULL,
       reserved_cny numeric NOT NULL,requests integer,usage jsonb,error text,started_at timestamptz NOT NULL DEFAULT now(),finished_at timestamptz,
@@ -43,7 +49,7 @@ export async function migrateQueue(client: PoolClient) {
     CREATE OR REPLACE FUNCTION guard_analysis_protocol() RETURNS trigger LANGUAGE plpgsql AS $$
     BEGIN
       IF OLD.target_id IS NOT NULL AND (NEW.state IS DISTINCT FROM OLD.state OR NEW.run_token IS DISTINCT FROM OLD.run_token
-        OR NEW.attempts IS DISTINCT FROM OLD.attempts) AND COALESCE(current_setting('skynet.analysis_protocol',true),'')<>'2' THEN
+        OR NEW.attempts IS DISTINCT FROM OLD.attempts) AND COALESCE(current_setting('skynet.analysis_protocol',true),'')<>'3' THEN
         RAISE EXCEPTION 'Analysis queue protocol mismatch; current jobs unchanged';
       END IF;
       RETURN NEW;
@@ -55,10 +61,10 @@ export async function migrateQueue(client: PoolClient) {
 // A read also reconciles expired leases: no missing worker leaves running status forever.
 export async function sweepQueue(client: PoolClient) {
   await client.query(`WITH changed AS (
-    SELECT t.id,s.id AS snapshot_id FROM analysis_targets t JOIN LATERAL(
+    SELECT t.id,s.id AS snapshot_id,${attributionRevisionSql('s.id')} AS attribution_revision FROM analysis_targets t JOIN LATERAL(
       SELECT id FROM snapshots WHERE device_id=t.device_id AND source=t.source AND source_session_id=t.source_session_id
-      ORDER BY committed_at DESC,id DESC LIMIT 1) s ON true WHERE t.desired_snapshot_id<>s.id)
-    UPDATE analysis_targets t SET desired_snapshot_id=c.snapshot_id,generation=generation+1,applicable_job_id=NULL,updated_at=now(),error=NULL
+      ORDER BY committed_at DESC,id DESC LIMIT 1) s ON true WHERE t.desired_snapshot_id<>s.id OR t.attribution_revision<>${attributionRevisionSql('s.id')})
+    UPDATE analysis_targets t SET desired_snapshot_id=c.snapshot_id,attribution_revision=c.attribution_revision,generation=generation+1,applicable_job_id=NULL,updated_at=now(),error=NULL
     FROM changed c WHERE t.id=c.id`);
   await client.query(`UPDATE analysis_jobs j SET state='superseded',error='输入或配置版本已过期；未追加模型调用',finished_at=now()
     WHERE state IN ('queued','retry-wait') AND EXISTS(SELECT 1 FROM analysis_targets t WHERE t.id=j.target_id AND t.generation<>j.target_generation)`);
@@ -81,7 +87,9 @@ export const analysisProjection = `j.id,j.snapshot_id AS "snapshotId",j.state,j.
   j.next_attempt_at AS "nextAttemptAt",j.lease_until AS "leaseUntil",j.deadline,j.target_generation AS generation,j.trigger,
   j.actor_id AS "actorId",j.actor_kind AS "actorKind",
   COALESCE((SELECT applicable_job_id=j.id AND desired_snapshot_id=j.snapshot_id AND config_hash=j.config->>'configurationHash'
-    AND generation=j.target_generation AND parser_version=j.input->>'parserVersion' FROM analysis_targets WHERE id=j.target_id),false) AS applicable,
+    AND generation=j.target_generation AND parser_version=j.input->>'parserVersion'
+    AND attribution_revision=COALESCE((j.input->>'attributionRevision')::bigint,0)
+    AND attribution_revision=${attributionRevisionSql('j.snapshot_id')} FROM analysis_targets WHERE id=j.target_id),false) AS applicable,
   (SELECT desired_snapshot_id FROM analysis_targets WHERE id=j.target_id) AS "desiredSnapshotId",
   (SELECT error FROM analysis_targets WHERE id=j.target_id) AS "targetError",
   COALESCE((SELECT jsonb_agg(jsonb_build_object('number',number,'state',state,'reservedCny',reserved_cny,'requests',requests,'usage',usage,'error',error,
@@ -124,7 +132,9 @@ export function analysisQueue(db: Database, config: AnalysisConfig, workerId: st
     return analysisTransaction(db, async client => {
       const row = await client.query(`UPDATE analysis_attempts a SET requests=COALESCE(requests,0)+1 FROM analysis_jobs j
         WHERE a.run_token=$1 AND a.job_id=j.id AND j.run_token=a.run_token AND j.worker_id=$2 AND j.state='running'
-        AND j.lease_until>now() AND j.deadline>now() AND a.state='running' AND COALESCE(a.requests,0)<$3 RETURNING a.id`,
+        AND j.lease_until>now() AND j.deadline>now() AND a.state='running' AND COALESCE(a.requests,0)<$3
+        AND COALESCE((j.input->>'attributionRevision')::bigint,0)=${attributionRevisionSql('j.snapshot_id')}
+        AND EXISTS(SELECT 1 FROM analysis_targets t WHERE t.id=j.target_id AND t.generation=j.target_generation) RETURNING a.id`,
         [job.run_token, workerId, config.maxRequests]);
       return row.rows.length === 1;
     });

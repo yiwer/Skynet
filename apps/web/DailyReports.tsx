@@ -6,14 +6,20 @@ export function DailyReports({ request, currentEmployeeId, onEvidence }: {
   request: (path: string, signal?: AbortSignal, method?: 'POST') => Promise<Response>;
   currentEmployeeId: string; onEvidence: () => void;
 }) {
-  const [employeeId, setEmployeeId] = useState(currentEmployeeId);
-  const [date, setDate] = useState(previousDate(beijingDate()));
+  const selection = () => new URLSearchParams(location.hash.startsWith('#daily?') ? location.hash.slice(7) : '');
+  const [employeeId, setEmployeeId] = useState(selection().get('employeeId') ?? currentEmployeeId);
+  const [date, setDate] = useState(selection().get('date') ?? previousDate(beijingDate()));
   const [report, setReport] = useState<DailyReport | null>(null);
   const [periods, setPeriods] = useState<{ employeeId: string; employee: string; date: string; state: string; revision: number }[]>([]);
   const [periodOffset, setPeriodOffset] = useState<number | null>(0);
   const [employees, setEmployees] = useState<{ id: string; name: string }[]>([]);
   const [employeeOffset, setEmployeeOffset] = useState<number | null>(null);
-  const [revision, setRevision] = useState('');
+  const [revision, setRevision] = useState(selection().get('revision') ?? '');
+  useEffect(() => {
+    const change = () => { if (!location.hash.startsWith('#daily?')) return; const query = selection();
+      setEmployeeId(query.get('employeeId') ?? currentEmployeeId); setDate(query.get('date') ?? previousDate(beijingDate())); setRevision(query.get('revision') ?? ''); };
+    window.addEventListener('hashchange', change); return () => window.removeEventListener('hashchange', change);
+  }, [currentEmployeeId]);
   const [busy, setBusy] = useState(false); const [error, setError] = useState(''); const [refresh, setRefresh] = useState(0);
   const path = `/api/daily-reports/${employeeId}/${date}`;
   useEffect(() => {
