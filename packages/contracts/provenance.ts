@@ -9,6 +9,7 @@ export interface EventOrigin {
   // uses raw UTF-16 offsets, not offsets in parsed semantic event text.
   materialId?: string | null; textOffset?: number;
   location?: EvidenceLocation; webPath?: string;
+  qualification?: { revision: string; proofSnapshotId: string; proofLine: number; proofBlock: number; enrolledAt: string };
 }
 export interface Provenance {
   version: 1;
