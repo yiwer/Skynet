@@ -1,146 +1,181 @@
 # V1 验收证据台账
 
-2026-09-30 恢复实施时的基线：`a4ca34c`。规格以 [PRD](../requirements/PRD.md) 与 [验收标准](../requirements/v1-acceptance.md) 为准；实现进度见 [实施记录](../planning/v1-implementation.md)。本表汇总已有证据与待完成事项，不能替代真实演练或负责人签收。
+V1 尚未完成，AC-01…AC-22 与 G0…G4 均未整体签收。本台账是唯一验收索引；各票文档保留实验过程。本检查点整理材料，未执行新的产品测试。产品源码 `68ee347605db0a23578b62560c4df8f97057025a`，文档基线 `15021a40244d811887486173289376099eb87009`（2026-09-30）；#32 在独立树实施，尚未合入。
 
-## AC 对照
+依据：[PRD](../requirements/PRD.md)、[V1 验收标准](../requirements/v1-acceptance.md)、[实施记录](../planning/v1-implementation.md)、[原生支持矩阵](native-validation-status.md)。[PRD v2 适用规则](../requirements/PRD-v2.md#与既有文档的关系) 已确认：使用能力评估与报表守则以 V2 为准，其余以 V1 为准。因此不能继续把全部自动评估写成永久禁止；本票不提前实现 V2 AC-23…38。V1 统计与四级证据仍须可追溯，Token 不是账单，事件区间不是工时；名次、榜单、按指数排序人员及自动人事动作仍在范围外。
 
-| 验收 | 已有可复跑实现与证据 | 仍需完成 |
+## 环境与支持边界
+
+“已验证”只指具体实验行为。loopback 是合成替身，不证明千问质量或计费；支持矩阵为 partial 的组合不因此成为完整 supported。
+
+| 代号 | 实测版本 / 环境 | 已测范围与边界 |
 | --- | --- | --- |
-| AC-01 单 Key npm 接入 | [#11](issue-11.md)：离线包、禁用安装脚本、一次 setup、两个 CLI 安装模式 | 完整 G1 环境登记与耗时复验 |
-| AC-02 市场入口与共存 | [#13](issue-13.md)：真实双 CLI 市场、单身份后台、入口所有权、缓存不可用 | Desktop 正常入口与完整支持矩阵 |
-| AC-03 修复升级卸载 | [#12](issue-12.md)、[#13](issue-13.md)、[#14](issue-14.md)：公开修复、中断升级、真实旧载荷回退、卸载及冻结 drain；guardian 崩溃恢复与中文path分块输入修订已合入 | recovery Windows 全量23/24：initial-install control无响应仍红；其他 OS、完整支持组合与第二人复现 |
-| AC-04 图标启动与登录恢复 | [#12](issue-12.md)：受认证后台、监督器、隐藏用户任务、崩溃恢复 | Desktop UI、正常登录/重启/休眠及无安装终端环境 |
-| AC-05 自动采集多项目 | [#6](issue-6.md)、[#7](issue-7.md)、[#11](issue-11.md)：真实 CLI 正常 hooks | Desktop UI 自动采集；三来源完整样例 |
-| AC-06 仅接管被继续的旧会话 | [#8](issue-8.md)、[#10](issue-10.md)：两个真实 CLI 旧会话已纳入持续回归，目录 mtime 不触发上传、仅继续一条、来源日期保留 | Desktop 实测 |
-| AC-07 文件代次与关联材料 | [#9](issue-9.md)、[#18](issue-18.md)、[#10](issue-10.md)：原件代次、Claude 原位子续用与 Codex 附件精确回填；[#19](issue-19.md) 主件及可独立资格材料的完整前缀、原材料行锚点与改写不确定性 | Claude 子代理不伪装独立主件；未知 payload/外部资源、Desktop UI、完整支持矩阵与 G0 |
-| AC-08 离线与确认语义 | [#16](issue-16.md)、[#17](issue-17.md)：退避、ACK 丢失、崩溃窗口及幂等快照；[#19](issue-19.md) 快照与材料资格事件映射同事务提交，重试、较晚独立采集和再次恢复保持 eventId 不重复计活动 | 已通过安装前置的三客户端完整 G2 故障矩阵 |
-| AC-09 本地故障与缺口 | [#18](issue-18.md)：真实 Linux ENOSPC/EACCES/ENOENT、动态故障与未核实范围；[#31](issue-31.md) 服务器收到日/小时的覆盖观测保留故障，当前连接与历史未知分开 | Windows 等价场景、无法落盘且离线的边界实测 |
-| AC-10 服务器独立原生续聊 | [#5](issue-5.md)、[#6](issue-6.md)、[#7](issue-7.md)：新 home、源材料不可用、同 ID 续聊 | Desktop 正常 UI 恢复续聊；完整材料兼容性 |
-| AC-11 恢复校验与归属 | [#5](issue-5.md)、[#9](issue-9.md)、[#19](issue-19.md)：A→B→C 主件及正常独立资格的 Codex 材料恢复，原员工/设备/项目/日期、冻结来源映射、Web/MCP 统计和再次完整导出；真实 CLI 正常 hook 支线实测 | Desktop UI、完整支持组合与 G2 验收；未资格材料始终 context-only |
-| AC-12 日周项目与证据 | [#27](issue-27.md)：搜索与原件位置；[#28](issue-28.md) 日报；[#29](issue-29.md) 固定日周项目与资格传播；[#30](issue-30.md) 已管理空期间首条迟到活动及更正版本，旧固定响应逐字不变；主线组合12/12通过 | 实际G3/运营、完整来源范围与质量验收 |
-| AC-13 证据分级与统计 | [#8](issue-8.md)、[#19](issue-19.md)：唯一事件及来源员工/项目/日期、历史或关联上下文与未知分类；[#22](issue-22.md) 四级结论与独立raw/input语义锚点；[#31](issue-31.md) 固定来源统计版本、已测Token基线/结构化文件/时间点区间、原材料资格及Web/MCP原句，主线12/12通过 | 真实模型质量与完整来源支持组合；统计缺项保持未知、不把context-only计活动；通用证据非法UTF8缺口仍待修 |
-| AC-14 北京时间归期 | [#8](issue-8.md) 来源日期/可信接入边界；[#28](issue-28.md) 每日09:00；[#29](issue-29.md) 周一09:00前一周与可信clock；[#30](issue-30.md) 已管理期间按原来源日公平发现迟到活动，接入前日期不批量建日报 | 实际运营时点、长期负载与全部归期范围 |
-| AC-15 更正与版本隔离 | 原始快照不可变；[#24](issue-24.md) generation/租约/适用版本；[#30](issue-30.md) 已集成公开审计更正、未归类显示项目、幂等重算、旧日周项目逐字不变与旧分析晚完成隔离；主线12/12通过 | 真实运行、模型和操作验收 |
-| AC-16 认证撤销与共享读 | [#20](issue-20.md)：逐请求校验、共享读取、维护权限、审计 | 新增分析/报告/更正接口沿用边界并复验 |
-| AC-17 MCP 真实授权与查询 | [#26](issue-26.md)、[#27](issue-27.md)：两个 CLI 正常 OAuth、自然到期刷新、分页及导出；[#28](issue-28.md) 日报；[#29](issue-29.md) 周/项目HTTP/Web/OAuth MCP固定版本、分页与重启一致，主线组合已复核 | 实际 G3 与部署域名 |
-| AC-18 真实分析与长会话 | [#22](issue-22.md) 公开任务与独立 Claude Code worker；[#23](issue-23.md) 支线实际 Windows Claude Code loopback 分段提取/汇总、原 UTF-16 引用、Web/MCP/完整导出及失败/跳过范围通过 | #21/G2 前置；指定千问 PAYG 模型、专用配置、核实价格与预算及真实长会话质量实测；支线合成链不关闭 G3 |
-| AC-19 分析失败隔离 | [#22](issue-22.md)、[#24](issue-24.md)：公开持久有限总尝试、全局并发、逐尝试预算预留、未知不退款、租约与转发 fencing、版本适用性、Web/MCP 队列；支线实际 CLI Windows/Linux loopback 无效引用/超时两次停止，原件上传/查询/导出仍可用 | 真实 PAYG 价格上界与账单、模型质量及 G2/G3验收；fixture 不认证真实计费 |
-| AC-20 指令隔离与防递归 | [#22](issue-22.md) 产品运行时禁用执行工具、hooks/auth/MCP 不继承，恶意材料及伪造引用在 Windows/Linux 实际 CLI loopback 公共链拒绝，无员工会话回流 | 真实千问 PAYG 模型与完整 G3 验收 |
-| AC-21 服务器备份恢复 | 单机容器持久卷重启演练；ACK 明示单副本 | #32 独立一致备份、新服务器恢复、报告引用、损坏检测及运行状态 |
-| AC-22 安装与性能 | [#11](issue-11.md)、[#12](issue-12.md)、[#18](issue-18.md)、[#14](issue-14.md) 的 200 样本 hook 实测；稳定维护 launcher 普通条件 P95 85.44 ms，保留长尾 | 并行满盘 P95 **111.35 ms** 超标记录保留；需优化/复验、安装两分钟与原文 60 秒指标、登记负载 |
+| W | Windows11 Pro 10.0.26200 x64，Node24.12.0/npm11.6.2；i7-14700K、28逻辑CPU、68,006,068,224 bytes内存 | 公开服务/headless Web/控制线程/hook快路径；自有状态与PG17容器。主机并发负载未控制，不外推其他OS或安装全量 |
+| C | W + Claude Code2.1.281 | 实际CLI普通hooks、两项目、旧会话、Write/Read、子代理原位续用、服务器独立恢复；loopback |
+| X | W + Codex CLI0.157.1 | 实际hooks/exec/history/fork/图片/附件行重建、独立材料资格；本机workspace-write被宿主退化为read-only，实际apply_patch未通过 |
+| D | W + Desktop26.924.2738.0 / bundled backend0.158.0-alpha.2.1 | 仅实际backend app-server恢复；创建renderer不等于可用UI，正常UI采集/信任/恢复未测 |
+| L | GitHub Ubuntu CI、Node24、自有PG容器，固定源码见各轮日志 | typecheck/build/普通回归，不覆盖Windows Task/Desktop/PAYG。Linux UID1000实际Claude短分析worker和ENOSPC/EACCES/ENOENT是独立实验 |
+| B | #32支线Linux/amd64 helper Node24.21.0、PG工具17.11；W调用、PG17-alpine fresh target | 两原件对象（含ACK未成快照staged chunk）新库恢复；same-host/integrity-only，未合主线/未验收灾备 |
 
-## 门槛
+当前全局Codex0.159.2、其他版本/macOS/WSL/SSH/员工容器未由这些固定实验覆盖。Agent×版本×OS×能力的每格状态以原生支持矩阵为准。
 
-| 门槛 | 状态 | 决定性未完成项 |
+## AC-01…22
+
+复跑步骤R1…R8及证据E1…E8见下文。表内“已验证”不是整项签收；票据文档包含准确参数、原始环境和历史记录。
+
+| 验收 | 环境与复跑步骤 | 已验证结果 / 证据 | 未解决项 |
+| --- | --- | --- | --- |
+| AC-01 单Key npm | W/C/X，R7；[#11](issue-11.md) --ignore-scripts/单次setup | 离线包、两CLI安装模式与前置错误；[#12](issue-12.md) launcher | 完整G1；安装开始到健康检查≤2分钟 |
+| AC-02 市场共存 | W/C/X，R7；[#13](issue-13.md) 两市场、共存/缓存错误 | 实际CLI市场、单身份后台、入口所有权 | D正常入口、完整支持组合 |
+| AC-03 修复升级卸载 | W，R2/R7；[#14](issue-14.md) 中断升级/旧载荷/冻结drain | guardian/UTF8定向；主线control/线程/旧Task元数据14/14、39.63s；E3 | 实际静默Task/完整Windows生命周期；历史红取消保留 |
+| AC-04 图标登录恢复 | W/D，R7；[#12](issue-12.md) 无安装终端环境启动/登录/重启/休眠 | 认证supervisor/worker及崩溃恢复；旧Task精确所有权迁移纯测试 | 正常UI图标/登录/重启/休眠、实际Task无弹窗 |
+| AC-05 自动多项目 | C/X/D，R3 ordinary；[#6](issue-6.md)/[#7](issue-7.md)/[#11](issue-11.md) 受信hooks | 两实际CLI多项目/工具记录；E4 | D自动UI采集、三来源完整样例/实际代码修改 |
+| AC-06 仅继续旧会话 | C/X/D，R3 G0；[#8](issue-8.md)/[#10](issue-10.md) 两旧会话只继续一条 | 实际CLI持续回归，mtime不触发扫传、原日期保留；E4 | D及完整环境组合 |
+| AC-07 代次材料 | C/X/D，R1/R3；[#9](issue-9.md)/[#18](issue-18.md)/[#19](issue-19.md) child/fork/附件/资格 | 原件代次、Claude原位子续用、Codex附件ID/time/type/key/payload回填、原材料前缀锚点；E2/E4 | 全材料/未知payload/外部资源/D；非法UTF8活动缺口修订 |
+| AC-08 离线ACK | W/L、三来源，R1；[#16](issue-16.md)/[#17](issue-17.md) 丢ACK/崩溃/重试 | 幂等快照/退避，同事务原事件与材料资格映射，跨恢复不重复活动；E2 | G1后完整三来源G2矩阵 |
+| AC-09 本地故障 | L/W，R5/R1；[#18](issue-18.md) 故障、[#31](issue-31.md) 覆盖观测 | UID1000实际ENOSPC/EACCES/ENOENT；收到日/小时故障保留，当前连接不填历史；E2 | Windows等价、无法落盘且离线边界 |
+| AC-10 独立续聊 | C/X/D，R3；[#5](issue-5.md) server包→new home→same ID | 两CLI源材料不可用时恢复上下文/工具；E4 | D正常UI/完整材料；#32恢复服务器后的native链 |
+| AC-11 校验归属 | W/C/X，R1/R3；[#5](issue-5.md)/[#9](issue-9.md)/[#19](issue-19.md) A→B→C | 损坏/非空目标拒绝，原owner/device/project/date/eventId/材料原锚点及完整导出；E2/E4 | D/G2组合；未资格材料仍context-only |
+| AC-12 日周项目证据 | W/L/C，R1/R4/R6；[#27](issue-27.md)/[#28](issue-28.md)/[#29](issue-29.md)/[#30](issue-30.md) | HTTP/Web/OAuth MCP固定版本、分页、员工/项目下钻；主线#30及#31各12/12；E1/E2 | 真实模型质量/运营来源、Web溢出/深色修订 |
+| AC-13 分级统计 | W/L/C，R1/R4；[#22](issue-22.md)/[#19](issue-19.md)/[#31](issue-31.md) 引用/资格/固定统计 | 四级结论，来源event去重、记录Token/基线/缓存、文件参数/时间点区间，缺项未知；E2 | PAYG抽检；通用0xFF/既存账本计数；V2守则按本文依据适用 |
+| AC-14 北京归期 | W/L，R1/R4；[#28](issue-28.md)09:00/[#29](issue-29.md)周一/[#30](issue-30.md)迟到 | 已管理空日周项目首条迟到自动刷新；原来源日，接入前日期不批量建报告；E1/E2 | 真实调度负载、全部日期边界 |
+| AC-15 更正隔离 | W/L/C，R1/R4；[#24](issue-24.md)/[#30](issue-30.md) 更正/并发/晚结果 | 审计说明/主题/显示项目、幂等重算；旧固定日周项目逐字不变、原件不变、晚结果非适用；E1/E2 | 实际运行/模型/操作、最终组合review |
+| AC-16 认证共享读 | W/L，R1；[#20](issue-20.md) 撤销/冒充/新接口 | 每请求撤销、认证共享读、维护权限与审计；E1/E2 | #32接口/最终全表面审查、真实部署 |
+| AC-17 MCP | C/X/W，R3/R1；[#26](issue-26.md)/[#27](issue-27.md) OAuth/到期刷新/分页/导出 | 两实际CLI正常HTTPS授权；报告/队列/覆盖同服务版本；E2/E4 | 实际HTTPS origin/G3、登录故障不阻采集复核 |
+| AC-18 实际长分析 | C/L，R4；[#22](issue-22.md)/[#23](issue-23.md)/[#24](issue-24.md) 独立CLI分段聚合 | Claude2.1.281 loopback短长公开链、原UTF16引用/全job请求预算；E4 | G2前置、指定千问PAYG真实长质量 |
+| AC-19 分析故障 | W/L/C，R1/R4；[#24](issue-24.md) 领取/租约/重启/新输入/超时 | 有限总attempts、并发/时间/输入/请求/预算caps、未知不退款；CLI两次停止，原件查导可用；E4 | 真计费上界/账单/G2/G3；#32旧claims fencing |
+| AC-20 指令隔离 | C/L，R4；[#22](issue-22.md) Bash/外发/伪造引用 | 实际CLI只有StructuredOutput、无副作用、不继承hooks/auth/MCP、不回流采集；E4 | 指定PAYG模型、完整G3抽检 |
+| AC-21 服务器灾备 | B，R8；[票#32](https://github.com/yiwer/Skynet/issues/32) 支线bbcb37b→70c3034 | fresh restore1/1、9.16s；stage3 paths/public/fault/Linuxvolumes4/4、37.59s；两对象含staged ACK、restore-before-migrate；E7 | 未合入；完整冻结报告/OAuthMCP/实际双CLI续聊与最终组合灾备 |
+| AC-22 性能运营 | W/L，R5/R7；[#11](issue-11.md)/[#12](issue-12.md)/[#14](issue-14.md)/[#18](issue-18.md) | ROOT200hook P50 52.53/P95 67.17/max137.34ms；另公开200原文可见P95 1161.15ms；E5 | 压力P95 111.35ms红；支持客户端/登记负载的安装≤2min和原文≤60s分布；第二人/五日 |
+
+## G0…G4
+
+| 门槛 | 状态 | 复跑 / 决定性剩余 |
 | --- | --- | --- |
-| G0 / #10 | 未通过 | Desktop 实际 UI 自动采集和服务器独立续聊；当前环境 Codex workspace-write 被宿主退化为 read-only；全部材料/历史/工具样例支持矩阵 |
-| G1 / #15 | 未通过 | 同步spawn阻塞已移到Worker线程，主线14/14定向通过；旧Windows全量失败保留，真实Task静默行为、Desktop图标与登录/重启/休眠、完整安装演练和第二人复现仍待验 |
-| G2 / #21 | 未通过 | 可独立资格材料来源已集成但不替代门槛；在已通过安装的三来源上复跑完整故障矩阵、覆盖未知关系和支持组合 |
-| G3 / #25 | 未通过 | #22–#24 短/长会话及队列loopback准备已集成；真实 Claude Code + 指定千问 PAYG 模型、质量、核实价格与预算仍待验 |
-| G4 / #33 | 未通过 | #28/#29/#30/#31准备已集成；#32灾备、页面/性能检查、第二人运维复现、门槛通过后的五个工作日试点与负责人签收仍待完成 |
+| G0 / #10 | 未通过 | R3；D正常UI采集/独立续聊、实际Codex workspace-write、完整材料/历史/工具矩阵 |
+| G1 / #15 | 未通过 | R2后R7；真实静默Task/图标/登录/重启/休眠及完整安装环境，保留Windows全量红取消 |
+| G2 / #21 | 未通过 | R1/R3/R5；G1后三来源完整故障矩阵、关系/材料未知与通用UTF8修订 |
+| G3 / #25 | 未通过 | R4后真实PAYG；独立Claude、指定模型质量/引用/长范围、价格预算 |
+| G4 / #33 | 未通过 | R1/R6/R7/R8；#32、最终Web/性能/review、第二人、前置通过后五日试点和签收 |
 
-门槛按顺序验收。代码或合成回归通过只证明所测行为，不解除尚缺真实条件的门槛，不关闭未验收票据。性能实测达不到目标时保留失败值和具体优化方案。
+按门槛顺序验收；合成/代码回归不解除真实条件，#32阶段性结果与本票前置交付不代表完成。
 
-## 复现与外部条件
+## 可复跑入口
 
-- 基线 [Linux CI](https://github.com/yiwer/Skynet/actions/runs/36400612859/job/108857308920)：类型检查、构建、17/17 普通测试通过。
-- #19 主会话集成 `1665d08` 的 [Linux CI](https://github.com/yiwer/Skynet/actions/runs/36670850420/job/109745319778)：类型检查、构建、19/19 普通测试通过；该轮早于 #14 集成。
-- 分析及材料资格集成 `f6ccbca` 的 [Linux CI](https://github.com/yiwer/Skynet/actions/runs/36675975531/job/109760915991)：28/28、0fail/0cancelled，100.38秒；早于 recovery 修订，与其 Windows24项是不同环境/源码/总数。
-- 原生测试须显式选择本机安装的实测版本，使用隔离配置和合成材料；命令及证据见各票文档。loopback 模型应标记为替身，不作真实千问计费或质量证明。
-- 外部关键日志、脚本与截图已保存在 `F:/GenCode/Skynet-evidence/v1-2026-09-30/`；旧 `%TEMP%/skynet-v1-implementation/` 部分材料已不可用，不能继续视为可复现证据。进入最终验收的关键脚本与证据索引仍需成为仓库内可复跑材料。
-- 需专用 Desktop 测试环境，以及包含千问 PAYG 模型/专用凭据的配置路径和测试预算。不得猜测现有环境 Key，也不得将真实用户的会话或登录凭据复制到测试目录。
-- 五个工作日试点、第二人复现和产品负责人签收须有实际参与者与记录，不能由代理的合成测试填写通过。
+以下是配方，未在本轮执行。固定源码/清洁构建/隔离合成配置，记录OS/版本/source hash/负载；先保存脱敏证据再清理自有资源。不读用户既有会话/Key/登录配置。实际Windows Task/setup/maintenance/完整`npm test`仍HOLD，R1不替代完整套件。
 
-## 2026-09-30 G0 增补集成
+**R1：公开非Task链。** Node24、Docker/PG可用时覆盖上传查导、归属、分析/长范围/队列、报告/更正/覆盖/MCP：
 
-`497e8da` 通过 `3fb6454` 无冲突合入。六项真实安装二进制、loopback 合成模型的原生增补回归通过；这是已测技术行为，G0仍未签收。支线全量普通流程 15/17，安装/插件本地 runtime unresponsive 两失败保持记录，#14尚在修复；详见 [#10](issue-10.md)，不能把既有 a4ca34c 的 Linux17/17通过替代当前失败。
+```powershell
+npm ci
+npm run typecheck
+npm run build
+node --test --test-concurrency=1 dist/tests/analysis.test.js dist/tests/analysis-queue.test.js dist/tests/analysis-long.test.js dist/tests/analysis-long-public.test.js dist/tests/archive.test.js dist/tests/consistency.test.js dist/tests/delivery.test.js dist/tests/history.test.js dist/tests/identities.test.js dist/tests/search.test.js dist/tests/material-primary.test.js dist/tests/material-qualification.test.js dist/tests/source-statistics.test.js dist/tests/team-coverage.test.js dist/tests/daily-reports.test.js dist/tests/work-views.test.js dist/tests/report-corrections.test.js dist/tests/report-corrections-workflow.test.js dist/tests/mcp.test.js
+git diff --check
+```
 
-#14 的真实旧代码升级所需 a4 编译产物已复制至仓库外并确认后，才重新构建主线；没有提前覆盖其旧代码验证输入。
+**R2：真实control HTTP caller与纯登记。** 2200ms同步spawn阻塞移出event-loop，线程异常等auth worker lease释放，不实际装Task：
 
-主线 `3fb6454` 类型检查、构建与 materials/recovery 两项集成回归 2/2通过（48.15s、40.28s；材料 Web 证据 `%TEMP%/skynet-test-F9g4Oq`）。本次没有重复执行全量17项，也不声明此前两个运行时失败已修复。
+```powershell
+node --test --test-concurrency=1 dist/tests/control-spawn.test.js dist/tests/runtime-control.test.js dist/tests/autostart-registration.test.js
+```
 
-## 2026-09-30 #19 主会话归属集成
+**R3：实际原生二进制。** 精确版本、独立home/合成provider，G0六项串行；ordinary及材料能力详见[#10](issue-10.md)/[#19](issue-19.md)：
 
-`261fee9` 已与 G0 集成，保留附件行重建回执、Claude 参数化旧会话 / 代码 / 子会话场景及主会话 A→B→C 归属链。类型检查、构建、diff 检查与跨设备 / 历史 / 材料 / MCP / 搜索六项集成通过；真实 Claude ordinary 跨设备及 subagent 原位子续用冲突回归通过。证据目录和复跑命令见 [#19](issue-19.md)。
+```powershell
+$env:SKYNET_CLAUDE_RUNTIME='ABSOLUTE_PATH_TO_CLAUDE_2.1.281_EXE'
+$env:SKYNET_CODEX_CLI='ABSOLUTE_PATH_TO_CODEX_CLI_0.157.1_EXE'
+$env:SKYNET_CODEX_RUNTIME='ABSOLUTE_PATH_TO_BUNDLED_0.158.0-alpha.2.1_EXE'
+$env:SKYNET_NODE_PTY_ROOT='ABSOLUTE_EXTERNAL_NODE_PTY_PACKAGE_ROOT'
+npm run test:g0-native
+node --test dist/tests/native-mcp.test.js
+$env:SKYNET_MATERIAL_SOURCE='codex-cli'
+$env:SKYNET_MATERIAL_PRIMARY='1'
+node --test dist/tests/native-materials.test.js
+```
 
-这是主会话 tracer bullet 的已测行为。关联子会话/fork 从恢复材料独立成为主会话时的员工历史归属仍开放，关联材料的捕获来源不是新增员工活动；#19 全部 AC、G2 及所有发布门槛均未因此通过。未再次执行完整套件，保留原 Windows runtime / taskState 失败，由 #14 修复集成后再测。
+实际Codex代码写入仅在正常workspace-write环境显式`SKYNET_NATIVE_CODEX_WRITES=1`，不绕过trust/sandbox。bundled backend不是Desktop UI。
 
-## 2026-09-30 #14 全量故障记录保留
+**R4：独立实际Claude CLI/loopback，非付费。** 保持显式Claude路径，逐条串行：
 
-本节记录 recovery 合入前的 `f6ccbca` 状态，后续修订与仍红的 Windows control 回归见下节。
+```powershell
+node --test dist/tests/native-analysis.test.js
+node --test dist/tests/native-analysis-long.test.js
+node --test dist/tests/native-daily-reports.test.js
+node --test dist/tests/native-work-views.test.js
+node --test dist/tests/native-report-corrections.test.js
+```
 
-`d725e48` 通过 `14e29a8` 合入维护实现；旧载荷、普通安装、插件与真实 Claude 各自定向证据见 [#14](issue-14.md)。Windows 完整批次分别为 **23 pass / 1 cancelled**，以及 **22 pass / 1 installation fail / 1 cancelled**；后者暴露 fallback 后台崩溃恢复的真实问题。取消的 maintenance tracer 不视为通过，即使测试 body 后续保存了行为证据。并行负载与未提交诊断尝试均不能据此变成此主线源码的成功证明。
+短分析另按[#24](issue-24.md)构建`Dockerfile.analysis`，显式`SKYNET_ANALYSIS_LINUX=1`/`SKYNET_ANALYSIS_IMAGE`，核对非root UID/runtime/image hash再跑同短测试，结束恢复变量。真实PAYG走专用配置，不把fixture别名/零价格当真实模型。
 
-#14 后续九个自有差异已按完整 SHA 核对移至独立 `Skynet-wt-issue14-recovery`，本次主线合并前是干净的 `14e29a8`。fallback 启动 ownership 失败仍在诊断，stdin UTF-8 修订未合入。当前合并只从自身源码重新构建，不使用先前 ignored dist 的未提交修订，不重复整套绕过上述失败；待 #14 修复集成后再跑最新完整套件。G1/G2 与其他门槛均保持开放。
+**R5：真实Linux本地故障。** [#18](issue-18.md)自有tmpfs/UID1000，登记200样本与并发故障条件：
 
-## 2026-09-30 #22 与 #19 材料扩展集成
+```powershell
+docker build -f tests/Dockerfile.native-local-faults -t skynet-native-local-faults:2.1.281 .
+$env:SKYNET_FAULT_TEST_IMAGE='skynet-native-local-faults:2.1.281'
+node --test dist/tests/native-local-faults.test.js
+```
 
-#22 `2af8421` 经 `73bc1bd` 合入，随后 #19 材料扩展 `73c745e` 经 `b4a60ec` 合入；两次均无冲突。保留 #14 已提交维护源码、G0 附件重建/sourceEmployee 回执、主件 origin、材料首次资格冻结，以及分析原材料 raw 锚点与当前主原件 inputLocation 语义偏移的独立字段。关联原件未资格时不进入事件账本，已有 primary 活动分类不降级，未知时间和不确定谱系不伪造为零。
+**R6：全页Web。** E6外部脚本支持sourceRoot/output，公开auth/upload/read创建单一fixture：
 
-主线自身源码的 typecheck/build/diffcheck 通过，分析 / MCP / 历史 / 材料 / 跨设备 / 材料独立资格 / 搜索定向 **10/10**（72.18 秒）。证据：主件链 `rOCNli`、occurrence 重写 `DR4rpF`、历史 `8hVnGg`、材料公开整链 `us6Ouo`、已有 primary / 材料增长 / 拒绝 `cYsTRx`、材料保存阅读 `RpQYSX`、HTTPS OAuth MCP `hl8Ew2`、全分页搜索 `ckFHNx`；analysis 两项为原句/原锚点契约及未配置公开 API 回归。
+```powershell
+$env:SKYNET_AUDIT_REPO='ABSOLUTE_CLEAN_BUILT_SOURCE_ROOT'
+$env:SKYNET_AUDIT_OUTPUT='ABSOLUTE_NEW_DURABLE_EVIDENCE_ROOT'
+node node_modules/tsx/dist/cli.mjs F:/GenCode/Skynet-evidence/v1-2026-09-30/web-audit/probe.mts
+```
 
-此合并没有源码冲突，未重复跑相邻原生场景。实际原生证据明确来自各自实现分支：#22 `2af8421` 的 Windows `B3TxgX`、Linux `oc2IFY` 实际 Claude Code 公开 worker 整链；#19 `73c745e` 的 `Ba7caC` 实际 Codex CLI 0.157.1 服务器独立材料恢复→正常审核 UserPromptSubmit→历史/新增员工归属。均为明确 loopback 合成 provider，没有付费模型或 Desktop UI 验收。完整发布门槛 G0–G4、#22 的 PAYG 条件及 G2 完整故障矩阵继续开放。
+最终修订代理把可复现版移入仓库tests，在`pages()`加#30更正/历史/显示项目、#32合入后的运行页及登录/退出；320/375/760/1280/1920×light/dark×已有/空/错误、长无空格employee/project/256KB输出、原件完整导出。断言实际overflow/dark palette，截viewport/full-page，人工检查标签/键盘/焦点/原生控件对比度。外部脚本后加asset/capture guards尚未再实际运行，不算新增通过。
 
-## 2026-09-30 #14 recovery 集成
+**R7：安装与性能。** HOLD解除、单次实际静默Task验证后，按#11–14登记≥2员工×≥2环境，复跑npm/市场/旧载荷/repair/upgrade/uninstall及正常登录/休眠。`node dist/tests/measure-installed-hook.js ABSOLUTE_OWNED_INSTALLED_SKYNET_LAUNCHER`保存≥200全样本/P50/P95/max。安装≤2min、事件→查询P95≤60s分别测；下载/信任/首次历史分别计。
 
-`1a8eb53` 合入最新分析/材料主线，只有文档进度冲突，保留双方证据；源码无冲突。支线 typecheck/build/diffcheck 通过；强制 Disabled task fallback 的 worker/监督器崩溃恢复与 UTF8 三字节分割中文path公开采集2/2通过（88.24秒）。该支线完整24项仍为23 pass /1 fail /0 cancelled（143.18秒），安装含确定性 fallback crash通过，maintenance初次安装出现1500ms控制无响应。定向新维护路径1/1通过（171.24秒）不能覆盖该全量红结果；此前23pass/1cancel与22pass/1fail/1cancel记录同样保留。
+E5正常hook的外部`performance/hook-baseline.mjs`固定main路径/产品68compiled；先审阅并登记实际source/build，再`node F:/GenCode/Skynet-evidence/v1-2026-09-30/performance/hook-baseline.mjs`。原文可见入口为`node F:/GenCode/Skynet-evidence/v1-2026-09-30/performance/raw-visibility-probe.mjs`，同样先核对固定own30源码/环境；独立核查脚本是`performance/verify-raw-visibility.mjs`。它们不装Task，不代表支持客户端或旧Linux满盘重测。完整Linux`npm test`依CI workflow执行，不推断Windows全量。
 
-后续诊断指针 `%TEMP%/skynet-v1-implementation/runtime-control-diagnosis-readiness.md` 准备 role/action、connect/response/server event-loop 脱敏时序与最小化压力条件，tight red-capable loop 尚未完成，不能先假定CPU负载或调大timeout。G1/G2与全部V1门槛仍开放。
+**R8：#32尚未合入。** 合入后取真实文档/CLI/hash再执行，不引用当前仓库不存在的入口。覆盖SQL exported snapshot+全部ACK staged chunks、raw/导出/报告引用、fresh PG restore-before-migrate、complete marker/receipt崩溃窗口、损坏拒绝、claims/预算fencing、恢复服务器独立native包、HTTP/Web/MCP容量/备份状态，区分same-host/off-host/未知故障域。
 
-recovery 合并后主线自身 typecheck/build/diffcheck 与 control保护5/5通过（2.04秒）；只有文档冲突，不重复heavy/native。完整Windows24项红结果来自该recovery支线，源码无冲突不能将它改写为主线完整通过；此前f6ccbca Linux28/28同样是另一环境/提交的证据。
+## 精简证据索引
 
-## 2026-09-30 #24 持久分析队列准备集成
+外部相对路径统一基于`F:/GenCode/Skynet-evidence/v1-2026-09-30/`，不是仓库文件。原`v1-acceptance-inventory.json`的at09:55:18.277Z/head1c2814c快照不改；增量hash见`issue-33-preflight-inventory.json`，只核查已有文件，不产生行为证据。
 
-`f2b9cf9` 经 `c281d7c` 无冲突合入。保留 #14 guardian/UTF8、G0 原生恢复、#19 主件/材料原锚点，以及分析 inputLocation 的精确语义偏移。主线自身 typecheck/build/diffcheck 与队列/分析/OAuth MCP/旧会话（含自动增量及 confirmed append）5/5通过（18.7秒）。队列证据 `%TEMP%/skynet-test-ZW9LOh`，历史 `jxlHRv`，HTTPS MCP `Y5P5bC`。没有重复完整 Windows 批次，也不声明已修复后台控制失败。
+| 代号 | 结果 / 来源 / 现存证据 |
+| --- | --- |
+| E1 当前CI | 产品68 [Linux CI](https://github.com/yiwer/Skynet/actions/runs/36697980515/job/109830431425) typecheck/build、**56/56，146.80s，0fail/0cancel**，`ci-68ee347-linux.log`。docs150 [CI36700854354](https://github.com/yiwer/Skynet/actions/runs/36700854354) completed/success、head15021a4；docs1c281 CI36698515617 success不重复计产品覆盖 |
+| E2 当前公开主线 | #30 `main-30-integration.log`/`main-30-evidence-summary.json`/`main-30/`：12/12、56.26s；#31 `main-31-integration.log`/`main-31-evidence-summary.json`/`coverage-f611dad8-9b43-4b47-81a1-706c3231c67d/public-flow.json`：12/12、31.43s、5LAcc5；#30组合矩阵`coverage-a1e041b4-99fa-4822-9c9c-6b2e5174429b/public-flow.json`。旧报告不从latest账本回填 |
+| E3 控制与资格已集成 | runtime b93ffeb→92e3711，main14/14、39.63s；rw1nib status8.04/stop2.19ms、2DhhCy exit17、zEh7J6/XwQOiK 2500ms drain见[诊断](runtime-control-diagnosis.md)，部分TEMP已失效。资格/周项目主线8/8、31.94s，`main-29-qualification-integration.log`/`main-29-qualification/`；旧件17,826,999bytes，raw64MiB、analysis8MiB；`caQOyh-legacy-material-qualification-evidence.json`/`wJq5or-material-qualification-evidence.json` |
+| E4 实际native分支 | G0497e8da六项通过→3fb6454；#22 2af8421：B3TxgX(W)/oc2IFY(L)；#19 73c745e：Ba7caC正常Codex材料资格；#24 f2b9cf9：5Mze6i(W)30.9s/pvpq1E(L UID1000)32.1s；#29组合`issue-29/1hfWI0-work-view-public-evidence.json`；#30 `issue-30/xUlWpY-work-view-public-evidence.json`1/1、54.37s。无源码冲突合入复用分支证据，不冒称main再native；各票列详细hash/配方/边界 |
+| E5 性能新实测 | `performance/hook-db721967-432e-4b2a-9f4f-cf7030ac2fb8/result.json`/`performance/hook-baseline.mjs`：W/product68，200/200唯一样本入spool，P50 **52.53**/P95 **67.17**/max **137.34ms**；无gap/原件读取/网络，Task0/provider0、hidden child≤3s。另`performance/raw-2c49f95d-db2e-444c-8e4d-a5d53195bd03/result.json`与`independent-verification.json`：own30 c5d23c5公开CLI hook→collector→服务器200/200可见，P50 **678.0862**/P95 **1161.1511**/max **1217.4754ms**、poll100ms、0missing/fail/timeout；总13.918s含准备cleanup。ROOT独立重算分布、200nonce/prefixSHA及11raw hash全部true；collector/server/packages与main68 relevant源码diff空，不是main执行。1员工/设备/会话、loopback服务器/PG512MiB1CPU、未配置分析、主机并发不控、Task/native/paid0；不代表登记试点/支持客户端AC22签收 |
+| E5 故障路径新增 | `performance/enospc-result.md`、`performance/enospc-d320a115-3b17-4a86-98c3-b7f54f324c82/host.json`/`output/result.json`：product68冻结载荷，Linux WSL2/Node24.21/UID1000、1CPU/128MiB/pids64/networknone/root只读，自有2MiB tmpfs实际ENOSPC、前后free0。200/200顺序child exit0且精确storage诊断；P50 **52.027888**/P95 **72.561423**/max **106.325139ms**，spool0/gap无法落盘；sample SHA256 `0202523324d4343905aa9aefe3b1737f3225f4b3ce394daba94521d68107f60b`。owned容器已不存在；无产品优化/Task/setup/native/paid。不是旧四任务并行111.35ms条件，不能覆盖其红。复跑入口 `node F:/GenCode/Skynet-evidence/v1-2026-09-30/performance/hook-enospc-probe.mjs` |
+| E6 当前Web/UTF8红 | `web-audit/run-2/result.json`/`web-audit/summary.json`/`web-audit/audit-handoff.md`：producta458、112captures、58overflow、0capture/page exceptions；56dark仍亮色。简化直接文字contrast min5.436/0fail非完整无障碍证明；21代表PNG人工核对+ROOT两张。`public-utf8-red-result.json`/`public-utf8-red.mjs`/`evidence-utf8-probe-result.json`：FF产生U+FFFD/gap0/额外活动；合法encoded U+FFFD控制与下载原hash通过；通用parser/既存origin待修 |
+| E7 #32支线阶段 | bbcb37b `issue-32-backup-stage2-green.log`1/1、9.16s、4eBW26；`issue-32-stage2-public.json`：两对象296bytes/dump89662bytes/PG17.11/Node24.21/same-host/integrity-only/stagedSubmission200，`issue-32-stage2-helper-image.json`。随后heartbeat修订 `issue-32-heartbeat-reconcile-green.log`2/2、19.81s：restore live_valid=false/真实heartbeat再true，历史观测不改。`backup-permission-preflight-result.json` UID1000访问1001私有0700/0600 EACCES→匹配1001读写成功；未放宽product权限。stage3 clean70c3034 `issue-32-stage3-green.log`4/4、37.59s，paths/public/fault/Linuxvolumes；`issue-32-stage3-fault-public.json`/`issue-32-stage3-heartbeat-public.json`/`issue-32-stage3-linux-volumes.json`；named-volume app/helper UID1000保持目录0700/文件0600。加严格SQLerror枚举与raw非空目标拒绝后 `issue-32-crash-fence-final.log`1/1，用例32.09s/批次32.74s。未合main，完整report/OAuthMCP/实际双CLI续聊未完 |
+| E8 历史与失效 | 原inventory44份durable、main30/31收据SHA一致，17条旧TEMP不存在。`ci-9b90e7a-linux.log`红；`ci-0743d4d-linux.log`36/36、`ci-6089062-linux.log`45/45、`ci-0dc863a-linux.log`49/49、`ci-a4588a6-linux.log`53/53只证明各源码。早期基线17/17、1665d08的19/19、f6ccbca的28/28（100.38s）仍保留各票/CI记录 |
 
-实际 CLI 证据来自 #24 实现分支最终源码：Windows `5Mze6i`1/1（30.9秒），Linux UID1000生产 worker镜像 `pvpq1E`1/1（32.1秒）。两次均明确使用合成 loopback provider，没有付费调用。模型输出无效引用/挂起均在两次总尝试后停止，Web/MCP队列同状态，未知用量不退款，故障期间原件仍可提交/读取/导出。正金额预算算术只用测试自建假凭据/价格进行数据库操作，不代表计费证明。已修迁移与在线领取的 jobs/targets 锁反转；受控旧实现稳定 red2.8秒、固定锁顺序后 green，以及原始 Windows native 复跑均有维护回归。详见 [#24](issue-24.md)。
+旧TEMP17条精确路径保留原inventory：native research/code-change/subagent/attachment、runtime diagnosis/reporting readiness、六G0原记录am35Jw/T5UcDo/iKyW27/fXHp3P/Frh0VR/TTEPSP、runtime summary ySaGHQ/main rw1nib、hook qZM0lv、local-fault txjgno、UTF8 finding。原因未知，不重造原日志。票据历史值保留，但失效原文件不能作为现存附件；新复跑不倒填旧run。
 
-最新较早节点 `9b90e7a` 的 [Linux CI](https://github.com/yiwer/Skynet/actions/runs/36677460451) 为27pass/1fail/0cancelled（106.54秒），失败是安装测试 `installation.test.ts:204` 期望禁用任务时包含 `not yet verified`；runtime 状态竞态由 #14 独立跟进。该结果不含本次 #24，不能用主线定向通过覆盖，也不把之前 f6ccbca 的28/28改写为最新完整通过。此前 Windows 初次维护1500ms控制无响应仍保留，后续独立 tight-loop 诊断继续。
+## 历史失败、取消与当前缺陷
 
-G0–G4、#21/G2、#22/#24 的真实 PAYG/G3均开放。#23长会话、#28日报及之后票据继续按依赖准备；未宣称 V1完成或关闭票据。
+后续绿色不改写下列红/取消，各票原记录不删除；表内聚合关键失败，其他中间诊断仍见票据。
 
-## 2026-09-30 日报 / 长会话组合准备与失败保留
+| 来源 | 实际失败/取消 | 后续边界 |
+| --- | --- | --- |
+| G0 / [#10](issue-10.md) | Windows ordinary15/17 installation/plugin runtime unresponsive；hQ60LH supervisor handshake无worker | 六native成功是不同流程 |
+| [#14](issue-14.md)早期Windows | 23pass/1cancel252.02s；22pass/1fail/1cancel250.47s；maintenance240s预算、fallback Task/directspawn不自动恢复 | 取消后body证据不算通过；guardian/UTF8后来2/2、88.24s |
+| #14 recoveryWindows | 23pass/1fail/0cancel143.18s；initial-install1500ms无响应 | maintenance1/1、171.24s不覆盖该批；control5/5纯保护另算 |
+| [#23](issue-23.md)Windows | 33项31pass/2fail/0cancel237.078s；installationGbzZun73.131s/pluginj1GGMW72.607s均1500ms；maintenanceXZRnZf236.150s过 | 不含后来的日报/最终runtime；不可合并所有失败原因或当旧payload proof |
+| [控制诊断](runtime-control-diagnosis.md) | fresh Task压力8次2红，spawn2164.11/2011.15ms、TCP1.63/1.55ms、server arrival在spawn返回后约3ms | 正确caller2200ms旧RED→线程GREEN、main14/14；线程异常早替换三child RED→等auth lease释放GREEN。单existing-state40/0不同条件；无修后Task/fullWindows |
+| [状态观测](issue-14-status-observation.md)/Linux9b90 | 27/28、106.54s，completed routing sweep被过早观测 | 6324d0a→9f06a49 CI29/29、111.125s；不同于Windows1500ms |
+| [#18](issue-18.md)/[#14](issue-14.md)性能 | 并行故障200样本P50 58.16/P95 **111.35**/max186.85ms超过100目标；maintained200 P50 59.99/P95 85.44/max **1075.89ms**长尾 | earlier84.38/76.99及E5正常67.17不同负载，不称压力已修 |
+| [#31](issue-31.md)/[#30](issue-30.md) | 初始9/10固定MCP tool数；更正404/迟到日0/项目null；完整workflow54.48/39.94/55.15s为分页首20/pending正确409/错claim snapshot | 后续命名契约10/10后12/12、#30主线12/12不删除原红 |
+| Docker/backup前置 | daemon挂起导致29/material120s取消、进程343.89s；首次tool父目录0444 MODULE_NOT_FOUND、registry45.017s timeout | 非业务根因结论；后续tools smoke2.42s SQLcalls0不验收灾备 |
+| E5 ENOSPC首测工具 | `performance/enospc-8fc2110b-7106-4cfc-8ef8-0a2267b1829b/`：Windows生成Linux launcher带`file:///F:/`，首样本module missing；清理matcher大小写错，ROOT独立确认owned容器不存在 | 仅1样本、无200分布，非产品延迟失败；改为Linux内product launcherText生成后以新owner复跑，原失败不混入指标 |
+| #32支线 | status404 3.76s、CLI缺失；首dump/restore成功但错预期201（现有接口200）23.05s；旧heartbeat错误connected16.18s；permission首fixture错单独留存 | stage2 9.16s/WIP heartbeat2/2独立登记；UID匹配不是完整恢复 |
+| 当前UTF8/Web | E6 FF额外活动gap0、58overflow/无dark；首测112次`__name`测量错保留`failed-measurement-run.json`，非产品失败 | strict分析/proof/统计不等于通用parser修复；run2成功测量不等于页面通过 |
 
-安装状态观测6324d0a经9f06a49集成；旧Linux27/28以 [focused修订](issue-14-status-observation.md) 的实际失败/完成routing sweep解释为准，保留原失败。`9f06a49` 的 [CI](https://github.com/yiwer/Skynet/actions/runs/36680977269/job/109776132842) 类型检查/构建及29/29通过（111.12秒）。日报5399481经185f6af，长会话803f89b经组合主线0743d4d集成；该组合的 [Linux CI](https://github.com/yiwer/Skynet/actions/runs/36681601424/job/109778040443) 类型检查/构建及36/36通过（119.91秒）。文档冲突保留24当前适用版本、28固定版本与23原范围。主线自身typecheck/build/diffcheck通过，归属/报告等12/12（18.45秒）及组合长范围/报告等11/11（17.86秒）；本次主线实际Claude日报公开链1/1（19.92秒）eJcXIF，处理字段original-utf16-1、raw未知仍partial。没有重跑heavy完整Windows。
+[#18](issue-18.md)初始16/17 logout竞态、[#23](issue-23.md)时间戳/原锚点fixture错误等仍留原票。源修订、测试修订、环境失败与验收分别记账，当前56/56不覆盖历史。
 
-23支线最新完整ordinary33项31pass/2fail/0cancel（237.08秒），安装GbzZun与插件j1GGMW均1500ms runtime-control无响应；该完整批次尚不包含日报，不改写为当前主线整套结果。既有recovery23/24及更早取消/失败批次同样保留，源故障继续独立诊断。G1/G2/G3及全部门槛仍开放。材料先作历史上下文后在原设备取得正常独立资格时的活动分类已交独立修订；冻结事件归属不被日报擅自重解释，G2不因计数/引用测试通过而签收。
+## 需要真人、账号或连续运行的最少条件
 
-## 后台控制focused修订集成
+1. 正常隔离Windows Desktop账号/环境（无需员工真实资料），声明支持OS/版本/信任/可写工作区；静默Task单次验证后登记完整安装/登录/重启/休眠生命周期。
+2. 千问PAYG专用配置/凭据路径、明确模型ID、核实价格和授权预算，以及部署HTTPS origin；先G2再独立Claude质量/引用/长范围抽检，不读旧Key/猜模型。
+3. 第二位操作者复现安装/修复/升级/卸载和#32新服务器恢复；登记备份故障域/试点负载，采集安装与原文可见延迟。
+4. G0–G3通过后授权连续5个工作日试点，负责人核对验收产出物，在[Issue #1](https://github.com/yiwer/Skynet/issues/1)签收。
 
-`b93ffeb` 经 `92e3711` 无冲突合入，主线自身类型检查、构建、diff检查及控制/launch-thread/旧Task登记纯编排 **14/14通过（39.63s）**。新证据 `%TEMP%/skynet-control-spawn-rw1nib`：实际spawn同步阻塞2200ms，status8.04ms、stop2.19ms，均在返回前确认；真实child退出0并释放角色租约。`2DhhCy` exit17恢复选定载荷；`zEh7J6` 与 `XwQOiK` 证明线程异常后2500ms原生租约释放前不替换，stop仍响应并最终退出。旧实现正确caller RED→GREEN见 [诊断](runtime-control-diagnosis.md)。
-
-集成节点 `6089062` 的 [Linux CI](https://github.com/yiwer/Skynet/actions/runs/36687101484/job/109795360132) 已通过类型检查、构建及 **45/45（107.94秒，0 fail / 0 cancelled）**，包含后台控制线程及旧Task登记纯编排。本次没有实际Task安装或heavy完整Windows；纯Task元数据替身不算生命周期验收。此前Windows完整红/取消批次保留，真实隐藏Task、完整Windows、Desktop、PAYG与所有门槛继续开放。
-
-## 周/项目与材料后资格集成
-
-集成节点 `0dc863a` 的 [Linux CI](https://github.com/yiwer/Skynet/actions/runs/36691871149/job/109810712884) 已通过类型检查、构建和 **49/49（126.43秒，0 fail / 0 cancelled）**，包含新增资格与周/项目回归；不替代 Windows 生命周期或原生客户端的独立验收。
-
-`d89c5c6` 组合 `1c41d21` 后无冲突合入 `bc00a97`，保留原运行时源码与诊断。主线自身typecheck/build/diffcheck及材料资格、大型旧件核查、周/项目、日报和OAuth MCP **8/8 PASS（31.94s）**；`zSGfJk`、`5unazv`、`Wq1MBU`、`gUPwf4`，日志 `F:/GenCode/Skynet-evidence/v1-2026-09-30/main-29-qualification-integration.log`。可信独立来源资格修订使当前分类/分析适用性/报告引用更新，旧固定报告全文、原员工/项目/日期/原件/eventId保留。原件支持64MiB，实际大型旧件为17,826,999 bytes；分析输入8MiB上限不放宽。
-
-实际Claude2.1.281周/项目loopback1/1为组合支线证据 `1hfWI0`，不是本次主线原生复跑。没有Task/maintenance/完整Windows，既有31/33、23/24、取消与性能失败不被本次定向通过覆盖。通用解析器单个0xFF公开RED仍错误产生替换文字、gap0及额外活动；合法U+FFFD与原件hash对照通过，durable `public-utf8-red-result.json`，待独立统一修订。G0–G4、G2/G3、Desktop、PAYG质量/预算、第二人/五日试点及#32独立灾备均开放。
-
-## 团队覆盖 / 来源统计主线集成
-
-clean `519d59f` 无冲突合入 `eb69a46`，保留Linux49/49与运行时/资格/周项目旧证据。主线自身typecheck/build/diffcheck及source/day/MCP/material/work/coverage定向 **12/12 PASS（31.43s）**。公开fixture `5LAcc5` 验证收到时的缺口保留、历史未知、原材料资格/辅助计数基线、固定统计/日报及员工项目只读下钻；safe JSON与五宽截图已存 `F:/GenCode/Skynet-evidence/v1-2026-09-30/coverage-f611dad8-9b43-4b47-81a1-706c3231c67d/`，日志 `main-31-integration.log`。
-
-不复跑实际native、Task/maintenance或完整Windows；历史失败与所有门槛不变。来源Token不是账单，时间点区间不是工时，部署前覆盖未知；辅助统计strictUTF8不表示一般证据解析非法字节已修。#30迟到/更正与#32一致灾备仍待独立交付。
-
-## 覆盖矩阵主线 Linux CI（2026-09-30）
-
-`a4588a6` 的 [Linux CI](https://github.com/yiwer/Skynet/actions/runs/36694392990/job/109818763622) 已通过类型检查、构建与 **53/53（162.16秒，0 fail / 0 cancelled）**。这是合入 #31 后的主线证据；主线本地定向12/12与独立原生测试来源保持区分。安全日志已保存 `F:/GenCode/Skynet-evidence/v1-2026-09-30/ci-a4588a6-linux.log`。真实Task、完整Windows、旧性能失败与G0–G4未因此关闭。
-
-## 迟到活动与人工更正主线集成
-
-`c5d23c5` 无冲突合入 `6d828bf`，运行时/资格/覆盖统计/周项目已有行为保留。主线自身typecheck/build/diffcheck及审计/late/完整更正/资格/source统计/覆盖/MCP/work **12/12 PASS（56.26s）**，`nUxLNy/bjemQB/6G2Ijm/jur5EB/rTGOXo/pl3vSp/k1YWQn/AkjTV0`。已建空日/周/项目首条迟到活动无需再POST，旧固定版本与原件不改；旧分析晚完成非适用。六份safe JSON与hash摘要/日志保存在 durable `main-30/`、`main-30-integration.log`、`main-30-evidence-summary.json`及覆盖截图目录 `coverage-a1e041b4-99fa-4822-9c9c-6b2e5174429b/`。
-
-最终实际Claude loopback1/1（54.37s）明确来自支线 `xUlWpY`，未在本次复跑；旧Linux53/53早于#30。没有Task/maintenance/fullWindows，历史RED、通用UTF8缺口及G0–G4仍保留。#32完整一致灾备与公开恢复尚未实现，工具smoke不替代AC-21；正式运营/质量/价格与签收仍待实际证据。
-
-## 迟到数据与人工更正主线 Linux CI（2026-09-30）
-
-`68ee347` 的 [Linux CI](https://github.com/yiwer/Skynet/actions/runs/36697980515/job/109830431425) 已通过类型检查、构建与 **56/56（146.80秒，0 fail / 0 cancelled）**，包含 #30 审计、首次迟到活动及完整更正流程。日志保存 `F:/GenCode/Skynet-evidence/v1-2026-09-30/ci-68ee347-linux.log`。主线本地12/12与支线实际Claude loopback54.37秒分别保留来源；未复跑Task、maintenance或完整Windows。#32在独立树实施，G0–G4与历史失败继续开放。
-
-## 静默 hook 基线补采（2026-09-30）
-
-ROOT在 product `68ee347` 的冻结 compiled CLI/hook/filesystem 和产品 `launcherText` 分派下，使用全新自有 explicit-state 测量 **200次真实进程启动+本地入队**。Windows11 Pro10.0.26200、Node24.12.0、i7-14700K/28逻辑CPU；主机并发工作未控制。P50 **52.53ms**、P95 **67.17ms**、最大 **137.34ms**；200/200唯一样本确实保留在spool、无hook-gap、无原件读取/网络。每个child有3秒上限、windowsHide，完整结果与源/载荷哈希在 `F:/GenCode/Skynet-evidence/v1-2026-09-30/performance/hook-db721967-432e-4b2a-9f4f-cf7030ac2fb8/result.json`；复跑脚本 `performance/hook-baseline.mjs`。
-
-这是隔离状态的正常快路径证据，不是安装完成、真实宿主或旧Linux四任务ENOSPC压力复测；历史P95 **111.35ms** 失败与max **1075.89ms** 长尾保留。没有Task/setup/maintenance/后台启动或付费调用；AC-22/G4及原文可见延迟分布仍待完整实测。
+下一步：合入#32最终证据；独立Standards/Spec review后单一修订代理处理UTF8/Web/权限/性能，再按R1…R8更新实际结果与门槛。
