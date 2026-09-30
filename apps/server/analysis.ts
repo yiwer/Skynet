@@ -8,7 +8,9 @@ import { evidenceLink } from '../../packages/contracts/search.js';
 import type { EvidenceLine } from '../../packages/contracts/archive.js';
 
 export async function migrateAnalysis(db: Database) {
-  await db.query(`BEGIN; SELECT pg_advisory_xact_lock(7402122);
+  const client = await db.connect();
+  try {
+  await client.query(`BEGIN; SELECT pg_advisory_xact_lock(7402122);
     CREATE TABLE IF NOT EXISTS analysis_workers (id text PRIMARY KEY, config jsonb NOT NULL, updated_at timestamptz NOT NULL DEFAULT now());
     CREATE TABLE IF NOT EXISTS analysis_jobs (id uuid PRIMARY KEY, snapshot_id uuid NOT NULL REFERENCES snapshots(id),
       actor_id uuid NOT NULL REFERENCES employees(id), state text NOT NULL, config jsonb NOT NULL, input jsonb NOT NULL,
@@ -17,14 +19,16 @@ export async function migrateAnalysis(db: Database) {
     CREATE INDEX IF NOT EXISTS analysis_snapshot_time ON analysis_jobs(snapshot_id,created_at DESC,id DESC);
     CREATE TABLE IF NOT EXISTS analysis_budgets (id text PRIMARY KEY, reserved_cny numeric NOT NULL DEFAULT 0);
     COMMIT;`);
+  } catch (error) { await client.query('ROLLBACK'); throw error; } finally { client.release(); }
 }
 export type AnalysisInput = AnalysisRun['input'] & { events: EvidenceLine[] };
 const runProjection = `id,snapshot_id AS "snapshotId",state,config,input - 'events' AS input,result,error,
   created_at AS "createdAt",started_at AS "startedAt",finished_at AS "finishedAt"`;
 export function analysisService(db: Database, archive: ArchiveQuery) {
   async function worker() {
-    const result = await db.query("SELECT config FROM analysis_workers WHERE id='short-session' AND updated_at > now()-interval '15 seconds'");
-    return result.rows[0]?.config as AnalysisRun['config'] | undefined;
+    const result = await db.query("SELECT DISTINCT config FROM analysis_workers WHERE updated_at > now()-interval '15 seconds'");
+    // Mixed deployments must not silently select a different model, credential or budget.
+    return result.rows.length === 1 ? result.rows[0]?.config as AnalysisRun['config'] : undefined;
   }
   async function availability() {
     const config = await worker();
@@ -62,12 +66,18 @@ export function analysisService(db: Database, archive: ArchiveQuery) {
       await client.query('COMMIT'); return result.rows[0];
     } catch (error) { await client.query('ROLLBACK'); throw error; } finally { client.release(); }
   }
-  return { list, request, availability };
+  async function get(id: string) {
+    const result = await db.query(`SELECT ${runProjection} FROM analysis_jobs WHERE id=$1`, [id]);
+    if (!result.rows[0]) throw new HttpError(404, '分析任务不存在');
+    return result.rows[0] as AnalysisRun;
+  }
+  return { list, request, availability, get };
 }
 export type AnalysisService = ReturnType<typeof analysisService>;
 
 export function validateAnalysis(input: AnalysisInput, value: unknown): AnalysisItem[] {
   const output = analysisOutputSchema.parse(value);
+  if (!output.items.length) throw new Error('Empty analysis is not a successful extraction');
   return output.items.map(item => {
     if (item.assessment !== 'insufficient' && !item.citations.length) throw new Error('Uncited conclusion');
     const citations = item.citations.map(citation => {

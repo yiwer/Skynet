@@ -11,8 +11,9 @@ await verifyRuntime(config);
 const db = connect(process.env.DATABASE_URL); await migrate(db); await migrateAnalysis(db);
 const shutdown = new AbortController();
 process.once('SIGTERM', () => shutdown.abort()); process.once('SIGINT', () => shutdown.abort());
-const heartbeat = async () => db.query(`INSERT INTO analysis_workers(id,config) VALUES('short-session',$1)
-  ON CONFLICT(id) DO UPDATE SET config=EXCLUDED.config,updated_at=now()`, [publicConfig(config)]);
+const workerId = randomUUID();
+const heartbeat = async () => db.query(`INSERT INTO analysis_workers(id,config) VALUES($1,$2)
+  ON CONFLICT(id) DO UPDATE SET config=EXCLUDED.config,updated_at=now()`, [workerId, publicConfig(config)]);
 await heartbeat();
 const timer = globalThis.setInterval(() => { void heartbeat().catch(() => shutdown.abort()); }, 3000);
 console.log(`Skynet analysis worker ready (${config.mode}; Claude Code ${config.runtimeVersion})`);
@@ -23,6 +24,10 @@ try {
       await client.query('BEGIN'); await client.query('SELECT pg_advisory_xact_lock(7402123)');
       await client.query(`UPDATE analysis_jobs SET state='failed',error='运行中断或超时；用量未知，预算预留保留',finished_at=now()
         WHERE state='running' AND deadline < now()`);
+      await client.query(`UPDATE analysis_jobs SET state='failed',error='原运行配置已离线；未调用模型，请按当前配置重新发起',finished_at=now()
+        WHERE state='queued' AND created_at < now()-interval '30 seconds'
+        AND NOT EXISTS(SELECT 1 FROM analysis_workers w WHERE w.updated_at > now()-interval '15 seconds'
+          AND w.config->>'configurationHash'=analysis_jobs.config->>'configurationHash')`);
       const running = await client.query("SELECT id FROM analysis_jobs WHERE state='running' LIMIT 1");
       if (!running.rows.length) {
         const next = await client.query(`SELECT id,input FROM analysis_jobs WHERE state='queued' AND config->>'configurationHash'=$1 ORDER BY created_at,id LIMIT 1 FOR UPDATE SKIP LOCKED`, [config.configurationHash]);
@@ -51,4 +56,4 @@ try {
         WHERE id=$1 AND run_token=$2 AND state='running'`, [job.id, job.run_token]);
     }
   }
-} finally { clearInterval(timer); await db.end(); }
+} finally { clearInterval(timer); await db.query('DELETE FROM analysis_workers WHERE id=$1', [workerId]); await db.end(); }
