@@ -86,12 +86,13 @@ test('HTTPS OAuth consent, per-request revocation, MCP/Web evidence and complete
     client = new Client({ name: 'public-product-test', version: '1' });
     await client.connect(new StreamableHTTPClientTransport(new URL(resource), { fetch: sandbox.fetchTls,
       requestInit: { headers: { Authorization: `Bearer ${tokens.access_token}` } } }));
-    assert.equal((await client.listTools()).tools.length, 9);
+    assert.equal((await client.listTools()).tools.length, 10);
     async function tool(name: string, args: Record<string, unknown>) {
       const result = await client!.callTool({ name, arguments: args });
       assert.notEqual(result.isError, true, JSON.stringify(result)); assert.ok(Buffer.byteLength(JSON.stringify(result)) <= 96 * 1024);
       return JSON.parse((result.content as { text: string }[])[0]!.text);
     }
+    assert.deepEqual(await tool('read_activity_statistics', {}), await (await sandbox.api('/api/activity-statistics', reader.readerCredential)).json());
       const sessions = await tool('list_sessions', { limit: 1 }); assert.equal(sessions.sessions[0].id, commit.snapshotId);
       const coverage = await tool('read_capture_status', { snapshotId: commit.snapshotId }); assert.equal(coverage.faults[0].id, captureFault.id);
       assert.deepEqual(coverage, await (await sandbox.api(`/api/snapshots/${commit.snapshotId}/capture-status`, reader.readerCredential)).json());
@@ -141,6 +142,49 @@ test('HTTPS OAuth consent, per-request revocation, MCP/Web evidence and complete
     const second = await tool('list_sessions', { limit: 2, cursor: first.nextCursor });
     assert.equal(new Set([...first.sessions, ...second.sessions].map(row => row.id)).size, 4);
     assert.equal(second.nextCursor, null);
+    // Another employee restores the first immutable source and adds one turn.
+    // All transports must preserve mixed historical/new ownership and counters.
+    const restoredDevice = await (await sandbox.api('/api/devices/enroll', reader.enrollmentCredential,
+      json({ installationId: randomUUID(), name: 'same OS user, different bound employee' }))).json();
+    const newTurn = Buffer.from(JSON.stringify({ type: 'response_item', timestamp: new Date(Date.now() + 60_000).toISOString(),
+      payload: { type: 'message', role: 'user', content: [{ type: 'input_text', text: 'MCP_RESTORED_NEW_EMPLOYEE_TURN' }] } }) + '\n');
+    const restoredBytes = Buffer.concat([bytes, newTurn]);
+    for (const payload of [restoredBytes, materialBytes]) assert.equal((await sandbox.api(`/api/chunks/${hash(payload)}`, restoredDevice.deviceCredential,
+      { method: 'PUT', headers: { 'Content-Type': 'application/octet-stream' }, body: payload })).status, 201);
+    const restoredCommit = await (await sandbox.api('/api/snapshots', restoredDevice.deviceCredential, json({ ...manifest,
+      project: '/synthetic/restored-MCP', hash: hash(restoredBytes), byteLength: restoredBytes.length,
+      restoredFrom: { snapshotId: commit.snapshotId, hash: manifest.hash, byteLength: bytes.length } }))).json();
+    assert.ok(restoredCommit.snapshotId);
+    const copiedPage = await tool('read_snapshot', { snapshotId: restoredCommit.snapshotId });
+    assert.equal(copiedPage.provenance.relation, 'verified-restoration'); assert.equal(copiedPage.events[0].origin.employeeId, employee.employeeId);
+    const copiedMaterial = await tool('read_material', { snapshotId: restoredCommit.snapshotId, materialId: material.id });
+    assert.equal(copiedMaterial.ownership.employeeId, employee.employeeId); assert.equal(copiedMaterial.ownership.snapshotId, commit.snapshotId);
+    assert.equal(copiedMaterial.ownership.countedAsActivity, false); assert.equal(copiedMaterial.ownership.relation, 'verified-identical-context');
+    const newPage = await tool('read_snapshot', { snapshotId: restoredCommit.snapshotId, offset: 124 });
+    assert.equal(newPage.events[0].text, 'MCP_RESTORED_NEW_EMPLOYEE_TURN'); assert.equal(newPage.events[0].origin.employeeId, reader.employeeId);
+    const mixedStats = await tool('read_activity_statistics', {});
+    assert.deepEqual(mixedStats, await (await sandbox.api('/api/activity-statistics', reader.readerCredential)).json());
+    assert.equal(mixedStats.rows.filter((row: any) => row.employeeId === reader.employeeId).reduce((n: number, row: any) => n + row.records, 0), 1);
+    const copiedSearch = await tool('search_sessions', { employee: '合成 MCP 存档员工', project: '/synthetic/mcp', content: '证据 122' });
+    const copiedHit = copiedSearch.hits.find((hit: any) => hit.id === restoredCommit.snapshotId); assert.ok(copiedHit);
+    const copiedLocation = await tool('read_location', { snapshotId: copiedHit.id, location: copiedHit.location });
+    assert.equal(copiedLocation.events[0].origin.employeeId, employee.employeeId); assert.equal(copiedLocation.events[0].origin.project, '/synthetic/mcp');
+    const restoredExport = await tool('prepare_export', { snapshotId: restoredCommit.snapshotId, format: 'recovery' });
+    const restoredPackage = await (await sandbox.api(restoredExport.downloadPath, tokens.access_token)).json();
+    assert.deepEqual(Buffer.from(restoredPackage.artifact.data, 'base64'), restoredBytes);
+    assert.equal(restoredPackage.manifest.restoredFrom.snapshotId, commit.snapshotId);
+    const changedMaterialBytes = Buffer.concat([materialBytes, Buffer.from('new associated bytes')]);
+    assert.equal((await sandbox.api(`/api/chunks/${hash(changedMaterialBytes)}`, restoredDevice.deviceCredential,
+      { method: 'PUT', headers: { 'Content-Type': 'application/octet-stream' }, body: changedMaterialBytes })).status, 201);
+    const materialRevision = await (await sandbox.api('/api/snapshots', restoredDevice.deviceCredential, json({ ...restoredPackage.manifest,
+      capture: { ...restoredPackage.manifest.capture, revision: 2, change: 'materials', previousSnapshotId: restoredCommit.snapshotId,
+        materials: [{ ...material, hash: hash(changedMaterialBytes), byteLength: changedMaterialBytes.length }] } }))).json();
+    assert.ok(materialRevision.snapshotId);
+    const changedContext = await tool('read_material', { snapshotId: materialRevision.snapshotId, materialId: material.id });
+    assert.equal(changedContext.ownership.relation, 'changed-context-uncertain');
+    assert.equal(changedContext.ownership.previousSource.employeeId, employee.employeeId); assert.equal(changedContext.ownership.countedAsActivity, false);
+    assert.match(changedContext.ownership.warning, /不能把整份材料归为当前员工或此前员工/);
+    assert.deepEqual(await tool('read_activity_statistics', {}), mixedStats, 'material revisions and repeated restoration claims do not duplicate the recorded target suffix');
     const refreshed = await (await sandbox.api('/oauth/token', undefined, form({ grant_type: 'refresh_token', client_id: registration.client_id,
       refresh_token: tokens.refresh_token, resource }))).json(); assert.ok(refreshed.access_token);
     assert.equal((await sandbox.api('/oauth/token', undefined, form({ grant_type: 'refresh_token', client_id: registration.client_id,

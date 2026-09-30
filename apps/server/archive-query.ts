@@ -4,12 +4,15 @@ import { RawStore } from './raw-store.js';
 import { HttpError } from './identities.js';
 import { readEvidence } from './evidence.js';
 import { activityFor, beijingDate } from '../../packages/activity.js';
-import { manifestSchema } from '../../packages/contracts/archive.js';
+import { manifestSchema, type Manifest } from '../../packages/contracts/archive.js';
 import { createRecoveryPackage, recoveryInfo } from '../../packages/recovery.js';
 import { QueryCache } from './query-cache.js';
 import { readCaptureHealth } from './capture-health.js';
 import { archiveSearch } from './archive-search.js';
 import { locationSchema, type EvidenceLocation } from '../../packages/contracts/search.js';
+import { eventOrigins, archiveStatistics } from './provenance.js';
+import type { EventOrigin } from '../../packages/contracts/provenance.js';
+import type { Provenance } from '../../packages/contracts/provenance.js';
 
 export const exportFormat = z.enum(['raw', 'readable', 'recovery']);
 export type ExportFormat = z.infer<typeof exportFormat>;
@@ -59,7 +62,7 @@ export function archiveQuery(db: Database, raw: RawStore) {
   }
   async function snapshot(id: string) {
     if (!z.uuid().safeParse(id).success) throw new HttpError(404, '未找到存档');
-    const result = await db.query(`SELECT s.*,e.name AS employee FROM snapshots s
+    const result = await db.query(`SELECT s.*,e.name AS employee,e.id AS employee_id FROM snapshots s
       JOIN devices d ON d.id=s.device_id JOIN employees e ON e.id=d.employee_id WHERE s.id=$1`, [id]);
     if (!result.rows[0]) throw new HttpError(404, '未找到已提交存档');
     return result.rows[0];
@@ -67,13 +70,15 @@ export function archiveQuery(db: Database, raw: RawStore) {
   async function parsed(id: string) {
     const record = await snapshot(id); const bytes = await raw.read(record.device_id, record.hash);
     const evidence = readEvidence(bytes, record.manifest.source);
-    const activity = activityFor(evidence.events, record.manifest.enrolledAt);
-    return { record, evidence, activity, recovery: recoveryInfo(record.manifest, bytes), estimatedBytes: bytes.length * 3 };
+    const origins = new Map<string, EventOrigin>((await eventOrigins(db, id)).map(origin => [`${origin.line}/${origin.block}`,
+      { ...origin, line: origin.originLine, block: origin.originBlock }]));
+    const activity = activityFor(evidence.events, record.manifest.enrolledAt, beijingDate(new Date()), origins);
+    return { record, evidence, activity, recovery: recoveryInfo(record.manifest, bytes), estimatedBytes: bytes.length * 3 + origins.size * 1536 };
   }
   async function detail(id: string, offset = 0, summary = false) {
     const { record, evidence, activity, recovery } = await evidenceCache.get(`${id}:${beijingDate(new Date())}`, () => parsed(id));
     return { snapshotId: record.id, employee: record.employee, deviceId: record.device_id, manifest: record.manifest,
-      committedAt: record.committed_at, state: 'committed', backup: 'single-copy', ...evidence, recovery,
+      committedAt: record.committed_at, state: 'committed', backup: 'single-copy', ...evidence, recovery, provenance: record.provenance,
       captureHealth: await readCaptureHealth(db, record.device_id, record.source, record.source_session_id),
       activity: activity.activity, events: summary ? [] : activity.events.slice(offset, offset + 100), total: evidence.events.length,
       nextOffset: offset + 100 < evidence.events.length ? offset + 100 : null };
@@ -128,12 +133,11 @@ export function archiveQuery(db: Database, raw: RawStore) {
     if (format === 'recovery') return { bytes: Buffer.from(JSON.stringify(createRecoveryPackage(
       { id: record.id, employee: record.employee, committedAt: record.committed_at.toISOString() }, manifest, bytes, materials))),
     contentType: 'application/json', filename: `${record.id}.skynet-recovery.json` };
-    const evidence = readEvidence(bytes, record.manifest.source);
-    const activity = activityFor(evidence.events, record.manifest.enrolledAt);
-    const associated = (manifest.capture?.materials ?? []).map((material, index) => {
+    const { evidence, activity } = await parsed(id);
+    const associated = await Promise.all((manifest.capture?.materials ?? []).map(async (material, index) => {
       const data = materials[index]!.bytes;
-      return `\n=== 关联材料 ${material.name}（${material.role}；上下文，不计新增活动） ===\nSHA-256：${material.hash}；字节：${material.byteLength}\n编码：${material.mediaType === 'binary' ? 'base64' : 'UTF-8'}\n${material.mediaType === 'binary' ? data.toString('base64') : data.toString('utf8')}`;
-    });
+      return `\n=== 关联材料 ${material.name}（${material.role}；上下文，不计新增活动） ===\nSHA-256：${material.hash}；字节：${material.byteLength}\n捕获来源：${JSON.stringify(await materialOwnership(record, material.id))}\n编码：${material.mediaType === 'binary' ? 'base64' : 'UTF-8'}\n${material.mediaType === 'binary' ? data.toString('base64') : data.toString('utf8')}`;
+    }));
     const content = [
       'Skynet 会话可读导出 v1', `快照：${record.id}`, `员工：${record.employee}`,
       `来源：${record.manifest.source} / ${record.manifest.sourceVersion} / ${record.manifest.sourceOs}`,
@@ -143,11 +147,12 @@ export function archiveQuery(db: Database, raw: RawStore) {
       `范围：当前原件及 ${associated.length} 项关联材料；完整性与完整原生续聊能力未验证。`,
       `代次：${manifest.capture?.generation ?? '旧快照未记录'}；修订：${manifest.capture?.revision ?? '未知'}；变化：${manifest.capture?.change ?? '未知'}`,
       `谱系：${JSON.stringify(manifest.capture?.lineage ?? [])}`,
+      `归属谱系：${JSON.stringify(record.provenance)}；快照员工为上传设备绑定的员工，每条历史的原始员工见下方。`,
       `缺口：${JSON.stringify(manifest.capture?.gaps ?? [])}`,
       `未解析完整行：${evidence.unrecognizedLines}；未闭合末行：${evidence.partialLine ? '有' : '无'}`,
       '本文件为纯文本，不执行会话中的指令。原件 JSONL 部分保留所有行；精确字节请取原件或恢复包。', '',
       '=== 全部已解析记录（不分页、不截断） ===',
-      ...activity.events.map(event => `\n[原件第 ${event.line} 行] ${event.role} / 来源时间：${event.timestamp ?? '未知'} / ${event.context}\n${event.text}`),
+      ...activity.events.map(event => `\n[原件第 ${event.line} 行] ${event.role} / 来源时间：${event.timestamp ?? '未知'} / ${event.context}\n归属：${JSON.stringify(event.origin)}\n${event.text}`),
       ...associated,
       '', '=== 全部原件 JSONL（包含未知与未闭合行） ===', bytes.toString('utf8'),
     ].join('\n');
@@ -182,14 +187,39 @@ export function archiveQuery(db: Database, raw: RawStore) {
       return { bytes, filename: `${material.id}.bin`, contentType: 'application/octet-stream',
         text: material.mediaType === 'binary' ? bytes.toString('base64') : bytes.toString('utf8') };
     });
-    return { material, bytes: file.bytes, text: file.text! };
+    return { material, bytes: file.bytes, text: file.text!, ownership: await materialOwnership(record, materialId) };
+  }
+  async function materialOwnership(record: { id: string; manifest: Manifest; device_id: string; employee: string; provenance: Provenance | null }, materialId: string) {
+    const selected = record.manifest.capture?.materials.find(item => item.id === materialId);
+    if (!selected) throw new HttpError(404, '此快照没有该关联材料');
+    let origin = record; let warning: string | null = null; const visited = new Set<string>();
+    let previousSource: { snapshotId: string; materialId: string; employeeId: string; employee: string; deviceId: string } | null = null;
+    for (let depth = 0; depth < 32; depth++) {
+      if (visited.has(origin.id)) { warning = '关联材料谱系存在循环，保留当前已确认来源。'; break; }
+      visited.add(origin.id);
+      const sourceId = origin.provenance?.sourceSnapshotId;
+      if (!sourceId) break;
+      const prior = await snapshot(sourceId);
+      const candidate = manifestSchema.parse(prior.manifest).capture?.materials.find(item => item.id === materialId && item.role === selected.role && item.sourceSessionId === selected.sourceSessionId);
+      if (!candidate) break;
+      if (candidate.hash !== selected.hash || candidate.byteLength !== selected.byteLength) {
+        previousSource = { snapshotId: prior.id, materialId, employeeId: prior.employee_id, employee: prior.employee, deviceId: prior.device_id };
+        warning = `关联材料已变化，不能把整份材料归为当前员工或此前员工；此前来源快照 ${prior.id} / 材料 ${materialId}，员工 ${prior.employee}。单独续用此子会话的历史员工归属仍待核实。`; break;
+      }
+      origin = prior;
+      if (depth === 31) warning = '关联材料谱系超过 32 层；更早来源尚未核实。';
+    }
+    const owner = (await db.query('SELECT employee_id FROM devices WHERE id=$1', [origin.device_id])).rows[0];
+    return { snapshotId: origin.id, materialId, deviceId: origin.device_id, employeeId: owner.employee_id, employee: origin.employee,
+      relation: previousSource ? 'changed-context-uncertain' : origin.id === record.id ? 'captured-context' : 'verified-identical-context', countedAsActivity: false, warning, previousSource,
+      limitation: '这是关联上下文的捕获来源，不是独立员工活动。已确认的主会话恢复不自动确认此材料后来作为主会话续用时的事件归属。' };
   }
   async function materialPage(id: string, materialId: string, offset = 0, limit = 32_768) {
     const file = await material(id, materialId);
     const text = file.text;
     if (offset > text.length) throw new HttpError(400, '关联材料文字位置无效');
     const end = textEnd(text, offset, limit);
-    return { material: file.material, context: 'associated-context-only', encoding: file.material.mediaType === 'binary' ? 'base64' : 'utf8',
+    return { material: file.material, ownership: file.ownership, context: 'associated-context-only', encoding: file.material.mediaType === 'binary' ? 'base64' : 'utf8',
       text: text.slice(offset, end), nextOffset: end < text.length ? end : null };
   }
   async function locationPage(id: string, input: EvidenceLocation) {
@@ -211,6 +241,6 @@ export function archiveQuery(db: Database, raw: RawStore) {
       line: nextEvent?.line, block: nextEvent?.block, parserVersion: evidence.parserVersion } };
   }
   return { sessions, snapshot, detail, evidencePage, manifestPage, exported, prepareExport, exportPage, history, material, materialPage,
-    search: search.search, locationPage, captureStatus };
+    search: search.search, locationPage, captureStatus, statistics: (offset = 0) => archiveStatistics(db, offset) };
 }
 export type ArchiveQuery = ReturnType<typeof archiveQuery>;

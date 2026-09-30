@@ -16,12 +16,14 @@ import { archiveWriter } from './archive-write.js';
 import { enrollDevice } from './enrollment.js';
 import { captureHealthSchema } from '../../packages/contracts/capture-health.js';
 import { saveCaptureHealth, readCaptureHealth } from './capture-health.js';
+import { backfillOrigins } from './provenance.js';
 
 export async function createApp(options: { db: Database; rawDirectory: string; webDirectory?: string; publicOrigin?: string }) {
   const { db } = options;
   await migrate(db);
   await migrateArchiveSearch(db);
   const raw = new RawStore(options.rawDirectory);
+  await backfillOrigins(db, raw);
   const app = Fastify({ bodyLimit: CHUNK_BYTES, logger: false, requestTimeout: 30_000 });
   app.setErrorHandler((error, _request, reply) => {
     if (error instanceof z.ZodError) return reply.code(400).send({ error: '请求格式无效' });
@@ -144,6 +146,10 @@ export async function createApp(options: { db: Database; rawDirectory: string; w
 
   app.get('/api/me', { onRequest: readerGuard }, async request => reader(request.headers.authorization));
   const archive = archiveQuery(db, raw);
+  app.get('/api/activity-statistics', { onRequest: readerGuard }, async request => {
+    const { offset } = z.object({ offset: z.coerce.number().int().min(0).default(0) }).parse(request.query);
+    return archive.statistics(offset);
+  });
   app.get('/api/snapshots/:id/capture-status', { onRequest: readerGuard }, async request => {
     const { offset } = z.object({ offset: z.coerce.number().int().min(0).default(0) }).parse(request.query);
     return archive.captureStatus((request.params as { id: string }).id, offset);

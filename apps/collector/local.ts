@@ -1,8 +1,8 @@
 import { mkdir, readFile, readdir, realpath, unlink } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
-import { isAbsolute, join } from 'node:path';
+import { dirname, isAbsolute, join } from 'node:path';
 import { z } from 'zod';
-import { hostEventSchema, manifestSchema, sourceSchema, type Source } from '../../packages/contracts/archive.js';
+import { hostEventSchema, manifestSchema, restoredFromSchema, sourceSchema, type Source } from '../../packages/contracts/archive.js';
 import { atomicJson } from '../../packages/filesystem.js';
 import { claudeIdentity } from '../../packages/native/claude.js';
 import { readCollectorSettings } from './settings.js';
@@ -180,9 +180,28 @@ async function collectSources(state: string, settings: Settings, monitor: Captur
       const capture = captureSchema.parse({ generation, revision: (previous.capture?.revision ?? 0) + 1, change,
         previousSnapshotId: source.acknowledgedSnapshotId, materials, gaps: discovered.gaps, lineage: discovered.lineage,
         compacted: discovered.compacted, partialLine: discovered.partialLine });
+      let restoredFrom;
+      // Only the exact primary restored rollout can inherit this receipt; unrelated
+      // sessions and context-only materials in the same home cannot claim its owner.
+      if (!previous.acknowledgedHash) {
+        const nativeHome = dirname(settings.nativeRoot);
+        try {
+          const receiptBytes = await readNativeFile(nativeHome, join(nativeHome, 'restore-receipt.json'));
+          if (receiptBytes.length > 1024 * 1024) throw new Error('Restore receipt exceeds its size limit');
+          const receipt = JSON.parse(receiptBytes.toString('utf8'));
+          if (receipt.source === settings.source && receipt.sourceSessionId === source.sessionId
+            && typeof receipt.rolloutPath === 'string' && await safeNativePath(settings.nativeRoot, receipt.rolloutPath) === transcriptPath) {
+            const claim = restoredFromSchema.parse(receipt.restoredFrom);
+            if (bytes.length >= claim.byteLength && hash(bytes.subarray(0, claim.byteLength)) === claim.hash) restoredFrom = claim;
+            else capture.gaps.push({ code: 'unknown-format', reference: '恢复回执的原件前缀已变化；无法确认跨设备历史归属，保留独立记录' });
+          }
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== 'ENOENT') capture.gaps.push({ code: 'unknown-format', reference: '恢复回执不可校验；跨设备历史归属未确认' });
+        }
+      }
       const manifest = manifestSchema.parse({ protocolVersion: 1, sourceSessionId: source.sessionId, source: settings.source,
         sourceVersion, sourceOs: settings.sourceOs, project: source.project,
-        hash: artifactHash, byteLength: bytes.length, qualifiedAt: source.qualifiedAt, capability: 'unverified', capture });
+        hash: artifactHash, byteLength: bytes.length, qualifiedAt: source.qualifiedAt, capability: 'unverified', capture, restoredFrom });
       await delivery.enqueue(manifest, fingerprint, [bytes, ...discovered.artifacts.flatMap(item => item.bytes ? [item.bytes] : [])]);
       monitor.recover(source.sessionId);
     } catch (error) { errors.push((error as Error).message); monitor.fail(error, source.sessionId); }
