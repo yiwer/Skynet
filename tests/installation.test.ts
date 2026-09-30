@@ -200,8 +200,29 @@ test('offline npm package with scripts disabled → one key setup → owned hook
       nativeClient: false, login: 'not-verified', reboot: 'not-verified', sleepResume: 'not-verified', desktopIcon: 'not-verified' }, null, 2));
     // Unknown app-server origin is retained without falsely counting Desktop work.
     const unknown = await syntheticSession(join(codex, 'sessions'));
+    const unknownQueuedAt = Date.now();
     await command(process.execPath, [join(state!, 'skynet-launcher.mjs'), 'hook', '--state', join(state!, 'inbox', 'codex')], env, JSON.stringify(unknown.event));
-    await setTimeout(1400); const gaps = JSON.parse(await installed.run('status')); assert.equal(gaps.codexUnclassifiedEvents, 1); assert.ok(gaps.runtime.errors.some((item: string) => item.includes('not yet verified')));
+    // Inbox count is live; runtime.errors belongs to the last completed sweep.
+    // Await routing observation rather than assuming a fixed delay includes a sweep.
+    let gaps: any;
+    for (let attempt = 0; attempt < 30; attempt++) {
+      gaps = JSON.parse(await installed.run('status'));
+      if (Date.parse(gaps.lastSweepCompletedAt) >= unknownQueuedAt && gaps.runtime.errors.some((item: string) => item.includes('not yet verified'))) break;
+      await setTimeout(200);
+    }
+    assert.equal(gaps.codexUnclassifiedEvents, 1);
+    assert.ok(gaps.runtime.errors.some((item: string) => item.includes('not yet verified')));
+    for (const source of ['codex-cli', 'codex-desktop']) {
+      const tracked = JSON.parse(await readFile(join(state!, 'sources', source, 'tracked.json'), 'utf8').catch(() => '[]'));
+      assert.ok(!tracked.some((entry: any) => entry.sessionId === unknown.event.session_id), 'unverified origin never qualifies in either source');
+      const spool = join(state!, 'sources', source, 'spool');
+      for (const file of await readdir(spool).catch(() => [])) if (file.endsWith('.json')) {
+        const queued = JSON.parse(await readFile(join(spool, file), 'utf8'));
+        assert.notEqual(queued.event.session_id, unknown.event.session_id, 'unverified origin is never routed to a source queue');
+      }
+    }
+    const unknownSessions = await (await fetch(`${origin}/api/sessions`, { headers })).json();
+    assert.ok(!unknownSessions.sessions.some((entry: any) => entry.sourceSessionId === unknown.event.session_id), 'unverified origin has no server archive');
     // Removing the npm location from availability leaves the stable runtime and
     // configured absolute hook intact; restoring it permits later setup checks.
     await rename(installed.prefix, `${installed.prefix} moved`);
