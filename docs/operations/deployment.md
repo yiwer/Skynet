@@ -157,3 +157,7 @@ sudo bash /opt/skynet/current/deploy/ubuntu-release.sh \
 初始同机一致备份通过，回执 `/opt/skynet/receipts/backup-20261003T103436Z-800099.json`。外部 HTTPS、主页和资产、未认证接口拒绝、维护账号权限、空存档、Web/API 固定指标导出与 OAuth HTTPS issuer 共 13 项检查通过。生产环境没有注入合成会话；完整 Web/MCP/上传验证在独立测试沙箱完成。
 
 首个维护账号已创建一次，服务器凭据文件 `/opt/skynet/private/operator.json` 为 root-only。本机交付文件 `C:\Users\yiwer\.ssh\skynet.91boy.cn-operator.json` 限当前用户和 SYSTEM 访问；网页登录使用其中 `readerCredential`。不在仓库、聊天或日志中记录凭据值，后续发布不重复创建账号。
+
+2026-10-03 19:25（北京时间）视觉修订发布 `v2-43235729a834-1`，代码 Git `43235729a8346914e0eb6f6a2fc64e5914aadc59`。发布归档 SHA-256 `6502a88fe01ded98a57e3a01759a6d94e9fef0db2aa32941d1239e0fdfd03073`，服务器构建源码 SHA-256 `046b8ae42269d8a6ba28f103edc242011eb635fe614bacdc10ba612db6b9c3c2`，镜像 `sha256:f713a36de8dff66224394ac1a2a3e4bb98e34d5d4197c733e28248af99b28e97`。升级前备份回执 `/opt/skynet/receipts/backup-20261003T112516Z-866873.json` 为 completed；保留旧 release 与镜像，数据库未替换。资产为 `index-BtKn_aAS.js` / `index-BpVIMKpd.css`。
+
+外部 13 项 API/HTTPS 冒烟复跑通过。浏览器实测维护账号登录、团队/用量/找回/接入/运行五页、同源字体加载、Ctrl+K/Escape 搜索和 375px 移动抽屉通过，无脚本或 console 错误、无页面横向溢出；严格 CSP 保留。生产存档仍为空，分析 Worker 仍禁用。既有四个 nginx site 的 SHA 校验通过，Certbot timer active。证据为 `E:\GenCode\Skynet-evidence\v2-2026-10-03\production-smoke.json` 与 `production-visual-smoke.json`。本段是部署后的记录更新，部署代码以所列 Git revision 为准。
