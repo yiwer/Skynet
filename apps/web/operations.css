@@ -1,10 +1,58 @@
-/* Operations uses the same production data and the prototype's compact tiles/table. */
-.platform-main .operations-page-head{display:flex;flex-wrap:wrap;gap:16px;align-items:flex-end;justify-content:space-between;margin-bottom:24px}.platform-main .operations-page-head>div{min-width:0;flex:1}.platform-main .operations-page-head h1{margin:0}.platform-main .operations-page-head p{margin:8px 0 0;color:var(--color-muted);max-width:75ch}.platform-main .operations-page-head>a{font-size:12px}
-.platform-main .operations-tiles{display:grid;grid-template-columns:minmax(0,1fr);gap:12px;margin-bottom:16px}.platform-main .operations-tiles>section{display:grid;gap:8px;align-content:start;padding:16px;background:var(--color-card);border:1px solid var(--color-rule-soft);border-radius:16px;min-width:0}
-.platform-main .operations-tiles h2{display:flex;align-items:center;gap:8px;font-size:12px;font-weight:600;color:var(--color-muted);margin:0}.platform-main .operations-tiles p,.platform-main .operations-tiles ul{font-size:12px;color:var(--color-muted);margin:0}.platform-main .operations-tiles ul{padding-left:16px;overflow-wrap:anywhere}.platform-main .operations-tiles .operations-tile-value{font-size:16px;font-weight:600;color:var(--color-ink)}
-.platform-main .operations-tiles summary{font-size:12px;padding:0}.platform-main .operations-tiles meter{width:100%;height:10px;accent-color:var(--color-accent-strong)}
-.platform-main .operations-jobs{margin:40px 0}.platform-main .operations-jobs>h2{font-size:16px;margin:0 0 12px;font-weight:600}
-.platform-main .operations-table-scroll{max-width:100%;overflow:auto;border:1px solid var(--color-rule-soft);border-radius:16px;background:var(--color-card)}.platform-main .operations-table-scroll table{border-collapse:collapse;width:100%;font-variant-numeric:tabular-nums}.platform-main .operations-table-scroll th,.platform-main .operations-table-scroll td{padding:12px;border-bottom:1px solid var(--color-rule-soft);vertical-align:middle;white-space:nowrap}.platform-main .operations-table-scroll th{font-size:12px;color:var(--color-muted);font-weight:500}.platform-main .operations-table-scroll td{font-size:14px}.platform-main .operations-table-scroll td:first-child{max-width:160px;white-space:normal;overflow-wrap:anywhere}.platform-main .operations-table-scroll td:nth-child(5){min-width:200px;max-width:360px;white-space:normal}.platform-main .operations-table-scroll p{margin:4px 0;font-size:12px}.platform-main .operations-table-scroll summary{padding:0;font-size:12px;color:var(--color-muted)}
-.platform-main .operations-state{display:inline-block;padding:2px 8px;border-radius:999px;background:var(--color-paper-2);color:var(--color-muted);font-size:12px}.platform-main .operations-state.state-running{background:var(--color-accent-soft);color:var(--color-accent-ink)}.platform-main .operations-state.state-failed{background:var(--color-crit-soft);color:var(--color-crit)}.platform-main .operations-state.state-completed{background:var(--color-ok-soft);color:var(--color-ok)}.platform-main .operations-empty{padding:24px;border:1px dashed var(--color-rule);border-radius:16px;margin-top:12px;color:var(--color-muted)}
-.platform-main .operations-runtime{padding:16px 0;border-top:1px solid var(--color-rule-soft);overflow-wrap:anywhere}.platform-main .operations-runtime>summary{font-weight:600;font-size:14px}.platform-main .operations-runtime h2{margin:20px 0 12px;font-size:16px}.platform-main .operations-runtime ul{padding-left:20px}
-@media(min-width:640px){.platform-main .operations-tiles{grid-template-columns:repeat(2,minmax(0,1fr))}}@media(min-width:1600px){.platform-main .operations-tiles{grid-template-columns:repeat(4,minmax(0,1fr))}}@media(hover:hover){.platform-main .operations-table-scroll tbody tr:hover{background:var(--color-paper)}}
+/* Compact operations workspace. Only recorded jobs, capacity and backup facts are shown. */
+.operations-page-head { display: flex; flex: none; flex-wrap: wrap; gap: 12px 16px; align-items: center; justify-content: space-between; margin-bottom: 20px; }
+.operations-page-head > div { min-width: 0; }
+.platform-main .operations-page-head h1 { margin: 0; }
+.operations-page-head > a { font-size: var(--text-sm); white-space: nowrap; color: var(--color-accent-strong); }
+.analysis-operations, .server-operations { font-size: var(--text-sm); }
+.analysis-operations [role=alert], .server-operations [role=alert] { padding: 10px 12px; margin: 0 0 16px; border-radius: var(--radius-sm); color: var(--color-crit); background: var(--color-crit-soft); }
+.operations-status-strip { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 16px; }
+.operations-model { margin-left: auto; color: var(--color-muted); font-size: var(--text-xs); }
+.platform-main .operations-state { display: inline-flex; align-items: baseline; gap: 6px; padding: 2px 8px; border-radius: var(--radius-pill); background: var(--color-paper-2); color: var(--color-muted); font-size: var(--text-xs); white-space: nowrap; }
+.platform-main .operations-state.state-running, .platform-main .operations-state.state-in-progress { background: var(--color-accent-soft); color: var(--color-accent-ink); }
+.platform-main .operations-state.state-failed { background: var(--color-crit-soft); color: var(--color-crit); }
+.platform-main .operations-state.state-succeeded, .platform-main .operations-state.state-completed { background: var(--color-ok-soft); color: var(--color-ok); }
+.operations-jobs { min-width: 0; }
+.operations-table-scroll { max-width: 100%; overflow: auto; border: 1px solid var(--color-rule-soft); border-radius: var(--radius-md); background: var(--color-card); }
+.operations-table-scroll table { border-collapse: collapse; width: 100%; font-variant-numeric: tabular-nums; }
+.operations-table-scroll th, .operations-table-scroll td { padding: 12px; border-bottom: 1px solid var(--color-rule-soft); vertical-align: top; text-align: left; white-space: nowrap; }
+.operations-table-scroll th { color: var(--color-muted); font-size: var(--text-xs); font-weight: 500; }
+.operations-table-scroll td { font-size: var(--text-sm); }
+.operations-table-scroll tr:last-child td { border-bottom: 0; }
+.operations-table-scroll td:nth-child(5) { min-width: 160px; max-width: 380px; white-space: normal; }
+.operations-table-scroll p { margin: 4px 0; font-size: var(--text-xs); }
+.operations-table-scroll summary { padding: 0; font-size: var(--text-xs); color: var(--color-muted); cursor: pointer; }
+.operations-table-scroll details { margin-top: 4px; }
+.operations-attempt { margin-top: 8px; }
+.operations-run-error { color: var(--color-crit); overflow-wrap: anywhere; }
+.operations-cell-detail { display: block; margin-top: 2px; color: var(--color-muted); font-size: var(--text-xs); }
+.platform-main .operations-empty { padding: 48px 16px; margin: 0; text-align: center; color: var(--color-muted); border: 0; background: transparent; }
+.operations-inline-empty { margin: 0; padding: 4px 0 12px; color: var(--color-muted); font-size: var(--text-sm); }
+.operations-runtime { padding: 16px 0; margin-top: 16px; border-top: 1px solid var(--color-rule-soft); overflow-wrap: anywhere; }
+.operations-runtime > summary { font-size: var(--text-sm); font-weight: 500; cursor: pointer; }
+.platform-main .operations-runtime h2 { font-size: var(--text-sm); margin: 16px 0 8px; font-weight: 600; }
+.operations-runtime ul { margin: 0; padding: 0; list-style: none; }
+.operations-runtime li { display: flex; flex-wrap: wrap; gap: 4px 12px; padding: 8px 0; border-bottom: 1px solid var(--color-rule-soft); }
+.operations-runtime .operations-cell-detail { flex-basis: 100%; }
+.operations-runtime li > p { flex-basis: 100%; margin: 0; }
+.operations-storage, .operations-backups { margin-bottom: 24px; }
+.platform-main .operations-storage h2, .platform-main .operations-backups h2 { margin: 0 0 12px; font-size: var(--text-base); font-weight: 600; }
+.platform-main .operations-storage-facts { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin: 0; padding: 0; background: transparent; }
+.platform-main .operations-storage-facts > div { display: block; min-width: 0; padding: 14px 16px; border: 1px solid var(--color-rule-soft); border-radius: var(--radius-md); background: var(--color-card); margin: 0; }
+.operations-storage-facts dt { color: var(--color-muted); font-size: var(--text-xs); }
+.operations-storage-facts dd { margin: 4px 0 0; font-size: var(--text-lg); font-weight: 600; color: var(--color-ink); }
+.operations-storage-facts span { color: var(--color-muted); font-size: var(--text-xs); }
+.operations-storage meter { display: block; width: 100%; height: 10px; margin-top: 12px; accent-color: var(--color-accent-strong); }
+.platform-main .operations-record { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 24px; margin: 0; padding: 16px; border: 1px solid var(--color-rule-soft); border-radius: var(--radius-md); background: var(--color-card); }
+.platform-main .operations-record > div { display: grid; grid-template-columns: 76px minmax(0, 1fr); align-items: baseline; gap: 8px; margin: 0; }
+.operations-record dt { color: var(--color-muted); font-size: var(--text-xs); }
+.operations-record dd { margin: 0; color: var(--color-ink); font-size: var(--text-sm); overflow-wrap: anywhere; }
+.operations-record .hash { font-family: var(--font-mono); font-size: var(--text-xs); }
+.operations-backup-attempt { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 12px; margin-top: 12px; }
+.operations-backup-attempt time { font-size: var(--text-xs); color: var(--color-muted); }
+.operations-backup-attempt p { flex-basis: 100%; }
+.operations-restore { margin-top: 24px; }
+.platform-main .operations-restore h3 { margin: 0 0 12px; font-size: var(--text-sm); font-weight: 600; }
+.operations-updated { font-size: var(--text-xs); color: var(--color-muted); margin: 0; }
+@media (max-width: 59.99rem) { .platform-main .operations-storage-facts { grid-template-columns: repeat(2, minmax(0, 1fr)); } .platform-main .operations-record { grid-template-columns: minmax(0, 1fr); } }
+@media (max-width: 39.99rem) { .operations-page-head { align-items: flex-start; } .operations-model { margin-left: 0; } .operations-storage-facts dd { font-size: var(--text-md); } }
+@media (hover:hover) { .operations-table-scroll tbody tr:hover { background: var(--color-paper); } }

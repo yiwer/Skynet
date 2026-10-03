@@ -144,7 +144,7 @@ export function PlatformShell({ children, authenticated, name, canManageIdentiti
       <nav className="platform-nav" aria-label="平台页面">
         {navigation.map(group => <div className="platform-nav-group" key={group.label}>
           <p className="platform-nav-label">{group.label}</p>
-          {group.items.map(item => {
+          {group.items.filter(item => item.view).map(item => {
             const destination = item.managerOnly && !canManageIdentities ? 'delivery' : item.view;
             const available = authenticated && !!destination;
             const current = !!item.view && (item.activeViews ?? [item.view]).includes(view);
@@ -155,7 +155,7 @@ export function PlatformShell({ children, authenticated, name, canManageIdentiti
         </div>)}
       </nav>
       <div className="platform-rail-footer">
-        <div className="platform-account"><span className="platform-avatar" aria-hidden="true">{name ? Array.from(name)[0] : '访'}</span><div><p className="platform-account-name">{authenticated ? name : '尚未登录'}</p><p className="platform-account-description">{authenticated ? '已认证用户 · 可查看全部员工数据' : '登录后阅读已提交的会话存档'}</p></div></div>
+        <div className="platform-account"><span className="platform-avatar" aria-hidden="true">{name ? Array.from(name)[0] : '访'}</span><div><p className="platform-account-name">{authenticated ? name : '未登录'}</p></div></div>
         <div className="platform-rail-tools"><span className="platform-timezone"><PlatformIcon name="clock" />北京时间</span><div>
           <button type="button" className="platform-icon-button" onClick={() => setTheme(dark ? 'light' : 'dark')} aria-label={`切换至${dark ? '浅色' : '深色'}主题`} title={`切换至${dark ? '浅色' : '深色'}主题`}><PlatformIcon name={dark ? 'sun' : 'moon'} /></button>
           {authenticated && <button type="button" className="platform-icon-button" onClick={onLogout} aria-label="退出" title="退出"><PlatformIcon name="logout" /></button>}
@@ -163,7 +163,7 @@ export function PlatformShell({ children, authenticated, name, canManageIdentiti
       </div>
     </aside>
     {drawerOpen && <div className="platform-rail-scrim" onClick={closeMenu} aria-hidden="true" />}
-    <main id="platform-main" className="platform-main" tabIndex={-1} inert={drawerOpen}>{children}</main>
+    <main id="platform-main" className="platform-main" tabIndex={-1} inert={drawerOpen}><div className="platform-page-content" key={view} data-scroll-region="page">{children}</div></main>
   </div>;
 }
 

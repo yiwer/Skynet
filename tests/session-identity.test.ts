@@ -86,7 +86,7 @@ test('same-name employees remain distinct in public session lists, employee filt
       await expect(slots).not.toContainText(originals.find(value => value.employeeId !== original.employeeId)!.project);
       await page.screenshot({ path: join(sandbox.directory, `${original.project}-recovery-selection.png`), fullPage: true, animations: 'disabled' });
       await slots.getByRole('button').click(); await recovery.getByRole('button', { name: '下一步 →', exact: true }).click();
-      await expect(recovery.getByRole('link', { name: '阅读原件与关联材料', exact: true })).toHaveAttribute('href', `#${original.snapshotId}`);
+      await expect(recovery.getByRole('link', { name: '阅读会话', exact: true })).toHaveAttribute('href', `#${original.snapshotId}`);
       await expect(recovery).toContainText(hash(original.bytes));
       await recovery.getByRole('button', { name: '下一步 →', exact: true }).click();
       const downloadPending = page.waitForEvent('download');

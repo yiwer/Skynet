@@ -80,7 +80,6 @@ test('Web account/device revocation preserves shared history and enforces every 
     await expect(alphaPage.getByRole('region', { name: '设备同步状态', exact: true })).toBeVisible();
     await expect(alphaPage.getByRole('region', { name: '接入与设备维护', exact: true })).toHaveCount(0);
     await expect(alphaPage.getByRole('button', { name: /停用设备|停用账号/ })).toHaveCount(0);
-    await alphaDownloadPage.getByText('原件与来源信息', { exact: true }).click();
     await alphaDownloadPage.getByRole('button', { name: '下载原件', exact: true }).waitFor();
     const page = await login(manager.readerCredential);
     await page.getByRole('button', { name: '接入与设备', exact: true }).click();
@@ -88,7 +87,7 @@ test('Web account/device revocation preserves shared history and enforces every 
     const alphaCard = page.getByRole('region', { name: '账号 合成员工甲', exact: true });
     const firstDevice = alphaCard.getByRole('listitem', { name: '设备 甲电脑一', exact: true });
     await firstDevice.getByRole('button', { name: '停用设备' }).click();
-    await expect(page.getByText('仅此设备的后续上传被拒绝', { exact: false })).toBeVisible();
+    await expect(page.getByRole('group', { name: '确认停用身份', exact: true }).getByRole('heading')).toHaveText('停用设备：合成员工甲 / 甲电脑一');
     await page.route(`**${stopA1}`, route => route.fulfill({ status: 503, body: 'Synthetic maintenance failure' }), { times: 1 });
     await page.getByRole('button', { name: '确认停用', exact: true }).click();
     await expect(management.getByRole('alert')).toBeVisible();
@@ -108,7 +107,7 @@ test('Web account/device revocation preserves shared history and enforces every 
     assert.equal(history.events.length, 1, 'duplicate concurrent requests do not duplicate audit entries');
     assert.equal(history.events[0].actorId, manager.employeeId); assert.equal(history.events[0].deviceId, a1.deviceId);
     await alphaCard.getByRole('button', { name: '停用账号' }).click();
-    await expect(page.getByText('该账号的读取、下载、新设备接入和全部设备上传将被拒绝', { exact: false })).toBeVisible();
+    await expect(page.getByRole('group', { name: '确认停用身份', exact: true }).getByRole('heading')).toHaveText('停用账号：合成员工甲');
     await page.getByRole('button', { name: '确认停用', exact: true }).click();
     await expect(alphaCard.getByText('已停用', { exact: true })).toBeVisible();
     await expect(alphaCard.getByRole('listitem', { name: '设备 甲电脑二' }).getByText('账号已停用，上传被拒绝')).toBeVisible();

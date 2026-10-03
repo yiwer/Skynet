@@ -119,9 +119,11 @@ test('V2 public originals → conversation and metrics Web → real HTTPS OAuth 
     await page.getByRole('region', { name: '会话用量', exact: true }).locator(`a[href="#${snapshotId}"]`).click();
     await expect(conversation).toContainText(inputText);
     assert.equal(new URL(page.url()).hash, `#${snapshotId}`);
-    await expect(conversation).toContainText('无工具结果佐证');
+    assert.equal(defaultPages[0]!.messages.find(message => message.line === 2)!.toolEvidence, 'none-observed');
+    assert.equal(defaultPages[0]!.status.verification, 'not-assessed');
     await expect(conversation).toContainText('1 次工具调用、2 条工具记录（已隐藏）');
-    await expect(conversation).toContainText('末尾另有 1 次工具调用、1 条工具记录');
+    assert.deepEqual([defaultPages[0]!.trailingHiddenToolCalls, defaultPages[0]!.trailingHiddenToolEvents], [1, 1]);
+    await expect(conversation.getByRole('button', { name: '显示 1 次工具调用', exact: true })).toBeVisible();
     assert.equal(await conversation.locator('pre').filter({ hasText: injection }).count(), 0);
     await conversation.getByLabel('显示工具调用与结果').check();
     await expect(conversation).toContainText(injection);
@@ -153,7 +155,12 @@ test('V2 public originals → conversation and metrics Web → real HTTPS OAuth 
       for (const colorScheme of ['light', 'dark'] as const) for (const width of [320, 1280]) {
         await target.emulateMedia({ colorScheme }); await target.setViewportSize({ width, height: 900 });
         assert.equal(await target.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true, `${surface} ${width} ${colorScheme} has document overflow`);
-        await target.evaluate(() => window.scrollTo({ top: 0, left: 0, behavior: 'instant' }));
+        await target.evaluate(() => {
+          window.scrollTo({ top: 0, left: 0, behavior: 'instant' });
+          document.querySelectorAll<HTMLElement>('main, main *').forEach(element => {
+            if (element.scrollTop || element.scrollLeft) element.scrollTo({ top: 0, left: 0, behavior: 'instant' });
+          });
+        });
         const name = `v2-${surface}-${width}-${colorScheme}.png`;
         await target.screenshot({ path: join(sandbox.directory, name), fullPage: true, animations: 'disabled' }); screenshots.push(name);
         const viewportName = `v2-${surface}-${width}-${colorScheme}-viewport.png`;
@@ -172,16 +179,16 @@ test('V2 public originals → conversation and metrics Web → real HTTPS OAuth 
     const commitDate = recovery.getByLabel('提交日期', { exact: true }); const populatedDate = await commitDate.inputValue();
     await commitDate.fill('1900-01-01');
     await expect(commitDate).toHaveValue('1900-01-01');
-    await expect(recovery.getByRole('region', { name: '选择会话', exact: true })).toContainText('这一天没有已加载的存档会话');
+    await expect(recovery.getByRole('region', { name: '选择会话', exact: true }).getByRole('button')).toHaveCount(0);
     await expect(recovery.getByRole('button', { name: '下一步 →', exact: true })).toHaveCount(0);
     await commitDate.fill(populatedDate);
     await recovery.getByRole('region', { name: '选择会话', exact: true }).getByRole('button').filter({ hasText: 'v2-public' }).click();
     await recovery.getByRole('button', { name: '下一步 →', exact: true }).click();
-    await expect(recovery.getByRole('list', { name: '找回步骤', exact: true }).locator('[aria-current="step"]')).toContainText('选择方式');
+    await expect(recovery.getByRole('list', { name: '找回步骤', exact: true }).locator('[aria-current="step"]')).toContainText('选择格式');
     await expect(recovery.getByRole('radio', { name: /完整可读导出/ })).toBeChecked();
     await expect(recovery).toContainText(digest(raw));
     await recovery.getByRole('button', { name: '下一步 →', exact: true }).click();
-    await expect(recovery.getByRole('list', { name: '找回步骤', exact: true }).locator('[aria-current="step"]')).toContainText('校验与恢复');
+    await expect(recovery.getByRole('list', { name: '找回步骤', exact: true }).locator('[aria-current="step"]')).toContainText('下载');
     async function recoveryDownload(button: string, filename: string) {
       const pending = page.waitForEvent('download'); await recovery.getByRole('button', { name: button, exact: true }).click();
       const exported = await pending; const path = join(sandbox.directory, filename); await exported.saveAs(path); return readFile(path);
@@ -192,17 +199,16 @@ test('V2 public originals → conversation and metrics Web → real HTTPS OAuth 
     assert.deepEqual(await recoveryDownload('下载原件 JSONL', 'v2-original-export.jsonl'), raw);
     await recovery.getByRole('button', { name: '← 返回选择方式', exact: true }).click();
     await recovery.getByRole('radio', { name: /恢复资料包/ }).check();
-    await expect(recovery).toContainText('原生恢复待验证');
+    await expect(recovery.getByRole('radio', { name: /恢复资料包/ })).toBeChecked();
     await recovery.getByRole('button', { name: '下一步 →', exact: true }).click();
     const restored = readRecoveryPackage(await recoveryDownload('下载恢复资料包', 'v2-recovery-export.json'));
     assert.equal(restored.snapshot.id, snapshotId); assert.equal(restored.manifest.hash, digest(raw)); assert.deepEqual(restored.bytes, raw);
-    await expect(recovery.getByRole('status')).toContainText('文件保存到本机不表示原生恢复或续聊已经通过');
     // Change only the public route's snapshot while recovery remains mounted. The
     // next export must use the newly selected original, never the previous detail.
     await page.goto(sandbox.origin + `/#recovery?snapshot=${unknownSnapshotId}`);
-    await expect(recovery.getByRole('list', { name: '找回步骤', exact: true }).locator('[aria-current="step"]')).toContainText('选择方式');
+    await expect(recovery.getByRole('list', { name: '找回步骤', exact: true }).locator('[aria-current="step"]')).toContainText('选择格式');
     await expect(recovery).toContainText(digest(unknownRaw));
-    await expect(recovery.getByRole('link', { name: '阅读原件与关联材料', exact: true })).toHaveAttribute('href', `#${unknownSnapshotId}`);
+    await expect(recovery.getByRole('link', { name: '阅读会话', exact: true })).toHaveAttribute('href', `#${unknownSnapshotId}`);
     await recovery.getByRole('button', { name: '下一步 →', exact: true }).click();
     assert.deepEqual(await recoveryDownload('下载原件 JSONL', 'v2-changed-snapshot-export.jsonl'), unknownRaw);
     await page.goto(sandbox.origin + `/#recovery?snapshot=${snapshotId}`);
@@ -213,7 +219,8 @@ test('V2 public originals → conversation and metrics Web → real HTTPS OAuth 
     await page.getByRole('navigation', { name: '平台页面', exact: true }).getByRole('button', { name: '用量与产出', exact: true }).click();
     const usagePage = page.getByRole('region', { name: '用量指标', exact: true });
     await expect(usagePage.getByRole('heading', { name: '用量指标', exact: true })).toBeVisible();
-    await expect(usagePage).toContainText('1 会话未知');
+    await expect(usagePage.getByRole('region', { name: '会话用量', exact: true }).getByRole('link', { name: '查看会话', exact: true })).toHaveCount(2);
+    await expect(usagePage.getByRole('heading', { name: /^(每人产出|会话：Token 与已验证结果)$/ })).toHaveCount(0);
     await usagePage.getByRole('group', { name: '时间范围', exact: true }).getByRole('button', { name: '自定义', exact: true }).click();
     await usagePage.getByLabel('开始日期', { exact: true }).fill(day); await usagePage.getByLabel('结束日期', { exact: true }).fill(day);
     await usagePage.getByRole('button', { name: '应用筛选', exact: true }).click();
@@ -223,16 +230,17 @@ test('V2 public originals → conversation and metrics Web → real HTTPS OAuth 
     const filteredSelection = { ...selection, source: 'claude-code-cli' };
     const filtered: MetricsPage = await (await api('/api/metrics?' + params(filteredSelection))).json();
     assert.equal(filtered.totals.inputTokens, 110); assert.equal(filtered.totals.unknownTokenSessions, 0);
-    await expect(usagePage).toContainText('110 已知');
+    await expect(usagePage.getByRole('region', { name: '会话用量', exact: true }).getByRole('cell', { name: '110', exact: true })).toBeVisible();
+    await expect(usagePage.getByRole('region', { name: '会话用量', exact: true }).getByRole('cell', { name: '22', exact: true })).toBeVisible();
     const downloadPending = page.waitForEvent('download'); await usagePage.getByRole('button', { name: '导出当前版本', exact: true }).click();
     const download = await downloadPending; const downloadPath = await download.path(); assert.ok(downloadPath);
     assert.deepEqual(JSON.parse(await readFile(downloadPath!, 'utf8')), filtered);
     const addedId = randomUUID(); await upload(encoded([native('user', '后续新增会话，不应改变旧指标版本', undefined, addedId)]), addedId);
     await usagePage.getByRole('button', { name: '从原件重算', exact: true }).click();
     await expect(usagePage.getByRole('region', { name: '会话用量', exact: true }).getByRole('link', { name: '查看会话', exact: true })).toHaveCount(2);
-    await expect(usagePage).toContainText('1 会话未知');
     const recomputed: MetricsPage = await (await api('/api/metrics?' + params(filteredSelection))).json();
     assert.notEqual(recomputed.version, filtered.version); assert.equal(recomputed.totals.sessions, 2);
+    assert.equal(recomputed.totals.unknownTokenSessions, 1);
     assert.deepEqual(await tool('get_report_summary', { ...filteredSelection, version: recomputed.version }), recomputed);
     assert.deepEqual(await tool('get_report_summary', { ...filteredSelection, version: filtered.version }), filtered);
     assert.deepEqual(await (await api('/api/metrics/export?' + params({ ...filteredSelection, version: filtered.version }))).json(), filtered);

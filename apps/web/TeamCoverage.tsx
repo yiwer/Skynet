@@ -81,85 +81,66 @@ export function TeamCoverage({ request, onEvidence, currentEmployeeId }: { reque
     return () => abort.abort();
   }, [selection?.employeeId, selection?.date, observationOffset, statisticsOffset, detailRetry]);
   function select(cell: CoverageCell) { setSelection(cell); setObservationOffset(0); setStatisticsOffset(0); setStatisticsRevision(undefined); setReportRevision(undefined); setDetailRetry(value => value + 1); }
-  return <section className="team-coverage" aria-label="团队覆盖矩阵">
-    <div className="heading coverage-heading"><div><h1>团队概览</h1><p>{matrix ? `${from} — ${to}` : '最近七日'} · 北京时间{matrix ? ` · 数据截至 ${time(matrix.checkedAt)}` : ''}</p></div>
-      <div className="coverage-heading-actions"><label>截止日期 <input type="date" value={date} onChange={event => { if (event.target.value) { setDate(event.target.value); setOffset(0); } }} /></label><a className="coverage-report-link" href="#metrics"><PlatformIcon name="chart" />数据报表</a></div></div>
-    {error ? <><p role="alert" className="error">{error}</p><button onClick={() => setRetry(value => value + 1)}>重试覆盖矩阵</button></> : !matrix ? <p role="status">正在读取覆盖矩阵…</p> : <>
-      <div className="coverage-kpis" aria-label="所示期间指标">
-        <div className="coverage-kpi"><p>所示期间活跃员工</p><strong>{overview ? overview.employees.filter(employee => employee.sessions > 0).length : '未知'}</strong><span>原件中有已确认会话的员工</span></div>
-        <div className="coverage-kpi"><p>Token 输入（已知）</p><strong>{overview ? compact(overview.totals.knownInputTokens) : '未知'}</strong><span>{overview ? `${overview.totals.unknownInputSessions} 个会话输入未知${!overview.sourceInputsComplete ? ' · 来源存在缺口' : ''}` : '读取期间原件统计后显示'}</span>{overview && <TokenTrend days={overview.daily} />}</div>
-        <div className="coverage-kpi"><p>已验证结果</p><strong className="coverage-unknown-value">未知</strong><span>成果核验指标尚未实现</span></div>
-        <div className="coverage-kpi"><p>代码变更</p><strong className="coverage-unknown-value">未知</strong><span>原件中变更行统计尚未实现</span></div>
-        <div className="coverage-kpi"><p>Agent 等待回复</p><strong className="coverage-unknown-value">未知</strong><span>等待区间指标尚未实现</span></div>
-      </div>
-      {overviewError && <p role="status" className="coverage-data-note">期间指标暂不可读取：{overviewError}</p>}
-      <h2 className="coverage-block-title">覆盖与活动 · 右侧统计为 {selection?.date ?? date} 周{weekday(selection?.date ?? date)}</h2>
+  const showDayMetrics = !!dayMetrics && dayMetrics.scope.from === selection?.date && dayMetrics.employees.length > 0;
+  const showReports = matrix?.rows.some(row => row.cells.some(cell => cell.date === selection?.date && ['ready', 'unfinished'].includes(cell.analysis)));
+  return <section className="team-coverage workspace-page" aria-label="团队覆盖矩阵">
+    <div className="heading coverage-heading"><div><h1>团队概览</h1>{matrix && <p>{from} — {to}</p>}</div>
+      <div className="coverage-heading-actions"><label>截止日期<input type="date" value={date} onChange={event => { if (event.target.value) { setDate(event.target.value); setOffset(0); } }} /></label><a className="coverage-report-link" href="#metrics"><PlatformIcon name="chart" />数据报表</a></div></div>
+    <div className="workspace-scroll coverage-scroll">
+    {error ? <><p role="alert" className="error">{error}</p><button onClick={() => setRetry(value => value + 1)}>重试覆盖矩阵</button></> : !matrix ? <p role="status">加载中…</p> : <>
+      {overview && overview.totals.sessions > 0 && <div className="coverage-kpis" aria-label="所示期间指标">
+        <div className="coverage-kpi"><p>活跃员工</p><strong>{overview.employees.filter(employee => employee.sessions > 0).length}</strong></div>
+        <div className="coverage-kpi"><p>会话</p><strong>{metric(overview.totals.sessions)}</strong></div>
+        <div className="coverage-kpi"><p>用户轮次</p><strong>{metric(overview.totals.userTurns)}</strong></div>
+        {overview.totals.sessions > overview.totals.unknownInputSessions && <div className="coverage-kpi"><p>Token 输入{overview.totals.unknownInputSessions > 0 ? '（已知）' : ''}</p><strong>{compact(overview.totals.knownInputTokens)}</strong><TokenTrend days={overview.daily} /></div>}
+      </div>}
+      {overviewError && <p role="status" className="coverage-data-note">指标加载失败</p>}
+      {matrix.rows.length > 0 ? <>
+      <div className="coverage-section-heading"><h2 className="coverage-block-title">覆盖与活动</h2><span>{selection?.date ?? date} 周{weekday(selection?.date ?? date)}</span></div>
       <div className="coverage-layout"><div>
         <div className="coverage-matrix" role="group" aria-label="员工与日期覆盖">
-          <table className="coverage-table"><caption className="platform-sr-only">员工 × 日期覆盖状态，以及所选日期的活动统计</caption><thead><tr><th scope="col">员工</th>
+          <table className="coverage-table"><caption className="platform-sr-only">员工与日期覆盖状态</caption><thead><tr><th scope="col">员工</th>
             {matrix.dates.map(day => <th scope="col" key={day} className="coverage-date-heading"><button aria-pressed={selection?.date === day} aria-label={`查看日期 ${day}`} onClick={() => { const cell = matrix.rows.find(row => row.employeeId === selection?.employeeId)?.cells.find(cell => cell.date === day); if (cell) select(cell); }}><span>{weekday(day)}</span><b>{Number(day.slice(8))}</b></button></th>)}
-            <th scope="col">会话</th><th scope="col">轮次</th><th scope="col">工具调用</th><th scope="col">文件</th><th scope="col">Token 输入</th><th scope="col">日报</th></tr></thead>
+            <th scope="col">会话</th>{showDayMetrics && <><th scope="col">轮次</th><th scope="col">工具</th><th scope="col">Token 输入</th></>}{showReports && <th scope="col">日报</th>}</tr></thead>
           <tbody>{matrix.rows.map(row => {
             const selectedDay = row.cells.find(cell => cell.date === selection?.date);
-            const measured = dayMetrics?.scope.from === selection?.date ? dayMetrics?.employees.find(employee => employee.employeeId === row.employeeId) : undefined;
-            const rowDetail = detail?.statistics.employeeId === row.employeeId && detail?.statistics.date === selection?.date ? detail : undefined;
+            const measured = showDayMetrics ? dayMetrics?.employees.find(employee => employee.employeeId === row.employeeId) : undefined;
             return <tr key={row.employeeId} className={selection?.employeeId === row.employeeId ? 'coverage-row-selected' : undefined}><th scope="row"><button className="coverage-person" aria-pressed={selection?.employeeId === row.employeeId} onClick={() => { if (selectedDay) select(selectedDay); }}><span className="coverage-person-avatar" aria-hidden="true">{Array.from(row.employee)[0]}</span><span>{row.employee}</span></button></th>
             {row.cells.map(cell => <td key={cell.date} className={selection?.date === cell.date ? 'coverage-current-column' : undefined}><button
               className={`coverage-cell ${cell.collection === 'gap-observed' ? 'coverage-gap' : ''} ${selection?.employeeId === cell.employeeId && selection?.date === cell.date ? 'coverage-selected' : ''}`}
               data-selected-date={selection?.date === cell.date} aria-pressed={selection?.employeeId === cell.employeeId && selection?.date === cell.date}
               aria-label={`${row.employee} ${cell.date}，${cell.records} 条已确认记录，${collection[cell.collection]}，${analysis[cell.analysis]}`}
-              title={`${cell.records} 条已确认记录 · ${collection[cell.collection]} · ${analysis[cell.analysis]}`} onClick={() => select(cell)}><CoverageGlyph cell={cell} /></button></td>)}
-            <td className="coverage-number">{metric(selectedDay?.sessions)}</td><td className="coverage-number">{metric(measured?.userTurns)}</td><td className="coverage-number">{metric(measured?.toolCalls)}</td><td className="coverage-number">{rowDetail ? `${metric(rowDetail.statistics.files.observedCount)}${rowDetail.statistics.files.complete ? '' : '+'}` : <span className="coverage-unknown">未知</span>}</td>
-            <td className="coverage-number">{measured ? <>{compact(measured.knownInputTokens)}{measured.unknownInputSessions > 0 && <span className="coverage-unknown">+未知</span>}</> : <span className="coverage-unknown">未知</span>}</td>
-            <td><span className={`coverage-report-state${selectedDay?.analysis === 'unfinished' ? ' is-unfinished' : ''}`}>{selectedDay?.analysis === 'ready' ? '已有版本' : selectedDay?.analysis === 'unfinished' ? '未完成' : selectedDay?.analysis === 'not-scheduled' ? '未安排' : '未知'}</span></td></tr>;
+              title={`${cell.records} 条记录 · ${collection[cell.collection]} · ${analysis[cell.analysis]}`} onClick={() => select(cell)}><CoverageGlyph cell={cell} /></button></td>)}
+            <td className="coverage-number">{selectedDay?.sessions}</td>{showDayMetrics && <><td className="coverage-number">{measured?.userTurns}</td><td className="coverage-number">{measured?.toolCalls}</td><td className="coverage-number">{measured && measured.sessions > measured.unknownInputSessions ? <>{compact(measured.knownInputTokens)}{measured.unknownInputSessions > 0 && <sup title="部分会话未上报 Token">*</sup>}</> : null}</td></>}
+            {showReports && <td>{selectedDay?.analysis === 'ready' ? <span className="coverage-report-state">已生成</span> : selectedDay?.analysis === 'unfinished' ? <span className="coverage-report-state is-unfinished">处理中</span> : null}</td>}</tr>;
           })}</tbody></table>
         </div>
-        <div className="coverage-legend" aria-label="符号说明"><span><CoverageGlyph kind="observed" />有已观察活动</span><span><CoverageGlyph />无已观察活动</span><span><CoverageGlyph kind="unknown" />覆盖未知</span><span><CoverageGlyph kind="gap" />采集缺口</span><span><CoverageGlyph kind="pending" />宿主待确认</span><span><CoverageGlyph kind="unfinished" />分析未完成</span></div>
-        <p className="coverage-data-note">无已观察活动不等于没有工作。心跳、原件提交与分析完成各自独立；覆盖未知保留为未知。所选员工的文件数量以右侧原件统计为准，其余显示未知。</p>
-        {dayMetricsError && <p role="status" className="coverage-data-note">当日指标暂不可读取：{dayMetricsError}</p>}
-        {!matrix.rows.length && <p>还没有员工。接入后可查看已提交记录与设备观测。</p>}
-        <div className="pagination"><button disabled={!offset} onClick={() => setOffset(value => Math.max(0, value - 10))}>上一页员工</button>
-          <button disabled={matrix.nextOffset === null} onClick={() => setOffset(matrix.nextOffset!)}>下一页员工</button></div>
-        <p className="muted small">{matrix.definition} 历史观测开始保存于 {time(matrix.observationStartedAt)}。</p>
-      </div><aside className="coverage-inspector" aria-label="选中员工与日期">{selection ? <>
+        <div className="coverage-legend" aria-label="符号说明"><span><CoverageGlyph kind="observed" />有活动</span><span><CoverageGlyph />无记录</span><span><CoverageGlyph kind="unknown" />覆盖未知</span><span><CoverageGlyph kind="gap" />采集缺口</span><span><CoverageGlyph kind="pending" />待确认</span><span><CoverageGlyph kind="unfinished" />处理中</span></div>
+        {dayMetricsError && <p role="status" className="coverage-data-note">当日指标加载失败</p>}
+        {(offset > 0 || matrix.nextOffset !== null) && <div className="pagination"><button disabled={!offset} onClick={() => setOffset(value => Math.max(0, value - 10))}>上一页员工</button><button disabled={matrix.nextOffset === null} onClick={() => setOffset(matrix.nextOffset!)}>下一页员工</button></div>}
+      </div>{selection && <aside className="coverage-inspector" aria-label="选中员工与日期">
         <div className="coverage-inspector-heading"><span className="coverage-person-avatar" aria-hidden="true">{Array.from(selection.employee)[0]}</span><div><h2>{selection.employee}</h2><p>{selection.date} 周{weekday(selection.date)}</p></div></div>
-        <ul className="coverage-statuses"><li>{connection[selection.currentConnection]}</li><li>{configured[selection.configured]}</li><li>{host[selection.hostConfirmation]}</li>
-          <li>{collection[selection.collection]}</li><li>{analysis[selection.analysis]}</li></ul>
-        <p className="muted small">服务器收到观测：{time(selection.firstReceivedAt)} — {time(selection.lastReceivedAt)}。这不是连续采集证明。</p>
-        {detailError ? <><p role="alert" className="error">{detailError}</p><button onClick={() => setDetailRetry(value => value + 1)}>重试统计与观测</button></> : !detail ? <p role="status">正在读取原始统计与观测…</p> : <>
-          <section aria-label="方向主题与阻塞"><h3>方向、主题与阻塞</h3>
-            {detail.report?.coverage?.fixture && <p className="notice">合成分析，非正式模型验收。</p>}
-            {detail.report?.version ? <p className="muted small">已保存日报 v{detail.report.revision}{detail.report.refreshPending ? ' · 后续刷新待完成' : ''}{detail.report.state !== 'ready' ? ' · 材料或分析不完整' : ''}</p>
-              : <p>{detail.report ? '本日主题尚未生成' : '日报暂不可读取'}；方向与阻塞未知。</p>}
+        <ul className="coverage-statuses">{selection.currentConnection !== 'unknown' && selection.currentConnection !== 'not-applicable' && <li>{connection[selection.currentConnection]}</li>}{selection.configured !== 'unknown' && <li>{configured[selection.configured]}</li>}{selection.hostConfirmation !== 'unknown' && <li>{host[selection.hostConfirmation]}</li>}{selection.collection === 'gap-observed' && <li>采集缺口</li>}</ul>
+        {detailError ? <><p role="alert" className="error">{detailError}</p><button onClick={() => setDetailRetry(value => value + 1)}>重试统计与观测</button></> : !detail ? <p role="status">加载中…</p> : <>
+          {!!detail.report?.items.length && <section aria-label="方向主题与阻塞">
             {([['goal', '方向'], ['topic', '主题'], ['blocker', '阻塞']] as const).map(([category, label]) => {
-              const items = (detail.report?.items ?? []).filter(item => item.category === category).slice(0, 1);
-              return <div key={category}><h4>{label}</h4>{items.length ? items.map((item, index) => <div key={index}><p>{item.text}</p><p className="muted small">{assessmentLabels[item.assessment]}</p>
-                <a href={`#work?${new URLSearchParams({ kind: 'project', subject: item.project, from: selection.date, to: selection.date })}`}>查看项目工作：{item.project || '未归类项目'}</a></div>)
-                : <p className="muted small">尚无本页证据支持的{label}，不代表没有。</p>}</div>;
+              const items = detail.report!.items.filter(item => item.category === category).slice(0, 1);
+              return items.length > 0 && <div key={category}><h3>{label}</h3>{items.map((item, index) => <div key={index}><p>{item.text}</p><p className="muted small">{assessmentLabels[item.assessment]}</p><a href={`#work?${new URLSearchParams({ kind: 'project', subject: item.project, from: selection.date, to: selection.date })}`}>{item.project || '未归类项目'} →</a></div>)}</div>;
             })}
-            <p><a href={`#daily?${new URLSearchParams({ employeeId: selection.employeeId, date: selection.date, ...(detail.report?.revision ? { revision: String(detail.report.revision) } : {}) })}`}>查看该员工本日工作</a></p>
-          </section>
-          <h3>已记录活动</h3><dl className="coverage-metrics"><div><dt>会话</dt><dd>{metric(detail.statistics.sessions)}</dd></div><div><dt>用户轮次</dt><dd>{metric(detail.statistics.userTurns)}</dd></div>
-            <div><dt>工具调用</dt><dd>{metric(detail.statistics.toolCalls)}</dd></div><div><dt>记录中文件路径</dt><dd>{metric(detail.statistics.files.observedCount)}{!detail.statistics.files.complete && ' · 不完整'}</dd></div>
-            <div><dt>来源 Token 总量</dt><dd>{metric(detail.statistics.tokens.total)}</dd></div><div><dt>活动时间段</dt><dd>{detail.statistics.intervals.length} 段</dd></div></dl>
-          <p className="muted small">仅已确认原活动；Token 来源记录非账单，区间非工时。</p>
-          <details><summary>核查统计口径</summary><p className="muted small">{detail.statistics.definition}</p><p className="muted small">{detail.statistics.tokens.definition}</p></details>
-          <details><summary>Token 分项与活动点</summary><p>输入 {metric(detail.statistics.tokens.input)}；缓存读取 {metric(detail.statistics.tokens.cachedInput)}；缓存写入 {metric(detail.statistics.tokens.cacheWriteInput)}；输出 {metric(detail.statistics.tokens.output)}；推理输出 {metric(detail.statistics.tokens.reasoningOutput)}。</p>
-            <ul>{detail.statistics.intervals.map((interval, index) => <li key={index}>{time(interval.from)} — {time(interval.to)} · {interval.points} 个来源活动点</li>)}</ul></details>
-          <details><summary>原件统计引用</summary><ul>{detail.statistics.references.map((reference, index) => <li key={index}><a href={reference.webPath} onClick={onEvidence}>{reference.kind === 'file' ? reference.value : `Token 记录，第 ${reference.line} 行`}</a></li>)}</ul>
-            <div className="pagination"><button disabled={!statisticsOffset} onClick={() => setStatisticsOffset(value => Math.max(0, value - 20))}>上一页引用</button>
-              <button disabled={detail.statistics.nextOffset === null} onClick={() => setStatisticsOffset(detail.statistics.nextOffset!)}>下一页引用</button></div>
-            <p className="muted small">统计版本 {detail.statistics.revision}；翻页保持同一版本。重新选择员工与日期可读取当前版本。</p></details>
-          <h3>服务器收到的设备观测</h3>{!detail.observations.length && <p>该日没有保存的观测，覆盖未知。</p>}
-          <ul>{detail.observations.map((observation, index) => <li key={index}><strong>{observation.device} · {observation.source ?? '后台'}</strong><p>{time(observation.firstReceivedAt)} — {time(observation.lastReceivedAt)}</p>
-            <p>{observation.gapObserved ? '曾观察采集缺口' : '未在这些时点报告缺口'}{observation.backlogObserved ? ' · 曾有待提交原件' : ''}</p></li>)}</ul>
-          <div className="pagination"><button disabled={!observationOffset} onClick={() => setObservationOffset(value => Math.max(0, value - 20))}>上一页观测</button><button disabled={detail.nextObservationOffset === null} onClick={() => setObservationOffset(detail.nextObservationOffset!)}>下一页观测</button></div>
+          </section>}
+          {detail.statistics.records > 0 && <section><h3>已记录活动</h3><dl className="coverage-metrics"><div><dt>会话</dt><dd>{metric(detail.statistics.sessions)}</dd></div><div><dt>用户轮次</dt><dd>{metric(detail.statistics.userTurns)}</dd></div><div><dt>工具调用</dt><dd>{metric(detail.statistics.toolCalls)}</dd></div>
+            {detail.statistics.files.observedCount > 0 && <div><dt>文件路径</dt><dd>{metric(detail.statistics.files.observedCount)}{!detail.statistics.files.complete && '+'}</dd></div>}{detail.statistics.tokens.total != null && <div><dt>来源 Token</dt><dd>{metric(detail.statistics.tokens.total)}</dd></div>}{detail.statistics.intervals.length > 0 && <div><dt>活动区间</dt><dd>{detail.statistics.intervals.length}</dd></div>}</dl></section>}
+          {(detail.statistics.tokens.usageRecords > 0 || detail.statistics.intervals.length > 0) && <details><summary>Token 与活动区间</summary><dl className="coverage-metrics">{([['输入', detail.statistics.tokens.input], ['缓存读取', detail.statistics.tokens.cachedInput], ['缓存写入', detail.statistics.tokens.cacheWriteInput], ['输出', detail.statistics.tokens.output], ['推理输出', detail.statistics.tokens.reasoningOutput]] as const).filter(([, value]) => value != null).map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{metric(value)}</dd></div>)}</dl><ul>{detail.statistics.intervals.map((interval, index) => <li key={index}>{time(interval.from)} — {time(interval.to)} · {interval.points} 个活动点</li>)}</ul></details>}
+          {(detail.statistics.references.length > 0 || statisticsOffset > 0) && <details><summary>统计引用 · v{detail.statistics.revision}</summary><ul>{detail.statistics.references.map((reference, index) => <li key={index}><a href={reference.webPath} onClick={onEvidence}>{reference.kind === 'file' ? reference.value : `Token · 第 ${reference.line} 行`}</a></li>)}</ul>
+            {(statisticsOffset > 0 || detail.statistics.nextOffset !== null) && <div className="pagination"><button disabled={!statisticsOffset} onClick={() => setStatisticsOffset(value => Math.max(0, value - 20))}>上一页引用</button><button disabled={detail.statistics.nextOffset === null} onClick={() => setStatisticsOffset(detail.statistics.nextOffset!)}>下一页引用</button></div>}</details>}
+          {(detail.observations.length > 0 || observationOffset > 0) && <details><summary>设备观测</summary><ul>{detail.observations.map((observation, index) => <li key={index}><strong>{observation.device} · {observation.source ?? '后台'}</strong><p>{time(observation.firstReceivedAt)} — {time(observation.lastReceivedAt)}</p>{(observation.gapObserved || observation.backlogObserved) && <p>{[observation.gapObserved && '采集缺口', observation.backlogObserved && '待提交原件'].filter(Boolean).join(' · ')}</p>}</li>)}</ul>
+            {(observationOffset > 0 || detail.nextObservationOffset !== null) && <div className="pagination"><button disabled={!observationOffset} onClick={() => setObservationOffset(value => Math.max(0, value - 20))}>上一页观测</button><button disabled={detail.nextObservationOffset === null} onClick={() => setObservationOffset(detail.nextObservationOffset!)}>下一页观测</button></div>}</details>}
+          <a className="coverage-daily-link" href={`#daily?${new URLSearchParams({ employeeId: selection.employeeId, date: selection.date, ...(detail.report?.revision ? { revision: String(detail.report.revision) } : {}) })}`}>查看日报 →</a>
         </>}
-      </> : <p>选择员工和日期查看统计与覆盖证据。</p>}</aside></div>
-      <section className="coverage-people-summary" aria-label="所示期间人员汇总"><div className="coverage-summary-heading"><h2>所示期间人员汇总</h2><a href="#metrics">打开完整报表</a></div>
-        {!overview ? <p className="coverage-data-note">{overviewError ? '期间原件统计暂不可读取。' : '正在读取期间原件统计…'}</p> : !overview.employees.length ? <p className="coverage-data-note">所示期间尚无已确认活动，不能据此判断员工是否工作。</p> : <div className="coverage-summary-table"><table><thead><tr><th scope="col">员工</th><th scope="col">会话</th><th scope="col">Token 输入（已知）</th><th scope="col">用户轮次</th><th scope="col">工具调用</th><th scope="col">已验证结果</th><th scope="col">使用能力</th></tr></thead><tbody>{[...overview.employees].sort((a, b) => a.employee.localeCompare(b.employee, 'zh-CN') || a.employeeId.localeCompare(b.employeeId)).map(employee => <tr key={employee.employeeId}><th scope="row"><span className="coverage-summary-person"><span className="coverage-person-avatar" aria-hidden="true">{Array.from(employee.employee)[0]}</span>{employee.employee}</span></th><td>{metric(employee.sessions)}</td><td>{compact(employee.knownInputTokens)}{employee.unknownInputSessions > 0 && <span className="coverage-unknown">{employee.unknownInputSessions} 会话未知</span>}</td><td>{metric(employee.userTurns)}</td><td>{metric(employee.toolCalls)}</td><td><span className="coverage-unknown">未知</span></td><td><span className="coverage-unknown">尚未评估</span></td></tr>)}</tbody></table></div>}
-        <p className="coverage-data-note">按姓名排列；Token 未上报的会话单独标注，不折算工时。已验证结果与使用能力尚未实现。{overview && `指标版本 ${overview.revision} · ${overview.version.slice(0, 12)}`}</p>
-      </section>
+      </aside>}</div>
+      </> : <p className="report-empty">暂无员工</p>}
+      {!!overview?.employees.length && <section className="coverage-people-summary" aria-label="所示期间人员汇总"><div className="coverage-summary-heading"><h2>人员汇总</h2><a href="#metrics">完整报表 →</a></div><div className="coverage-summary-table"><table><thead><tr><th scope="col">员工</th><th scope="col">会话</th><th scope="col">Token 输入</th><th scope="col">用户轮次</th><th scope="col">工具调用</th></tr></thead><tbody>{[...overview.employees].sort((a, b) => a.employee.localeCompare(b.employee, 'zh-CN') || a.employeeId.localeCompare(b.employeeId)).map(employee => <tr key={employee.employeeId}><th scope="row"><span className="coverage-summary-person"><span className="coverage-person-avatar" aria-hidden="true">{Array.from(employee.employee)[0]}</span>{employee.employee}</span></th><td>{metric(employee.sessions)}</td><td>{employee.sessions > employee.unknownInputSessions ? <>{compact(employee.knownInputTokens)}{employee.unknownInputSessions > 0 && <sup title="部分会话未上报 Token">*</sup>}</> : null}</td><td>{metric(employee.userTurns)}</td><td>{metric(employee.toolCalls)}</td></tr>)}</tbody></table></div></section>}
     </>}
+    </div>
   </section>;
 }

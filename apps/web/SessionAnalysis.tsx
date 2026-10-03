@@ -24,40 +24,25 @@ export function SessionAnalysis({ snapshotId, request }: { snapshotId: string; r
     try { await request(`/api/snapshots/${snapshotId}/analysis`, undefined, 'POST'); setOffset(0); setRefresh(value => value + 1); }
     catch (failure) { setError((failure as Error).message); } finally { setBusy(false); }
   }
+  if(!error&&(!page||!page.availability.ready&&page.runs.length===0))return null;
   return <section className="recovery" aria-label="会话分析"><h3>会话分析</h3>
-    <p>{page?.availability.reason ?? '正在读取分析状态…'}</p>
-    <p className="muted small">分析固定主原件，长会话按有界原文段提取和汇总。历史材料保留原归属；未知、缺失、未处理范围及关联材料不代表没有活动。结论不是工时、评分或排名。</p>
-    <button disabled={busy || !page?.availability.ready} onClick={start}>{busy ? '正在提交…' : '分析会话'}</button>
-    <button onClick={() => setRefresh(value => value + 1)}>刷新分析状态</button>
-    {error && <p role="alert" className="error">{error}</p>}
-    {page?.runs.map(run => <AnalysisResult key={run.id} run={run} retry={async () => {
-      try { await request(`/api/analysis/${run.id}/retry`, undefined, 'POST'); setRefresh(value => value + 1); }
-      catch (failure) { setError((failure as Error).message); }
-    }} />)}
-    {page?.runs.length === 0 && <p className="muted">当前快照尚无分析结果。原件可继续查询和导出。</p>}
-    {page?.nextOffset !== null && page?.nextOffset !== undefined && <button onClick={() => setOffset(page.nextOffset!)}>加载更多分析</button>}
+    <div className="export-actions">{page?.availability.ready&&<button disabled={busy} onClick={start}>{busy?'正在提交…':'分析会话'}</button>}<button onClick={()=>setRefresh(value=>value+1)}>刷新</button></div>
+    {error&&<p role="alert" className="error">{error}</p>}
+    {page?.runs.map(run=><AnalysisResult key={run.id} run={run} retry={async()=>{try{await request(`/api/analysis/${run.id}/retry`,undefined,'POST');setRefresh(value=>value+1);}catch(failure){setError((failure as Error).message);}}}/>)}
+    {page?.nextOffset!=null&&<button onClick={()=>setOffset(page.nextOffset!)}>更多分析</button>}
   </section>;
 }
 function AnalysisResult({ run, retry }: { run: AnalysisRun; retry: () => Promise<void> }) {
-  return <div className="analysis-result"><h4>{analysisStates[run.state]}{run.config.mode === 'fixture' ? ' · 合成演示，非正式验收' : ''}</h4>
-    {run.result?.processing && <div aria-label="分析处理范围"><p>{run.result.processing.complete ? '选定的已解析事件已完成提取' : '部分处理，不能视为完整会话分析'} · 汇总：{run.result.processing.aggregation} · {run.result.processing.omittedFindings} 项提取结论未纳入汇总。</p>
-      {run.result.processing.ranges.map((range, index) => <p key={index}>原事件 {range.start.event} 偏移 {range.start.textOffset} → {range.end.event} 偏移 {range.end.textOffset}：{range.state === 'extracted' ? '已提取' : range.state === 'failed' ? '失败' : '未处理'}{range.reason && ` · ${range.reason}`}</p>)}
-      <p className="muted small">事件索引从 0 开始，偏移为 UTF-16；完成仅指已解析主原件范围，未知行、末行、材料和采集缺口另列。</p></div>}
-    <p>版本 {run.generation} · 尝试 {run.attempts}/{run.maxAttempts} · {run.applicable ? '适用于当前输入' : '尚未适用或属于历史版本'} · {run.actorKind === 'system' ? '系统自动触发' : '认证用户触发'}</p>
-    {run.state === 'retry-wait' && <p>下次尝试：{new Date(run.nextAttemptAt).toLocaleString('zh-CN')}</p>}
-    {['failed', 'retry-wait'].includes(run.state) && run.attempts < run.maxAttempts && <button onClick={retry}>在剩余次数内重试</button>}
-    <p className="muted small">{run.config.model} · Claude Code {run.config.runtimeVersion} · {run.config.promptVersion} · {run.input.parserVersion} · 原来源资格版本 {run.input.attributionRevision ?? '未记录（历史输入）'}</p>
-    <p>输入覆盖：{run.input.eventCount} 条已解析事件；{run.input.coverage.unrecognizedLines} 行未解析；{run.input.coverage.partialLine ? '存在未闭合末行' : '无未闭合末行'}；
-      {run.input.coverage.excludedMaterials} 项关联材料未分析；{run.input.coverage.captureGaps.length} 项存档缺口。</p>
-    {run.error && <p className="error">{run.error}</p>}
-    {run.result?.items.map((item, index) => <div key={index}><h4>{analysisLabels[item.category]} · {assessmentLabels[item.assessment]}</h4><p>{item.text}</p>
-      {item.classificationAdjusted && <p className="muted small">原模型标记已按原句证据降级。</p>}
-      {item.citations.map((citation, part) => <p key={part}><a href={citation.webPath}>查看原句{citation.location.kind === 'material' ? ' · 原关联材料' : ` · 第 ${citation.location.line} 行`}</a>：<q>{citation.quote}</q>
-        <span className="muted small"> · {citation.origin?.employee ?? '归属未知'} · {citation.context === 'historical' ? '历史上下文' : citation.context === 'after-enrollment' ? '原员工接入后记录' : '活动归属边界未知'}</span></p>)}
-      {item.citations.filter(citation => citation.location.kind !== 'event').map((citation, part) => <p key={`input-${part}`} className="muted small">
-        原材料链接定位原始 JSON 行，保留转义；<a href={evidenceLink(citation.inputSnapshotId, citation.inputLocation)}>查看本次输入中的精确原句</a>。</p>)}
+  return <div className="analysis-result"><h4>{analysisStates[run.state]}</h4>
+    <p className="small muted">版本 {run.generation} · {run.applicable?'当前版本':'历史版本'}</p>
+    {['failed','retry-wait'].includes(run.state)&&run.attempts<run.maxAttempts&&<button onClick={retry}>重试</button>}
+    {run.error&&<p className="error">{run.error}</p>}
+    {run.result?.items.map((item,index)=><div key={index}><h4>{analysisLabels[item.category]} · {assessmentLabels[item.assessment]}</h4><p>{item.text}</p>
+      <details><summary>原文 · {item.citations.length}</summary>{item.citations.map((citation,part)=><p key={part}><a href={citation.webPath}>第 {citation.location.kind==='material'?'关联材料':citation.location.line} 行</a> <q>{citation.quote}</q></p>)}
+      {item.citations.filter(c=>c.location.kind!=='event').map((citation,part)=><a key={part} href={evidenceLink(citation.inputSnapshotId,citation.inputLocation)}>查看输入原句</a>)}</details>
     </div>)}
-    <p className="muted small">提供商实付人民币：未知；预算预留 ¥{run.config.reservationCny} 保留，未按未知用量退款。
-      {run.result ? ` 请求 ${run.result.usage.requests} 次；输入 token ${run.result.usage.inputTokens ?? '未知'}；输出 token ${run.result.usage.outputTokens ?? '未知'}；CLI 美元估计 ${run.result.usage.runtimeCostUsd ?? '未知'}（不是千问账单）。` : ''}</p>
+    <details><summary>处理记录</summary><p>{run.config.model} · {run.input.eventCount} 条记录 · {run.attempts}/{run.maxAttempts} 次</p>
+      {run.result?.processing?.ranges.map((range,index)=><p key={index}>{range.start.event} — {range.end.event} · {range.state==='extracted'?'已完成':range.state==='failed'?'失败':'待处理'}</p>)}
+    </details>
   </div>;
 }

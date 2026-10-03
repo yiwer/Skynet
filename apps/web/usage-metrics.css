@@ -9,10 +9,10 @@
 .usage-metrics button:disabled { opacity: .55; cursor: default; }
 .usage-metrics :is(button, input, select, summary, a):focus-visible { outline: 2px solid var(--color-focus); outline-offset: 3px; }
 .usage-metrics a { color: var(--color-accent-strong); text-underline-offset: 3px; }
-.usage-metrics .usage-page-head { margin-bottom: var(--space-lg); }
+.usage-metrics .usage-page-head { display: flex; flex: none; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px 16px; margin-bottom: 20px; }
 .usage-metrics .usage-page-head h1 { font-size: var(--text-xl); font-weight: 600; line-height: 1.2; letter-spacing: -.025em; overflow-wrap: anywhere; min-width: 0; }
 .usage-page-head p { max-width: 75ch; margin-top: 8px; color: var(--color-muted); font-size: var(--text-sm); text-wrap: pretty; }
-.usage-metrics .usage-filters { padding-block: 12px; margin-bottom: 16px; border-block: 1px solid var(--color-rule-soft); }
+.usage-metrics .usage-filters { flex: none; padding-block: 10px; margin-bottom: 16px; border-block: 1px solid var(--color-rule-soft); }
 .usage-filter-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; }
 .usage-periods { display: inline-flex; flex-wrap: wrap; gap: 2px; padding: 4px; max-width: 100%; border-radius: var(--radius-btn); background: var(--color-paper-2); }
 .usage-metrics .usage-periods button { height: 32px; min-height: 32px; padding: 0 10px; border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--color-muted); font-weight: 500; }
@@ -42,6 +42,8 @@
 .usage-metrics .usage-stat dt { color: var(--color-muted); font-size: var(--text-xs); font-weight: 600; }
 .usage-metrics .usage-stat dd { color: var(--color-ink); font-size: var(--text-lg); font-weight: 600; line-height: 1.2; letter-spacing: -.01em; margin: 0; }
 .usage-stat-sub { font-size: var(--text-xs); color: var(--color-muted); }
+.usage-stat-sub:empty { display: none; }
+.usage-partial { margin-left: 2px; font-size: 10px; color: var(--color-muted); font-weight: 400; }
 .usage-spark { display: block; width: 120px; max-width: 100%; height: 30px; margin-top: 4px; overflow: visible; }
 .usage-spark polyline { fill: none; stroke: var(--viz-deemph); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
 .usage-spark circle { fill: var(--viz-1); stroke: var(--color-card); stroke-width: 2; }
@@ -86,7 +88,7 @@
 .usage-legend li { display: inline-flex; align-items: center; gap: 8px; }
 .usage-legend i { display: block; flex: none; width: 12px; height: 8px; border-radius: 2px; background: var(--series-color); }
 .usage-legend .usage-legend-unknown { border: 1px dashed var(--color-rule-2); background: transparent; }
-.usage-table-scroll { max-width: 100%; overflow: auto; border: 1px solid var(--color-rule-soft); border-radius: var(--radius-md); }
+.usage-table-scroll { position: relative; max-width: 100%; overflow: auto; border: 1px solid var(--color-rule-soft); border-radius: var(--radius-md); }
 .usage-table-scroll table { width: 100%; border-collapse: collapse; font-size: var(--text-sm); font-variant-numeric: tabular-nums; }
 .usage-table-scroll caption { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .usage-table-scroll th, .usage-table-scroll td { text-align: left; padding: 12px; border-bottom: 1px solid var(--color-rule-soft); vertical-align: middle; }
@@ -119,6 +121,10 @@
 .usage-metrics .usage-definitions dd { margin: 0; }
 .usage-metrics .usage-definitions ul { margin-top: 12px; padding-left: 20px; color: var(--color-muted); font-size: var(--text-xs); }
 .usage-status, .usage-empty { padding: 16px 0; color: var(--color-muted); font-size: var(--text-sm); }
+.usage-metrics .usage-empty { padding: 48px 16px; text-align: center; }
+.usage-data-status { padding: 12px 0; color: var(--color-muted); font-size: var(--text-xs); }
+.usage-data-status summary { cursor: pointer; }
+.usage-data-status ul { padding: 8px 0 0 20px; }
 .usage-success { color: var(--color-ok); }
 .usage-error { padding: 12px 16px; border: 1px solid var(--color-crit-soft); border-radius: var(--radius-btn); background: var(--color-crit-soft); color: var(--color-crit); margin-bottom: 16px; }
 .usage-error button { margin-top: 8px; }
@@ -129,7 +135,7 @@
 }
 @media (min-width: 75rem) {
   .usage-metrics .usage-stats { display: flex; }
-  .usage-metrics .usage-stat { flex: 1 1 0; min-height: 170px; }
+  .usage-metrics .usage-stat { flex: 1 1 0; min-height: 118px; }
 }
 @media (min-width: 90rem) { .usage-metrics .usage-figure-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 59.99rem) {

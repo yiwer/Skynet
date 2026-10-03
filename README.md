@@ -2,7 +2,7 @@
 
 内部 Coding Agent 工作观察与会话存档平台。#4–#33 的代码、验收准备与最终评审修订已集成至代码基准 `83537e6`，两轴独立复核通过；该源码 Linux CI typecheck/build 与74/74普通测试通过。真实 Desktop、完整 Windows 生命周期、千问 PAYG、第二位操作者与连续五个工作日试点尚未验收，PR #55 已于 2026-10-03 合入 main；V1 发布验收仍未完成。验收入口见 [V1 验收台账](docs/implementation/v1-acceptance-ledger.md)，实现进度见 [V1 实施记录](docs/planning/v1-implementation.md)。
 
-V2 已开始开发：首批提供同源用量指标与对话阅读，Web 和 OAuth MCP 共用数据服务，保留原件、未知值和固定版本。当前进展、测试及剩余范围见 [V2 实施记录](docs/planning/v2-implementation.md)。Ubuntu 单机 HTTPS 发布、备份和回滚操作见 [部署配方](docs/operations/deployment.md)；部署准备不代表生产环境已上线或完整 V2 已验收。
+V2 已开始开发：首批提供同源用量指标与对话阅读，Web 和 OAuth MCP 共用数据服务，保留原件、未知值和固定版本。当前进展、测试及剩余范围见 [V2 实施记录](docs/planning/v2-implementation.md)。平台已部署至 [skynet.91boy.cn](https://skynet.91boy.cn)，Ubuntu 单机 HTTPS 发布、备份和回滚操作见 [部署配方](docs/operations/deployment.md)；完整 V2 验收仍在推进。
 
 ## 文档入口
 
@@ -40,6 +40,7 @@ V2 已开始开发：首批提供同源用量指标与对话阅读，Web 和 OAu
 | [PRD v2.0](docs/requirements/PRD-v2.md) | V2：数据报表、对话视图、活动记录、会话组装审计与员工使用能力评估；用户故事 72—176，验收场景 AC-23…AC-38 |
 | [V2 实施记录](docs/planning/v2-implementation.md) | S0、#34 基础指标、#36 对话首批实现、真实测试证据及后续范围 |
 | [Ubuntu HTTPS 部署配方](docs/operations/deployment.md) | 固定版本、私有配置、持久卷、一致备份、应用回滚及实机验证要求 |
+| [Windows 本机接入](docs/operations/local-onboarding.md) | npm 归档安装、设备接入、定向测试及 GitHub/npm 分发状态 |
 | [V2 实现提示词](docs/requirements/v2-prompt.md) | 交给实现 Agent 的 V2 工作说明；第六节守则第 1 条与 AC-28 已被 PRD v2.0 取代 |
 | [Web 平台原型](prototypes/web-platform/README.md) | 可点击的界面原型，数据为合成；只作界面与口径参考，代码不进入产品 |
 | [可行性与整体架构](docs/architecture/solution-design.md) | 推荐结构、Module 职责、可靠存档、分析、恢复与实施顺序 |

@@ -46,9 +46,7 @@ export function ConversationReader({ snapshotId, initial, request, navigation, o
     {error && <><p className="error" role="alert">{error}</p><button onClick={() => { setCursors([undefined]); setRetry(value => value + 1); }}>重新读取对话</button></>}
     {page && <>
       <p className="sr-only">{page.totalMessages} 条消息 · {page.totalToolCalls} 次工具调用 · 来源时间按北京时间显示</p>
-      {(page.status.captureGapCount > 0 || page.status.unrecognizedLines > 0 || page.status.partialLine) && <p className="notice">采集材料存在缺口或未解析内容；对话视图不能代替完整原件。可切换原件视图核查。</p>}
-      {page.status.compacted && <p className="notice">来源记录包含上下文压缩，已归档原件与关联材料仍可查阅。</p>}
-      {page.messages.length === 0 && <p>当前范围没有可显示的对话消息。可展开工具，或查看原件。</p>}
+      {page.messages.length === 0 && <p>暂无消息</p>}
       <div className="conversation-stream">{page.messages.map(message => {
         const focused = page.anchor?.line === message.line && page.anchor.block === message.block &&
           page.anchor.textOffset >= message.textOffset && page.anchor.textOffset < message.textOffset + Math.max(1, message.text.length);
@@ -58,28 +56,21 @@ export function ConversationReader({ snapshotId, initial, request, navigation, o
           <div className="conversation-column">
           <pre className="conversation-bubble">{focused && initial.matchLength ? <><mark>{message.text.slice(0, initial.matchLength)}</mark>{message.text.slice(initial.matchLength)}</> : message.text}</pre>
           <div className="message-meta"><strong>{message.role === 'user' ? message.origin?.employee ?? page.employee : message.role === 'assistant' ? 'Agent' : message.role}</strong>
-            <time title={message.timestamp ? date(message.timestamp) : undefined}>{message.timestamp ? new Date(message.timestamp).toLocaleTimeString('zh-CN',{timeZone:'Asia/Shanghai',hour:'2-digit',minute:'2-digit',hour12:false}) : '来源时间未知'}</time>
+            {message.timestamp&&<time title={date(message.timestamp)}>{new Date(message.timestamp).toLocaleTimeString('zh-CN',{timeZone:'Asia/Shanghai',hour:'2-digit',minute:'2-digit',hour12:false})}</time>}
             {message.context === 'historical' && <span className="badge">历史上下文</span>}
-            {message.context === 'unknown-time' && <span>来源时间未知</span>}
-            {message.context === 'unknown-enrollment' && <span>接入边界未知</span>}
             {focused && <strong>命中位置</strong>}
           <details className="conversation-evidence"><summary aria-label={`原件第 ${message.line} 行`}>#{message.line}</summary><div className="conversation-evidence-popup">
-          {message.toolEvidence === 'none-observed' && <p>无工具结果佐证</p>}
-          {message.toolEvidence === 'present-not-assessed' && <p>存在工具结果，结论尚需核查。</p>}
           <p>{message.origin?.employee ?? page.employee} · block {message.block}
             {message.textOffset > 0 || message.text.length < message.textLength ? ` · 本段 ${message.textOffset}–${message.textOffset + message.text.length} / ${message.textLength}` : ''}
             {' · '}<a href={message.evidencePath}>在时间线核查原句</a>{' · '}<a href={message.conversationPath}>此消息链接</a></p></div></details>
           {!includeTools && message.hiddenToolEvents > 0 && <span className="conversation-hidden-tools" title={`${message.hiddenToolCalls} 次工具调用、${message.hiddenToolEvents} 条工具记录（已隐藏）`}>{message.hiddenToolCalls} 次工具调用（已隐藏）<span className="sr-only">{message.hiddenToolCalls} 次工具调用、{message.hiddenToolEvents} 条工具记录（已隐藏）</span></span>}
-          {message.toolEvidence === 'none-observed' && <span className="conversation-verification">Agent 自述 · 无工具结果佐证</span>}
-          {message.toolEvidence === 'present-not-assessed' && <span className="conversation-verification">存在工具结果，结论尚需核查</span>}
           </div></div>
           {message.role === 'user' && <span className="conversation-avatar conversation-avatar-user" aria-hidden="true">{Array.from(message.origin?.employee ?? page.employee)[0]}</span>}
         </section>;
       })}</div>
-      {!includeTools && page.trailingHiddenToolEvents > 0 && <p className="notice">末尾另有 {page.trailingHiddenToolCalls} 次工具调用、{page.trailingHiddenToolEvents} 条工具记录，展开工具即可查看。</p>}
-      <div className="pagination"><button disabled={busy || cursors.length === 1} onClick={() => setCursors(value => value.slice(0, -1))}>上一页对话</button>
-        <button disabled={busy || !page.nextCursor} onClick={() => setCursors(value => [...value, page.nextCursor!])}>继续阅读对话</button></div>
-      <p className="muted small conversation-boundary">离线补传状态、会话是否仍在进行及未上报的等待事件：未知。按原件顺序阅读，消息内容保持原文。</p>
+      {!includeTools && page.trailingHiddenToolEvents > 0 && <button onClick={()=>{setIncludeTools(true);setAnchor(undefined);setCursors([undefined]);}}>显示 {page.trailingHiddenToolCalls} 次工具调用</button>}
+      {(cursors.length>1||page.nextCursor)&&<div className="pagination"><button disabled={busy || cursors.length === 1} onClick={() => setCursors(value => value.slice(0, -1))}>上一页对话</button>
+        <button disabled={busy || !page.nextCursor} onClick={() => setCursors(value => [...value, page.nextCursor!])}>继续阅读对话</button></div>}
       {page.relatedTotal > 0 && <details><summary>关联会话与材料（{page.relatedTotal}）</summary><ul>{page.related.map(item => <li key={item.materialId}>
         <a href={item.webPath}>{item.name}</a> · {item.role}</li>)}</ul><a href={page.relatedDetailsPath}>查看完整关联材料清单</a></details>}
     </>}

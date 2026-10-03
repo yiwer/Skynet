@@ -11,7 +11,6 @@ import { PlatformShell } from './PlatformShell.js';
 import { SessionDetail, type Detail } from './SessionDetail.js';
 import { SessionIndex } from './SessionIndex.js';
 import { RecoveryFlow } from './RecoveryFlow.js';
-import { InstallationHelp } from './installation.js';
 import { ArchiveSearch } from './ArchiveSearch.js';
 import { selectedEvidence } from './EvidenceReader.js';
 import { AnalysisOperations } from './AnalysisOperations.js';
@@ -20,6 +19,7 @@ import { TeamCoverage } from './TeamCoverage.js';
 import { WorkViews } from './WorkViews.js';
 import { ServerOperations } from './ServerOperations.js';
 import { UsageMetrics } from './UsageMetrics.js';
+import './product-polish.css';
 
 function App() {
   const [credential, setCredential] = useState('');
@@ -120,22 +120,22 @@ function App() {
       const extension = { raw: 'jsonl', readable: 'txt', recovery: 'skynet-recovery.json' }[kind];
       const anchor = document.createElement('a'); anchor.href = url; anchor.download = `${detail.snapshotId}.${extension}`; anchor.click();
       setTimeout(() => URL.revokeObjectURL(url), 1000);
-      setExportStatus('已准备下载；保存文件后按恢复说明操作。');
+      setExportStatus('下载已准备');
     } catch (failure) { setExportError((failure as Error).message); }
     finally { setExporting(false); }
   }
 
   return <PlatformShell authenticated={!!token} name={name} canManageIdentities={canManageIdentities} view={view} onNavigate={navigate} onLogout={()=>logout()} onSearch={openSearch}>
-    {!token?<section className="login"><p className="eyebrow">工作过程，有据可查</p><h1>阅读会话原件</h1><p>登录后可查看所有员工、所有项目的已提交存档。</p><form onSubmit={login}><label htmlFor="credential">个人读取凭据</label><input id="credential" type="password" value={credential} onChange={event=>setCredential(event.target.value)} autoComplete="off" required aria-describedby="credential-hint"/><p id="credential-hint" className="muted">使用管理员签发的读取凭据。凭据仅在当前页面内保留。</p><button className="primary" disabled={busy||!credential}>{busy?'正在验证…':'进入存档'}</button></form></section>:<>
+    {!token?<section className="login"><h1>登录 Skynet</h1><form onSubmit={login}><label htmlFor="credential">个人读取凭据</label><input id="credential" type="password" value={credential} onChange={event=>setCredential(event.target.value)} autoComplete="off" required/><button className="primary" disabled={busy||!credential}>{busy?'正在验证…':'进入存档'}</button></form></section>:<>
     {view==='metrics'?<UsageMetrics key={token} request={(path,signal,method,body)=>request(path,token,signal,method,body)}/>
     :view==='server'?<ServerOperations request={(path,signal)=>request(path,token,signal)}/>
     :view==='coverage'?<TeamCoverage currentEmployeeId={employeeId} request={(path,signal)=>request(path,token,signal)} onEvidence={()=>navigate('archive')}/>
     :view==='analysis'?<AnalysisOperations request={(path,signal)=>request(path,token,signal)}/>
     :view==='work'?<WorkViews currentEmployeeId={employeeId} request={(path,signal,method)=>request(path,token,signal,method)} onEvidence={()=>navigate('archive')}/>
     :view==='daily'?<DailyReports currentEmployeeId={employeeId} request={(path,signal,method,body)=>request(path,token,signal,method,body)} onEvidence={()=>navigate('archive')}/>
-    :view==='delivery'?<><DeviceDelivery token={token} onUnauthorized={()=>logout('身份已停用或凭据失效，请重新登录。')}/><InstallationHelp/></>
+    :view==='delivery'?<DeviceDelivery token={token} onUnauthorized={()=>logout('身份已停用或凭据失效，请重新登录。')}/>
     :view==='recovery'?<RecoveryFlow key={conversationHash} sessions={sessions} hasMore={!!nextSessionCursor} onLoadMore={()=>{setSessionCursor(nextSessionCursor);setSessionRetry(value=>value+1);}} request={(path,signal)=>request(path,token,signal)}/>
-    :view==='identities'&&canManageIdentities?<><IdentityManagement token={token} currentEmployeeId={employeeId} onDelivery={()=>navigate('delivery')} onUnauthorized={()=>logout('身份已停用或凭据失效，请重新登录。')}/><InstallationHelp/></>
+    :view==='identities'&&canManageIdentities?<IdentityManagement token={token} currentEmployeeId={employeeId} onDelivery={()=>navigate('delivery')} onUnauthorized={()=>logout('身份已停用或凭据失效，请重新登录。')}/>
     :selected?<>{detailLoading?<p role="status">正在读取会话…</p>:detailError?<><p className="error" role="alert">{detailError}</p><button onClick={()=>setDetailRetry(value=>value+1)}>重试读取会话</button></>:detail&&<SessionDetail detail={detail} reading={reading} conversationHash={conversationHash} refresh={refresh} offset={offset} evidenceLocation={evidenceLocation} setOffset={setOffset} request={(path,signal,method,body)=>request(path,token,signal,method,body)} download={download} exporting={exporting} exportStatus={exportStatus} exportError={exportError}/>}</>
     :<SessionIndex sessions={sessions} busy={busy} recovery={false} hasMore={!!nextSessionCursor} onLoadMore={()=>{setSessionCursor(nextSessionCursor);setSessionRetry(value=>value+1);}} onRefresh={()=>{setSessionCursor(null);setRefresh(value=>value+1);}} onSearch={openSearch}/>}
     <dialog className="archive-search-dialog" ref={searchDialog} onCancel={()=>setSearchOpen(false)} onClose={event=>{if(!event.currentTarget.open)setSearchOpen(false);}} onClick={event=>{if(event.target===event.currentTarget)setSearchOpen(false);}} aria-label="搜索存档"><div><div className="search-dialog-heading"><h2>搜索存档</h2><button aria-label="关闭搜索" onClick={()=>setSearchOpen(false)}>关闭</button></div>{searchOpen&&<ArchiveSearch key={token} request={(path,signal)=>request(path,token,signal)}/>}</div></dialog>

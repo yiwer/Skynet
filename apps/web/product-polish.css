@@ -1,0 +1,100 @@
+/* Hallmark · pre-emit critique: P5 H4 E4 S5 R5 V4
+ * Product workspaces: fixed chrome, intentional content scrolling, native themed controls. */
+html,body,#root{height:100%;width:100%;min-height:0;margin:0;overflow:hidden}
+.platform-shell{height:100dvh;min-height:0;overflow:hidden;grid-template-rows:52px minmax(0,1fr)}
+.platform-shell .platform-topbar{height:52px;min-height:0;position:relative;top:0}
+.platform-shell .platform-main{display:flex;flex-direction:column;min-height:0;height:auto;padding:24px 20px;overflow:hidden;margin:0 8px 8px}
+.platform-page-content{flex:1;min-width:0;min-height:0;overflow:auto;overscroll-behavior:contain;scrollbar-gutter:stable}
+.platform-page-content:has(>.workspace-page),.platform-page-content:has(>.session-detail),.platform-page-content:has(>.sessions-index){overflow:hidden;display:flex;flex-direction:column;scrollbar-gutter:auto}
+.platform-main .workspace-page{display:flex;flex-direction:column;height:100%;min-height:0;overflow:hidden;min-width:0;margin:0}
+.platform-main .workspace-page> :not(.workspace-scroll){flex-shrink:0}
+.platform-main .workspace-scroll{flex:1;min-height:0;min-width:0;overflow:auto;overscroll-behavior:contain;padding:0 6px 16px 0;scrollbar-gutter:stable}
+.platform-shell .platform-rail{min-height:0;overflow:hidden;gap:20px}
+.platform-rail-brand,.platform-shell .platform-search-button,.platform-rail-footer{flex-shrink:0}
+.platform-shell .platform-search-button{height:36px}
+.platform-nav{min-height:0;overflow:auto;align-content:start;overscroll-behavior:contain;flex:1;padding:1px}
+.platform-rail-footer{margin-top:0}
+.platform-shell .platform-main h1{font-size:clamp(24px,1.2vw + 16px,30px);line-height:1.25;text-wrap:pretty}
+.platform-main .workspace-page> :is(header,[class$="page-head"],[class$="page-heading"]){margin-bottom:20px}
+.platform-main :is(button,input,select,textarea){transition:background-color var(--dur-short) var(--ease-out),border-color var(--dur-short) var(--ease-out),box-shadow var(--dur-short) var(--ease-out)}
+.platform-main :is(select,input:not([type=checkbox]):not([type=radio]),textarea){border-radius:var(--radius-sm);border:1px solid var(--color-rule);background:var(--color-card);color:var(--color-ink)}
+.platform-main select{appearance:none;background-image:linear-gradient(45deg,transparent 50%,var(--color-muted) 50%),linear-gradient(135deg,var(--color-muted) 50%,transparent 50%);background-position:calc(100% - 17px) 50%,calc(100% - 12px) 50%;background-size:5px 5px;background-repeat:no-repeat;padding-right:36px;cursor:pointer}
+.platform-main select:hover:not(:disabled){border-color:var(--color-rule-2);background-color:var(--color-paper)}
+.platform-main select:focus-visible{border-color:var(--color-focus);box-shadow:0 0 0 3px var(--color-accent-soft);outline:none}
+.platform-main select:disabled{opacity:.45;cursor:not-allowed}
+@supports(appearance:base-select){
+ .platform-main select,.platform-main select::picker(select){appearance:base-select}
+ .platform-main select{display:flex;justify-content:space-between;background-image:none;align-items:center;gap:12px;padding-right:12px;white-space:nowrap;text-overflow:ellipsis}
+ .platform-main select::picker-icon{content:'';width:6px;height:6px;flex:none;margin:0 2px 3px 8px;border-right:1.5px solid var(--color-muted);border-bottom:1.5px solid var(--color-muted);rotate:45deg;transition:rotate var(--dur-short) var(--ease-out)}
+ .platform-main select:open::picker-icon{rotate:225deg}
+ .platform-main select::picker(select){margin-top:6px;padding:6px;min-width:anchor-size(width);max-width:calc(100vw - 24px);max-height:min(360px,50dvh);overflow:auto;overscroll-behavior:contain;background:var(--color-card);color:var(--color-ink);border:1px solid var(--color-rule);border-radius:12px;box-shadow:var(--shadow-float);font:400 14px/1.5 var(--font-sans)}
+ .platform-main select option{display:flex;align-items:center;gap:12px;min-height:36px;padding:8px 12px;border-radius:7px;color:var(--color-ink);white-space:normal;overflow-wrap:anywhere;cursor:pointer}
+ .platform-main select option:hover,.platform-main select option:focus{background:var(--color-hover);outline:none}
+ .platform-main select option:checked{background:var(--color-accent-wash);color:var(--color-accent-ink);font-weight:500}
+ .platform-main select option::checkmark{color:var(--color-accent-strong);margin-left:auto;order:1;content:'✓'}
+ .platform-main select optgroup{padding:4px;font-size:12px;color:var(--color-muted)}
+}
+.platform-shell :is(.platform-page-content,.workspace-scroll,.platform-nav,.session-reading,.session-side,.session-table-wrap,.archive-search-dialog){scrollbar-width:thin;scrollbar-color:var(--color-rule-2) transparent}
+.platform-main .sessions-index{display:flex;flex-direction:column;height:100%;min-height:0;overflow:hidden}
+.platform-main .sessions-index> :not(.session-table-wrap){flex-shrink:0}
+.platform-main .session-table-wrap{flex:1;min-height:0;overscroll-behavior:contain}
+.platform-main .session-table thead{position:sticky;top:0;z-index:2}
+.platform-main .session-index-heading{margin-bottom:20px}
+.platform-main .session-list-controls{margin-bottom:16px;gap:12px}
+.platform-main .sessions-index>.empty{flex:1;align-content:center;justify-items:center;border:0;background:transparent;min-height:160px}
+.platform-main .session-detail{display:flex;flex-direction:column;height:100%;min-height:0;overflow:hidden}
+.platform-main .session-page-heading{flex:none;margin-bottom:20px}
+.platform-main .session-crumbs{font-size:12px;white-space:nowrap;overflow:hidden}
+.platform-main .session-crumbs .hash{overflow:hidden;text-overflow:ellipsis}
+.platform-main .session-title-row h1{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden}
+.platform-main .session-meta{flex:none;margin:0 0 16px}
+.platform-main .session-columns{flex:1;min-height:0;overflow:auto;align-items:stretch;gap:28px;overscroll-behavior:contain}
+.platform-main .session-reading{min-height:0;overflow:visible;padding-right:4px}
+.platform-main .session-side{position:static;max-height:none;min-height:0;padding:0}
+.platform-main .conversation-toolbar,.platform-main .session-reading>.reading-nav{position:sticky;top:0;z-index:10;background:var(--color-paper);padding-bottom:12px;margin:0}
+.platform-main .conversation-stream{padding-bottom:16px}
+.platform-main .conversation-reader>.pagination{position:sticky;bottom:0;z-index:2;background:var(--color-paper);padding:12px 0;margin:0;border-top:1px solid var(--color-rule-soft)}
+.platform-main .session-side .session-facts dl{gap:12px}
+.platform-main .session-side .session-facts dd{text-align:right;font-variant-numeric:tabular-nums}
+.platform-main .session-side .session-file-actions{display:flex;flex-wrap:wrap;gap:8px}
+.platform-main .session-side details{overflow-wrap:anywhere}
+.platform-main .session-side .hash{overflow-wrap:anywhere}
+.platform-main .restore-book{margin-top:0}
+.platform-main .restore-snapshot{margin:24px 0}
+.platform-main .restore-snapshot dl>div{display:grid;grid-template-columns:100px minmax(0,1fr);gap:16px}
+.platform-main .restore-snapshot dd{overflow-wrap:anywhere}
+.platform-main .restore-checks{margin:0 0 20px}
+.platform-main .login{width:min(420px,100%);margin:clamp(24px,10vh,100px) auto;padding:32px;border:0;background:transparent}
+.platform-main .login form{display:grid;gap:14px}.platform-main .login button{margin-top:8px}
+.platform-main .login h1{margin-bottom:28px}.platform-main .login label{font-size:13px;color:var(--color-muted)}
+.archive-search-dialog{padding:20px;max-height:min(720px,85dvh)}
+.archive-search-dialog .search-fields{gap:12px}.archive-search-dialog .search-options{margin:16px 0}
+.archive-search-dialog .search-results{border-top:1px solid var(--color-rule-soft);padding-top:16px;margin-top:16px}
+@media(min-width:60rem){
+ .platform-shell{grid-template-columns:248px minmax(0,1fr);grid-template-rows:minmax(0,1fr)}
+ .platform-shell .platform-main{margin:8px 8px 8px 0;min-height:0;padding:32px clamp(24px,3vw,48px) 24px}
+ .platform-shell .platform-rail{position:relative;height:100%;min-height:0}
+}
+@media(min-width:1200px){
+ .platform-main .session-columns{grid-template-columns:minmax(0,1fr) 280px;overflow:hidden}
+ .platform-main .session-reading,.platform-main .session-side{overflow-y:auto;overscroll-behavior:contain;scrollbar-gutter:stable;padding-right:8px}
+}
+@media(max-width:639px){
+ .platform-shell .platform-main{padding:20px 14px 12px}
+ .platform-main .session-title-row{gap:10px}.platform-main .session-title-row h1{font-size:22px}
+ .platform-main .session-title-row p{font-size:12px}
+ .platform-main .session-page-heading{margin-bottom:12px}
+ .platform-main .session-meta{display:none}
+ .platform-main .session-recover-button{min-height:32px;font-size:12px;padding:6px 12px}
+ .platform-main .session-columns{display:block}
+ .platform-main .session-side{border-top:1px solid var(--color-rule);margin-top:24px;padding-top:20px}
+ .platform-main .session-list-controls>label{width:auto;flex:1;min-width:100px}
+ .platform-main .session-list-controls>span{display:none}
+ .platform-main .session-agent-filter{width:100%}
+ .platform-main .session-agent-filter button{font-size:12px;padding-inline:10px}
+ .platform-main .workspace-scroll{padding-right:0;scrollbar-gutter:auto}
+ .platform-main .conversation-toolbar{gap:4px}.platform-main .conversation-tool-switch{font-size:12px}
+ .platform-main .usage-filters{max-height:42dvh;overflow-y:auto;overscroll-behavior:contain;scrollbar-width:thin;scrollbar-color:var(--color-rule-2) transparent}
+ .platform-main .usage-custom-dates input{width:100%;min-width:0}
+}
+@media(max-width:359px){.platform-main .usage-custom-dates{grid-template-columns:minmax(0,1fr)}}

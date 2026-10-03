@@ -38,20 +38,18 @@ export function ArchiveSearch({ request }: Props) {
       </div>
       <div className="search-options"><label><input type="checkbox" checked={draft.projectState === 'unclassified'} onChange={event => setDraft({ ...draft, project: '', projectState: event.target.checked ? 'unclassified' : 'all' })} />仅未归类项目</label>
         <label><input type="checkbox" checked={draft.history === 'all'} onChange={event => setDraft({ ...draft, history: event.target.checked ? 'all' : 'latest' })} />包含历史快照与代次</label></div>
-      <p className="muted small">内容、姓名和项目按包含文字查找。日期按原文发生时间（北京时间）筛选；未知日期及关联材料不计入日期筛选。二进制附件不做文字识别。</p>
       <button className="primary" disabled={busy}>搜索存档</button>
     </form>
     {busy && <p role="status">正在搜索原件…</p>}
     {error && <><p className="error" role="alert">{error}</p><button disabled={busy} onClick={() => setRetry(value => value + 1)}>重试搜索</button></>}
     {page && <div className="search-results" aria-label="搜索结果">
-      <p role="status">已检查 {scanned} 份快照，找到 {hits.length} 份。{page.complete ? '本次搜索已完成。' : '还有快照待检查；请继续搜索。'}</p>
-      {!busy && page.complete && hits.length === 0 && <p>没有匹配原件。可清除内容或日期条件，或勾选历史快照扩大范围。</p>}
+      <p role="status">{hits.length} 个结果{!page.complete&&` · 已搜索 ${scanned} 份快照`}</p>
+      {!busy && page.complete && hits.length === 0 && <p>没有匹配结果</p>}
       <ol>{hits.map(hit => <li key={hit.id}><a className="search-hit" href={hit.webPath}><strong>{hit.employee} · {hit.project || '未归类项目'}</strong>
-        <span>{sourceLabel(hit.source)} · {hit.sourceDate ?? '来源日期未知'} · {hit.revision === null ? '修订未知' : `修订 ${hit.revision}`}</span>
+        <span>{sourceLabel(hit.source)}{hit.sourceDate&&` · ${hit.sourceDate}`}{hit.revision!==null&&` · 修订 ${hit.revision}`}</span>
         <span>{hit.location?.kind === 'material' ? '关联材料' : hit.location?.kind === 'raw' ? `原件第 ${hit.line} 行（原始格式）` : hit.line ? `原件第 ${hit.line} 行${hit.block === null ? '' : ` / block ${hit.block}`}` : '空原件'} · 打开首个命中</span>
         <q>{hit.excerpt}</q></a>{hit.conversationPath && <a href={hit.conversationPath}>在对话中打开命中消息</a>}</li>)}</ol>
       {page.nextCursor && <button disabled={busy} onClick={() => setQuery({ ...query, cursor: page.nextCursor! })}>继续搜索更多快照</button>}
-      <p className="muted small">每份快照列出首个命中。本次搜索保留 15 分钟；上传新版本后重新搜索可查看。完整材料仍可在详情导出。</p>
     </div>}
   </section>;
 }

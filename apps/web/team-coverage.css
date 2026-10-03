@@ -8,13 +8,15 @@
 .platform-main .coverage-heading label { width: 160px; margin: 0; font-size: 12px; color: var(--color-muted); font-weight: 400; }
 .platform-main .coverage-heading input { min-height: 40px; margin-top: 4px; font-size: 14px; }
 .platform-main .coverage-report-link { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 40px; padding: 8px 16px; border: 1px solid var(--color-ink); border-radius: 10px; color: var(--color-ink); font-size: 14px; font-weight: 500; text-decoration: none; white-space: nowrap; transition: background-color var(--dur-short) var(--ease-out); }
-.platform-main .coverage-kpis { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-bottom: 16px; }
-.platform-main .coverage-kpi { display: grid; align-content: start; gap: 4px; min-width: 0; padding: 16px; border: 1px solid var(--color-rule-soft); border-radius: 16px; background: var(--color-card); }
-.platform-main .coverage-kpi:first-child { grid-column: span 2; }
+.platform-main .coverage-kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-bottom: 16px; }
+.platform-main .coverage-kpi { display: grid; align-content: start; gap: 8px; min-width: 0; padding: 16px; border: 1px solid var(--color-rule-soft); border-radius: 16px; background: var(--color-card); }
+
 .platform-main .coverage-kpi p { margin: 0; font-size: 12px; font-weight: 600; color: var(--color-muted); }
 .platform-main .coverage-kpi > strong { font-size: 25px; font-weight: 600; letter-spacing: -.01em; line-height: 1.2; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
 .platform-main .coverage-kpi > span { font-size: 12px; color: var(--color-muted); }
-.platform-main .coverage-token-trend { width: 100%; height: 34px; margin-top: 4px; overflow: visible; }
+.platform-main .coverage-token-trend { width: 104px; height: 26px; position: absolute; right: 16px; bottom: 14px; opacity: .7; }
+.platform-main .coverage-kpi { position: relative; min-height: 92px; }
+.platform-main .coverage-kpi:has(.coverage-token-trend) > strong { padding-right: 104px; }
 .platform-main .coverage-token-trend line { stroke: var(--color-rule-soft); stroke-width: 1; }
 .platform-main .coverage-token-trend polyline { fill: none; stroke: var(--viz-1); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 .platform-main .coverage-block-title { font-size: 16px; font-weight: 600; margin: 0 0 12px; }
@@ -83,16 +85,9 @@
 .platform-main .coverage-summary-table th, .platform-main .coverage-summary-table td { padding: 12px; white-space: nowrap; vertical-align: middle; font-variant-numeric: tabular-nums; }
 .platform-main .coverage-summary-table tbody th { color: var(--color-ink); font-size: 14px; font-weight: 500; }
 .platform-main .coverage-summary-person { display: inline-flex; align-items: center; gap: 8px; }
-@media (min-width: 40rem) {
-  .platform-main .coverage-kpis { grid-template-columns: repeat(6, minmax(0, 1fr)); }
-  .platform-main .coverage-kpi { grid-column: span 2; }
-  .platform-main .coverage-kpi:first-child, .platform-main .coverage-kpi:nth-child(2) { grid-column: span 3; }
-}
 @media (min-width: 75rem) {
-  .platform-main .coverage-kpis { display: flex; }
-  .platform-main .coverage-kpi { flex: 1 1 0; }
   .platform-main .coverage-layout { grid-template-columns: minmax(0, 1fr) 312px; }
-  .platform-main .coverage-inspector { position: sticky; top: 16px; align-self: start; max-height: calc(100dvh - 32px); overflow-y: auto; scrollbar-width: thin; }
+  .platform-main .coverage-inspector { align-self: start; }
 }
 @media (hover: hover) {
   .platform-main .coverage-person:hover, .platform-main .coverage-table .coverage-cell:hover, .platform-main .coverage-report-link:hover { background: var(--color-hover); }
@@ -103,4 +98,26 @@
   .platform-main .coverage-heading { align-items: flex-start; }
   .platform-main .coverage-heading-actions { width: 100%; }
   .platform-main .coverage-heading label { flex: 1; min-width: 140px; }
+}
+
+.platform-main .coverage-heading { flex: none; }
+.platform-main .coverage-scroll { padding: 0 4px 24px 0; }
+.platform-main .coverage-section-heading { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; margin: 24px 0 12px; }
+.platform-main .coverage-section-heading h2 { margin: 0; }
+.platform-main .coverage-section-heading > span { color: var(--color-muted); font-size: 12px; }
+.platform-main .coverage-statuses:empty { display: none; }
+.platform-main .coverage-daily-link { display: flex; justify-content: center; align-items: center; min-height: 36px; padding: 6px 12px; border: 1px solid var(--color-rule); border-radius: 10px; text-decoration: none; font-weight: 500; }
+.platform-main .coverage-inspector details > ul { margin: 12px 0 0; padding-left: 16px; }
+.platform-main .coverage-inspector details > ul > li { margin-bottom: 12px; overflow-wrap: anywhere; }
+.platform-main .coverage-inspector details > ul > li > p { margin-top: 4px; color: var(--color-muted); font-size: 12px; }
+.platform-main .coverage-matrix, .platform-main .coverage-summary-table { position: relative; }
+.platform-main .coverage-table sup, .platform-main .coverage-summary-table sup { color: var(--color-muted); margin-left: 2px; }
+@media (max-width: 39.99rem) {
+  .platform-main .coverage-heading { gap: 16px; margin-bottom: 16px; }
+  .platform-main .coverage-heading p { font-size: 12px; }
+  .platform-main .coverage-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .platform-main .coverage-kpi { min-height: 84px; padding: 12px; }
+  .platform-main .coverage-token-trend { position: static; width: 100%; height: 20px; }
+  .platform-main .coverage-kpi:has(.coverage-token-trend) > strong { padding: 0; }
+  .platform-main .coverage-inspector { padding: 16px; }
 }
