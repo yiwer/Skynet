@@ -53,6 +53,7 @@ html,body,#root{height:100%;width:100%;min-height:0;margin:0;overflow:hidden}
 .platform-main .session-side{position:static;max-height:none;min-height:0;padding:0}
 .platform-main .conversation-toolbar,.platform-main .session-reading>.reading-nav{position:sticky;top:0;z-index:10;background:var(--color-paper);padding-bottom:12px;margin:0}
 .platform-main .conversation-stream{padding-bottom:16px}
+.platform-main .conversation-hidden-tools{position:relative}
 .platform-main .conversation-reader>.pagination{position:sticky;bottom:0;z-index:2;background:var(--color-paper);padding:12px 0;margin:0;border-top:1px solid var(--color-rule-soft)}
 .platform-main .session-side .session-facts dl{gap:12px}
 .platform-main .session-side .session-facts dd{text-align:right;font-variant-numeric:tabular-nums}
@@ -79,6 +80,10 @@ html,body,#root{height:100%;width:100%;min-height:0;margin:0;overflow:hidden}
  .platform-main .session-columns{grid-template-columns:minmax(0,1fr) 280px;overflow:hidden}
  .platform-main .session-reading,.platform-main .session-side{overflow-y:auto;overscroll-behavior:contain;scrollbar-gutter:stable;padding-right:8px}
 }
+@media(max-width:1199px){
+ .platform-main .session-columns{display:block}
+ .platform-main .session-side{border-top:1px solid var(--color-rule);margin-top:24px;padding-top:20px}
+}
 @media(max-width:639px){
  .platform-shell .platform-main{padding:20px 14px 12px}
  .platform-main .session-title-row{gap:10px}.platform-main .session-title-row h1{font-size:22px}
@@ -96,5 +101,9 @@ html,body,#root{height:100%;width:100%;min-height:0;margin:0;overflow:hidden}
  .platform-main .conversation-toolbar{gap:4px}.platform-main .conversation-tool-switch{font-size:12px}
  .platform-main .usage-filters{max-height:42dvh;overflow-y:auto;overscroll-behavior:contain;scrollbar-width:thin;scrollbar-color:var(--color-rule-2) transparent}
  .platform-main .usage-custom-dates input{width:100%;min-width:0}
+ .platform-main .coverage-heading{display:grid;grid-template-columns:minmax(0,1fr);align-items:stretch}
+ .platform-main .coverage-heading-actions{min-width:0;max-width:100%}
+ .platform-main .coverage-heading label{min-width:0;max-width:100%;flex:1 1 140px}
+ .platform-main .coverage-heading input{width:100%;min-width:0;max-width:100%}
 }
 @media(max-width:359px){.platform-main .usage-custom-dates{grid-template-columns:minmax(0,1fr)}}
