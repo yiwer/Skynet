@@ -1,6 +1,6 @@
 # Windows 本机接入与 npm 分发记录
 
-日期：2026-10-03。目标平台：`https://skynet.91boy.cn`。本轮由用户明确授权安装本机采集器并测试，使用现有个人身份“Skynet 管理员”。完成了普通 Windows 环境中的 npm 安装、设备绑定、当前用户任务和合成存档链；**真实 Codex hooks 信任、真实 CLI 自动采集、Codex Desktop、登录/重启/休眠仍未验收**。
+日期：2026-10-03。目标平台：`https://skynet.91boy.cn`。本轮由用户明确授权安装本机采集器并测试，使用现有个人身份“Skynet 管理员”。最终采集器为 **0.2.3**：普通 PowerShell 和 Codex MSIX 共用同一私有状态、设备身份和后台；完成六条 hooks 的原生逐条授信，以及 Codex CLI 0.160.0 无模型空会话的自动采集、上传、原字节下载核对。**Codex Desktop 本体的来源识别与图标入口、登录/重启/休眠仍未验收**。
 
 ## 分发渠道核对
 
@@ -12,20 +12,20 @@
 
 | 字段 | 值 |
 | --- | --- |
-| 包名 / 版本 | `@skynet/agent` / `0.2.1` |
+| 包名 / 版本 | `@skynet/agent` / `0.2.3` |
 | 部署标识 | `skynet-91boy` |
 | 平台地址 | `https://skynet.91boy.cn` |
-| 本机 tarball | `E:/GenCode/Skynet-evidence/v2-2026-10-03/local-onboarding/release-0.2.1/skynet-agent-0.2.1.tgz` |
-| 大小 | 1,218,006 bytes |
-| SHA-256 | `2631bd905125fd4d0c6121be43147a25af6896963ac21440e7d9dc228f6fd4a2` |
-| 采集器源码基准 | `e96e863987a5ca0c0445740fd892c8b57604aef3`；本轮未修改采集器源码 |
+| 本机 tarball | `E:/GenCode/Skynet-evidence/v2-2026-10-03/local-onboarding/release-0.2.3/skynet-agent-0.2.3.tgz` |
+| 大小 | 1,218,764 bytes |
+| SHA-256 | `260c383278df87e51136204b29a573a473831c9e75ad996b9519fb154cbe5dd5` |
+| 采集器源码基准 | `027f80dcd255ce24f24b16f09759d2346602eb6e` |
 | 安装方式 | `npm install -g --offline --ignore-scripts --no-audit --no-fund <tarball>` |
 
-发行目录的 893 个文件已检查，不含本次个人接入凭据或读取凭据。安装目录与凭据/本地队列分别存储。
+发行目录的 893 个文件已检查，不含本次个人接入凭据或读取凭据。安装目录与凭据/本地队列分别存储。最初安装的 0.2.1 与未安装的中间 0.2.2 归档均保留，没有覆盖已生成的 tarball；最终包证据为 `release-0.2.3-manifest.json`。
 
 后续可以把这个 tarball、校验文件与说明上传至已验证的 GitHub Release，员工下载后核对 SHA-256，再使用上述 npm 命令安装；也可让 npm 直接读取可信 HTTPS tarball URL。[npm 安装接口](https://docs.npmjs.com/cli/v11/commands/npm-install/)支持包归档与远程包地址。此路径不要求公共 npm registry 发布，仍需一次个人接入授权。
 
-若选择公共 npm registry，需要先确定有发布权的 scope/包名、完成维护者 npm 认证、调整发行包的 `private` 设置并建立正式版本发布流程。本轮没有这些发布权限，不能把本地 tarball 称为已发布 npm 包。现有可用产物与缺口也记录在证据目录的 `release-manifest.json`、`SHA256SUMS.txt`。
+若选择公共 npm registry，需要先确定有发布权的 scope/包名、完成维护者 npm 认证、调整发行包的 `private` 设置并建立正式版本发布流程。本轮没有这些发布权限，不能把本地 tarball 称为已发布 npm 包。
 
 ## 本机最终状态
 
@@ -36,28 +36,30 @@
 | 检测到的 Codex Desktop | 26.930.3748.0 |
 | Claude Code | 未检测到，本轮未配置 |
 | 标准 npm 安装目录 | `C:/Users/yiwer/AppData/Roaming/npm/node_modules/@skynet/agent` |
-| 标准私有状态目录 | `C:/Users/yiwer/AppData/Local/Skynet` |
+| 唯一活动私有状态目录 | `C:/Users/yiwer/.skynet/state` |
 | 设备 ID | `9df093f5-77a8-46f8-b56e-da20e9ed13ac` |
-| 运行版本 | 0.2.1 |
+| 运行版本 | 0.2.3 |
 | 后台与平台连接 | `running` / `connected` |
-| 正式当前用户任务 | `Skynet-929bb0c9796782b518cf53d5`，`registered` / `Running` |
+| 正式当前用户任务 | `Skynet-bb51b1a2de1d59ae029edef4`，`registered` / `Running` |
 | 任务权限与窗口 | 当前用户 `Interactive` / `Limited`，Hidden |
 | 当前会话降级启动 | 无，`fallback: null` |
 | 状态目录 ACL | 受保护，仅当前用户 SID 有访问条目 |
 
-后续日常管理应在**从 Windows 正常启动的 PowerShell**中执行：
+普通 Windows PowerShell 与当前 MSIX 中的 npm 安装均已升级为 0.2.3，以下命令在两个上下文中返回同一状态目录、设备和后台实例：
 
 ```powershell
-skynet status
+skynet.cmd status
 ```
 
 如果该终端尚未重新加载 npm 全局命令路径，可使用明确入口：
 
 ```powershell
-node "$env:APPDATA/npm/node_modules/@skynet/agent/dist/apps/collector/cli.js" status
+& "$env:APPDATA/npm/skynet.cmd" status
 ```
 
-当前设备已绑定，正常使用不再需要设置 `SKYNET_KEY`。维护凭据保留在用户原有受限文件 `C:/Users/yiwer/.ssh/skynet.91boy.cn-operator.json`，没有写入发行包、宿主 hooks、仓库或验收输出。
+使用 `.cmd` 入口可避免 PowerShell 选择 npm 的 `.ps1` shim；不需要修改执行策略。当前设备已绑定，正常使用不再需要设置 `SKYNET_KEY`。维护凭据保留在用户原有受限文件 `C:/Users/yiwer/.ssh/skynet.91boy.cn-operator.json`，没有写入发行包、宿主 hooks、仓库或验收输出。
+
+最终命令检查发现：MSIX npm 更新后，包外标准 npm 包及 shim 路径缺失，但稳定目录中的后台持续正常。已在包外使用同一校验通过的 0.2.3 tarball 离线重装本产品 npm 入口并启用 `--bin-links=true`，没有重新 setup、登记设备或重启采集后台。此后包外和 MSIX 均用上述明确的 `skynet.cmd status` 命令实测成功，返回相同设备、0.2.3、运行中的同一个后台；证据为 `standard-shim-status.json`、`msix-shim-status.json`。所有临时验证任务已移除，最终清单见 `final-owned-tasks.json`。
 
 ## MSIX 环境差异与恢复
 
@@ -70,7 +72,7 @@ C:/Users/yiwer/AppData/Local/Packages/OpenAI.Codex_2p2nqsd0c76g0/LocalCache/Roam
 
 安装记录与 hooks 中保存了逻辑路径，计划任务却在包外启动。包外只读探针确认逻辑 launcher 当时不存在，LocalCache 中的 launcher 存在；Node 本身可运行。第一次任务未取得后台控制所有权，产品正确显示 `degraded` 并启动当前会话后台，没有将其记为自启通过。
 
-恢复采用标准包外安装，没有为此改动采集器源码：
+最初恢复采用标准包外 0.2.1 安装：
 
 1. 固定校验旧任务 description、完整 action 和私有元数据后，停止并移除该任务；通过公开命令停止其共享后台。
 2. 在包外预检标准目标目录和同名 npm 命令均不存在。使用 Hidden / Limited 的一次性当前用户任务执行固定脚本，不提升权限、不改系统策略。
@@ -80,7 +82,15 @@ C:/Users/yiwer/AppData/Local/Packages/OpenAI.Codex_2p2nqsd0c76g0/LocalCache/Roam
 
 脚本及证据保存在 `E:/GenCode/Skynet-evidence/v2-2026-10-03/local-onboarding/`：`probe-outside-msix.ps1`、`outside-probe.json`、`install-outside-msix.mjs`、`migration-copy-inventory.json`、`outside-setup-evidence.json`。
 
-**仍存在 Desktop 路径边界**：在 MSIX 包内解析 hooks 保存的逻辑 AppData 路径，仍会指向已停止但保留的旧虚拟副本；普通 PowerShell 中解析的是标准安装目录。因此不能根据包外合成链通过而宣称 Codex Desktop 自动采集已可用，也不要在 Codex 内反复运行 setup 重新启动旧副本。没有删除恢复副本或创建循环 junction。真正的 Desktop hook 执行上下文仍需正常宿主信任后实测；若确认其从 MSIX 环境执行，应另行实现并验证能在两个执行上下文之间稳定寻址的受控安装路径，迁移时继续保留身份、队列与配置所有权。
+随后复核发现：逻辑 AppData 路径仍会让 MSIX 内的 hooks 落到旧虚拟副本，因此包外安装本身没有完成双上下文接入。最终作了以下受控修复与迁移：
+
+1. Windows 新安装默认使用用户根目录下的 `.skynet/state`；优先识别其中有效的 installation 与 identity，兼容有效旧安装。损坏记录明确报错，不静默回退或创建另一身份。默认 setup 可在同一路径继续合法的空目录、enrollment、identity 中间态；空的新目录不能遮蔽旧设备身份。显式 `--state` 的完整安装 status/setup 与 identity-only setup 走共享安装分支，旧单来源接口仍兼容。
+2. `tests/state-location.test.ts` 三项窄回归、全仓 `tsc --noEmit` 均通过，另由独立 subagent 复核首次 setup 重试边界。仅编译 collector 与共享模块，没有调用 Vite 或覆盖前端审计产物。
+3. 用 Hidden / Limited 一次性任务在包外执行 `migrate-stable-state.mjs`。先核对源设备、launcher、唯一正式任务和后台归属，再持有源/目标安装锁，停止自有任务和后台，保护目标 ACL 后复制。909 个文件逐一核对长度与 SHA-256，迁移前的完整清单保存在 `stable-migration-copy-inventory.json`。
+4. 仅重写本产品的 launcher/runtime 指针和精确拥有的 hooks；原身份、原件和队列字节保留，然后通过正常 `upgrade --state` 从 0.2.1 升至 0.2.3。身份文件 SHA-256 始终为 `3a0e103275668d95436e49e80f70a9570729fd677ebb8aed9a7957369415df39`。
+5. 标准 npm 与 MSIX 虚拟 npm 安装均升级为 0.2.3。两边默认 status 确认同一设备和后台实例；hooks 的绝对路径现在直接指向 `.skynet/state`。标准 AppData 和旧 LocalCache 状态均保留为停止的恢复副本，没有删除或建立 junction。全部一次性任务已移除，只保留新正式任务。
+
+首个一次性任务使用 PowerShell `-File` 入口时在进入 Node 脚本前退出，未创建目标目录或改变源；改为已验证的固定 `-EncodedCommand` 入口后迁移成功，没有修改执行策略。完整阶段、目录、任务与包哈希证据见 `stable-migration-evidence.json`；两个执行上下文的状态见 `stable-outside-status.json`、`stable-msix-status.json`。
 
 ## 本轮定向验证
 
@@ -109,8 +119,22 @@ C:/Users/yiwer/AppData/Local/Packages/OpenAI.Codex_2p2nqsd0c76g0/LocalCache/Roam
 
 [在平台查看合成会话](https://skynet.91boy.cn/#5510f7bb-b049-43ae-8037-3333caedb61f?view=conversation)。结果与截图分别为证据目录下的 `onboarding-test-evidence.json`、`final-status.json`、`production-synthetic-conversation.png`。首次包外浏览器检查因 Playwright 默认路径仍指向未安装位置而失败；随后显式使用已经安装的 Chromium 实际路径，对同一个合成会话完成验证，没有再新增会话。
 
-## 真实宿主后续步骤
+## 原生 hooks 与无模型 CLI 验证
 
-普通 Windows PowerShell 运行 `codex`，进入宿主正常 `/hooks` 界面，审查本产品的确切命令并完成必要信任。随后在独立测试目录开启普通新会话，核对平台是否收到该会话和本机 status 的确认上传记录。不能手工写入信任摘要，也不能以本轮人工合成事件的 `host-event-observed` 状态代替全部 hooks 已被信任。
+使用本机 Codex CLI 0.160.0 的原生 PTY `/hooks` 界面，逐条查看并信任六条 Skynet 命令：PreToolUse、PostToolUse、SessionStart、SessionEnd、UserPromptSubmit、Stop。没有选择 Trust all，也没有手写信任摘要。随后通过原生 `hooks/list` 只读核对，六条均为 enabled / trusted，warnings/errors 为空；命令全部指向 `C:/Users/yiwer/.skynet/state/skynet-launcher.mjs` 和该目录内的 codex inbox。该 CLI 版本列出六种已配置事件，未列出安装器 JSON 中的 PostToolUseFailure。
 
-本机 CLI 0.160.0 高于既有实测基线 0.157.1；本轮只验证该版本被正确检测及合成存档链，不声称 0.160.0 的所有原生事件、Token 统计或原生恢复已验证。Desktop 必须先解决/核实上文执行上下文和路径问题，再通过其正常界面完成信任与真实事件检查。登录、重启、休眠、Desktop 图标入口继续保持 `not-verified`，完整 G0/G1 不因本记录改为通过。
+从当前 Desktop 启动的子进程继承了 `CODEX_INTERNAL_ORIGINATOR_OVERRIDE=Codex Desktop`。前两个无模型会话的原生 metadata 为 `source=cli`、`originator=Codex Desktop`；它们的真实 SessionEnd hooks 已进入稳定 inbox，但路由按现有边界保留为 unclassified，不猜测 Desktop 身份。会话 `01a101b7-99d8-7e81-8a8a-a5ad3c39db08` 和 `01a101b9-6184-7963-a4c3-c1cfc7708048` 的原事件继续保留，证据见 `native-empty-events.json`。
+
+随后仅在新 CLI 子进程环境中移除上述继承变量，未改系统/宿主配置，也没有设置伪造的来源值。CLI 自身产生 `source=cli`、`originator=codex-tui`。在独立合成项目目录中打开普通空会话，仅执行 `/quit`：无用户模型提示、无模型 turn、无付费调用。真实 SessionEnd 自动触发 hooks，后台将原生原件上传至平台：
+
+| 字段 | 实测值 |
+| --- | --- |
+| 原生会话 | `01a101ba-6189-7083-aa59-057d873fcc17` |
+| 来源 / 原生版本 | codex-cli / 0.160.0 |
+| 平台快照 | `a704cc1f-afbc-4798-b125-24693add0f71` |
+| 原件大小 | 22,481 bytes |
+| 本地原件与平台下载共同 SHA-256 | `2ad3960b0b2f712a244daba04c916ec1b905cd0575703afbb086e6563578fae0` |
+
+[在平台查看原生空会话](https://skynet.91boy.cn/#a704cc1f-afbc-4798-b125-24693add0f71?view=raw)。此前合成会话两版快照也重新下载验证，仍与最初哈希相同。结果见 `stable-native-verification.json`、`native-hooks-current.json`、`stable-final-status.json`。
+
+这证明了正常 CLI 0.160.0 的 SessionEnd 自动接入链与原件完整性，未验证该版本所有原生事件、Token 统计或恢复。实际 Desktop UI 来源识别、登录、重启、休眠和 Desktop 图标入口仍保持 `not-verified`；完整 G0/G1 不因本记录改为通过。后续 Desktop 验收应基于其真实来源证据补充路由与原生 UI 测量，不能将继承 Desktop 标识的 CLI 空会话当成 Desktop 全量验收。

@@ -161,3 +161,11 @@ sudo bash /opt/skynet/current/deploy/ubuntu-release.sh \
 2026-10-03 19:25（北京时间）视觉修订发布 `v2-43235729a834-1`，代码 Git `43235729a8346914e0eb6f6a2fc64e5914aadc59`。发布归档 SHA-256 `6502a88fe01ded98a57e3a01759a6d94e9fef0db2aa32941d1239e0fdfd03073`，服务器构建源码 SHA-256 `046b8ae42269d8a6ba28f103edc242011eb635fe614bacdc10ba612db6b9c3c2`，镜像 `sha256:f713a36de8dff66224394ac1a2a3e4bb98e34d5d4197c733e28248af99b28e97`。升级前备份回执 `/opt/skynet/receipts/backup-20261003T112516Z-866873.json` 为 completed；保留旧 release 与镜像，数据库未替换。资产为 `index-BtKn_aAS.js` / `index-BpVIMKpd.css`。
 
 外部 13 项 API/HTTPS 冒烟复跑通过。浏览器实测维护账号登录、团队/用量/找回/接入/运行五页、同源字体加载、Ctrl+K/Escape 搜索和 375px 移动抽屉通过，无脚本或 console 错误、无页面横向溢出；严格 CSP 保留。生产存档仍为空，分析 Worker 仍禁用。既有四个 nginx site 的 SHA 校验通过，Certbot timer active。证据为 `E:\GenCode\Skynet-evidence\v2-2026-10-03\production-smoke.json` 与 `production-visual-smoke.json`。本段是部署后的记录更新，部署代码以所列 Git revision 为准。
+
+2026-10-03 20:15（北京时间）发布工作区与信息精简修订 `v2-f0a2f42f4160-1`，随后20:22发布窄屏/平板补丁 **`v2-745c2be6df44-1`**。最终源码 Git `745c2be6df4473290f4eacc44ec0eb747c526525`，发布归档 SHA-256 `c0087ff742a8403a30e7e43a401224ca7bef2e483dd8999f2149d8c391ab2a81`，服务器源码 SHA-256 `f7e237dbade776293711d3971d04a0e2479cadcf860c5116029a56a28101c93d`，应用镜像 `sha256:687b76f0fbde4435affa56a16ada48d7bab455d3b3c2106f6148031586e4324a`。资产为 `index-NNmQzWbl.js` / `index-Dp10cLpo.css`。
+
+两次升级前一致备份均完成，回执分别为 `/opt/skynet/receipts/backup-20261003T121453Z-932334.json` 和 `/opt/skynet/receipts/backup-20261003T122219Z-943386.json`；原数据库、原件、历史 release 与镜像保留。最终外部13项API检查通过，四个既有nginx站点哈希不变，证书续期任务active，分析Worker继续禁用。本轮用户授权本机接入并测试后，生产已含明确的接入测试会话，不再是空存档。
+
+前一个工作区发布通过9个只读页面×1280/375×浅深主题共36个生产浏览器状态、16个下拉菜单的展开/键盘恢复和搜索快速重开，无页面/控制台/HTTP错误。随后独立扩展视口发现会话在768—1199px重叠、团队日期控件裁切和320px隐藏文本撑高外层；最终补丁在本地7个宽度×浅深主题×两页共28态全部通过。独立报告、各轮截图与生产验证保存在 `E:/GenCode/Skynet-evidence/polish-2026-10-03/`，入口为 `REPORT.md` 和 `index.html`；前一次生产验证记录仍保留在 `production/2026-10-03T12-16-33-603Z/`，未覆盖失败或旧版本证据。
+
+最终发布后补验团队320/414及授权接入合成会话320/768/1199/1280、浅深主题共12态全部通过，10个有内容溢出的区域实际滚轮与尾端检查通过，无外层滚动、正文重叠、日期裁切或浏览器错误。确认实际加载最终资产，并等待真实消息渲染后截图；证据为 `production-responsive/2026-10-03T12-23-25-415Z/audit.json` 与22张截图。前次误截加载态的记录标记为被后次替代，仍保留。
