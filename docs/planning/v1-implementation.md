@@ -1,10 +1,10 @@
 # V1 implementation
 
-工作分支：`implement/v1`。规格：[Issue #1](https://github.com/yiwer/Skynet/issues/1)、[PRD](../requirements/PRD.md)、[验收标准](../requirements/v1-acceptance.md)。
+主分支：`main`；原工作分支：`implement/v1`（PR #55 已合并）。规格：[Issue #1](https://github.com/yiwer/Skynet/issues/1)、[PRD](../requirements/PRD.md)、[验收标准](../requirements/v1-acceptance.md)。
 
 实现采用 [tracer-bullet ticket 图](tracer-bullet-tickets.md)，范围为 #4–#33；V2 的 #3 与 #34–#54 不在本次范围。每个实现任务使用独立 worktree，合并到同一草稿 PR。代码与合成测试通过不等同于真实客户端验收通过。
 
-当前代码基准 `83537e6f4225f0d2af037770df7e302c0c861fec` 已集成 #4–#33 与最终评审修订；全源两轴复核及d306b2e、69f1da7、85d2982各delta均PASS、0新finding，由distinct merger完成主线合入。[该代码基准 Linux CI](https://github.com/yiwer/Skynet/actions/runs/36744710095/job/109987831824) typecheck/build与74/74普通测试通过，0失败/取消/跳过，245536.973069ms。主线永久backup-reader1/1、18921.2433ms验证完整固定统计/报告与HTTP/OAuth恢复；最终三项parser/备份故障回归3/3、34871.6276ms，type/build/diff通过。原84ea5fb窄集成8/9、76280.9473ms的过期更正版本RED、0cba CI输出丢失（底层数量未知）和acd CI71/74、229070.717454ms均保留；旧594的CI61/61、210066.943933ms与公开backup4/4、33590ms是此前源码。双实际CLI续聊1/1、13366.7888ms仍来自#32独立分支，未重跑。最终修订分支证据见[修订记录](../implementation/v1-review-fixes.md)，[验收台账](../implementation/v1-acceptance-ledger.md)仍是唯一验收索引。后文各日期、未合入叙述和旧失败均为历史现场，不改写为新结果；当前文档不预报自己的未来CI。PR55与全部真实门槛保持开放。
+当前代码基准 `83537e6f4225f0d2af037770df7e302c0c861fec` 已集成 #4–#33 与最终评审修订；全源两轴复核及d306b2e、69f1da7、85d2982各delta均PASS、0新finding，由distinct merger完成主线合入。[该代码基准 Linux CI](https://github.com/yiwer/Skynet/actions/runs/36744710095/job/109987831824) typecheck/build与74/74普通测试通过，0失败/取消/跳过，245536.973069ms。主线永久backup-reader1/1、18921.2433ms验证完整固定统计/报告与HTTP/OAuth恢复；最终三项parser/备份故障回归3/3、34871.6276ms，type/build/diff通过。原84ea5fb窄集成8/9、76280.9473ms的过期更正版本RED、0cba CI输出丢失（底层数量未知）和acd CI71/74、229070.717454ms均保留；旧594的CI61/61、210066.943933ms与公开backup4/4、33590ms是此前源码。双实际CLI续聊1/1、13366.7888ms仍来自#32独立分支，未重跑。最终修订分支证据见[修订记录](../implementation/v1-review-fixes.md)，[验收台账](../implementation/v1-acceptance-ledger.md)仍是唯一验收索引。后文各日期、未合入叙述和旧失败均为历史现场，不改写为新结果；当前文档不预报自己的未来CI。PR55已于2026-10-03按用户要求合入main，合并提交af2139889ce5741d91e573571804262a83afb6ae的文件树与已验证4b37e9c完全一致；全部真实门槛与未验收tickets继续保持开放。
 
 ## 恢复实施（2026-09-30）
 
@@ -57,7 +57,7 @@ AC-01…AC-22 的已有证据和缺口集中列于 [V1 验收证据台账](../im
 
 #23 独立实现准备已基于 #24 最终 `f2b9cf9` 完成有界长会话 public trace，并通过组合主线 `0743d4d` 集成复核：实际 Windows Claude Code 2.1.281 对本地合成服务分段提取/汇总，原 UTF-16 引用、跨段头尾事实、坏段与 skipped 范围、Web/MCP/原件导出定向通过，见 [#23 记录](../implementation/issue-23.md)。全尝试共享请求/租约/deadline/预算，不按段追加额度。支线完整 Windows 33 项为 **31 pass / 2 runtime-control fail / 0 cancel**，237.08s；新长会话/队列通过，维护 236.15s 通过，安装与插件 1500ms 无响应仍红并交接独立诊断。真实千问、质量和 G3 仍开放。
 - G0–G4：未通过。原生恢复、真实分析、客户端 MCP 授权与五个工作日试点必须保留实测证据。
-- [草稿 PR #55](https://github.com/yiwer/Skynet/pull/55) 已保存实现与规格关闭引用；保持草稿，尚无 ticket 通过验收或被关闭。
+- 当时[草稿 PR #55](https://github.com/yiwer/Skynet/pull/55) 保存实现与规格关闭引用，未验收票据开放。2026-10-03按用户要求合入main前，关闭引用已改为关联引用，保留未验收票据开放。
 - 本地类型检查、构建、公开入口 E2E、Linux 容器持久卷重启验证及初次 GitHub CI 通过；[两路评审](../implementation/review-issue-4.md) 的可修复代码问题已在 `9ad3277` 修复，并通过 `920b92f` 合并，回归检查通过。
 
 运行与复现见 [首条存档链](../implementation/issue-4.md)、[导出与恢复](../implementation/issue-5.md)、[Codex CLI 链路](../implementation/issue-6.md)、[Claude CLI 链路](../implementation/issue-7.md)、[旧会话与增量](../implementation/issue-8.md)、[关联材料](../implementation/issue-9.md)、[单 Key 安装](../implementation/issue-11.md)、[共享后台](../implementation/issue-12.md)、[插件接入](../implementation/issue-13.md)、[维护](../implementation/issue-14.md)、[离线补传](../implementation/issue-16.md)、[提交一致性](../implementation/issue-17.md)、[故障与缺口](../implementation/issue-18.md)、[跨设备历史归属](../implementation/issue-19.md)、[身份停用](../implementation/issue-20.md)、[短会话分析](../implementation/issue-22.md)、[分析队列](../implementation/issue-24.md)、[HTTPS MCP](../implementation/issue-26.md)、[组合搜索](../implementation/issue-27.md)。目前需补齐的外部条件见 [原生客户端验收状态](../implementation/native-validation-status.md)。

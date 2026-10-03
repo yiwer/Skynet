@@ -187,4 +187,4 @@ E5正常hook的外部`performance/hook-baseline.mjs`固定main路径/产品68com
 
 clean dc225d3完整Standards PASS；完整Spec确认原五项但新增零semantic-origin未闭合/畸形JSON/未知格式P2。该项公开RED1/1、10824.5366ms与首次修订失败1/1、11302.6532ms均保留；后续三类输入及合法metadata/Token控制公开1/1、12263.0214ms通过，旧日周/原件恢复/独立分析不变。最终有界primary证明与既存材料/完整性回归4/4、20522.0602ms、type/build/diff通过，精确源码边界及旧大夹具未知padding失败3/4见E9[阶段7](v1-review-fixes.md)。随后固定8b64 Spec与694文档delta均PASS，该P2关闭；d306的永久backup-reader修订两轴PASS，随后69诊断与85旧断言修订两轴delta亦PASS，现已集成835且源码CI74/74通过。不把dc原完整Spec改写为通过。
 
-下一步：代码review/merge与当前代码CI已完成，见E1/E9；真人与连续运行条件具备后按R1…R8推进门槛，保持PR草稿与未验收tickets开放。
+下一步：代码review/merge与当前代码CI已完成，见E1/E9；真人与连续运行条件具备后按R1…R8推进门槛，PR55已于2026-10-03按用户要求合入main，未验收tickets继续开放；代码合并不表示发布签收。
