@@ -103,7 +103,7 @@ test('frozen offline generations survive source loss and process/server restarts
     assert.equal(deviceStatus.sources[0].report.pendingSnapshots, 1); assert.equal(deviceStatus.sources[0].report.lastFailure.kind, 'rate-limited');
     browser = await chromium.launch(); const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
     await page.goto(upstream); await page.getByLabel('个人读取凭据').fill(reader.readerCredential); await page.getByRole('button', { name: '进入存档' }).click();
-    await page.getByRole('button', { name: '设备同步', exact: true }).click();
+    await page.getByRole('navigation', { name: '平台页面', exact: true }).getByRole('button', { name: '接入与设备', exact: true }).click();
     await expect(page.getByRole('region', { name: '设备同步状态' })).toContainText('服务器限流 (429)');
     await page.screenshot({ path: join(sandbox.directory, 'delivery-backlog.png'), fullPage: true });
     mode = 'online'; await setTimeout(Math.max(0, Date.parse(limited.delivery.nextAttemptAt) - Date.now() + 30)); assert.equal((await run()).committed, 1);

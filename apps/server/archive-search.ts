@@ -71,7 +71,7 @@ export function archiveSearch(db: Database, raw: RawStore) {
         if (!scan.rows[0]) throw new HttpError(410, '本次搜索已过期，请重新搜索；原件没有删除');
         if (scan.rows[0].query_hash !== fingerprint || (page?.offset ?? 0) > scan.rows[0].total) throw new HttpError(400, '搜索分页位置与筛选不匹配');
         boundary = scan.rows[0].created_at.toISOString();
-        const result = await connection.query(`SELECT s.*,e.name AS employee FROM archive_search_scans q,
+        const result = await connection.query(`SELECT s.*,e.id AS employee_id,e.name AS employee FROM archive_search_scans q,
           unnest(q.snapshot_ids[$2::integer+1:$2::integer+9]) WITH ORDINALITY AS member(id,ordinal)
           JOIN snapshots s ON s.id=member.id JOIN devices d ON d.id=s.device_id JOIN employees e ON e.id=d.employee_id
           WHERE q.id=$1 ORDER BY member.ordinal`, [scanId, page?.offset ?? 0]);
@@ -131,7 +131,7 @@ export function archiveSearch(db: Database, raw: RawStore) {
         }
         if (!hit && currentOwnerMatches && !expression && !(filters.from || filters.to)) hit = { location: null, line: null, block: null, sourceDate: null, excerpt: '当前原件为空；可查看清单和完整导出。', matchLength: 0 };
         if (hit) {
-          const session: SessionSummary = { id: row.id, employee: hitEmployee, source_session_id: row.source_session_id, project: hitProject,
+          const session: SessionSummary = { id: row.id, employeeId: hitOrigin?.employeeId ?? row.employee_id, employee: hitEmployee, source_session_id: row.source_session_id, project: hitProject,
             committed_at: row.committed_at.toISOString(), hash: row.hash, byte_length: manifest.byteLength, source_version: manifest.sourceVersion, source_os: manifest.sourceOs, source: manifest.source };
             const conversationPath = conversationLink(row.id, hit.location);
             const result = { ...session, ...hit, origin: hitOrigin, generation: manifest.capture?.generation ?? null, revision: manifest.capture?.revision ?? null, webPath: evidenceLink(row.id, hit.location),

@@ -141,6 +141,8 @@ test('public search spans all pages, history, original evidence, Web and authent
 
     const origin = await sandbox.startServer(); const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
     await page.goto(origin); await page.getByLabel('个人读取凭据').fill(reader.readerCredential); await page.getByRole('button', { name: '进入存档' }).click();
+    await expect(page.getByRole('navigation', { name: '平台页面', exact: true }).getByRole('button', { name: '会话', exact: true })).toBeEnabled();
+    await page.keyboard.press('Control+k');
     const searchRegion = page.getByRole('region', { name: '搜索会话', exact: true });
     await searchRegion.getByLabel('会话内容').fill('SKYNET_LONG_MATCH'); await searchRegion.getByRole('button', { name: '搜索存档', exact: true }).click();
     await searchRegion.getByRole('link').filter({ hasText: 'SKYNET_LONG_MATCH' }).click();
@@ -149,10 +151,23 @@ test('public search spans all pages, history, original evidence, Web and authent
     assert.equal(await focused.locator('pre').first().textContent(), suffix.slice(0, 2048 - (/[\uD800-\uDBFF]/.test(suffix[2047]!) ? 1 : 0)));
     await focused.getByRole('button', { name: '继续读取原文' }).click(); await expect(focused).not.toContainText('SKYNET_LONG_MATCH');
     await focused.getByRole('button', { name: '上一段原文' }).click(); await expect(focused).toContainText('SKYNET_LONG_MATCH');
+    // Escape schedules a native dialog close event. Reopening immediately must
+    // remain usable even if that previous close event is delivered afterward.
+    const rapidSearchReopens = 10;
+    await page.keyboard.press('Control+k'); await expect(searchRegion).toBeVisible();
+    for (let attempt = 0; attempt < rapidSearchReopens; attempt++) {
+      await page.keyboard.press('Escape'); await page.keyboard.press('Control+k');
+      await expect(searchRegion).toBeVisible();
+      await searchRegion.getByLabel('会话内容').fill(`未提交的搜索草稿 ${attempt}`);
+      await expect(searchRegion.getByLabel('会话内容')).toHaveValue(`未提交的搜索草稿 ${attempt}`);
+      assert.equal(new URL(page.url()).hash, longHit.webPath);
+    }
+    await page.keyboard.press('Escape');
     for (const width of [320, 375, 1440]) {
-      await page.setViewportSize({ width, height: 1000 }); await searchRegion.scrollIntoViewIfNeeded();
+      await page.setViewportSize({ width, height: 1000 }); await page.keyboard.press('Control+k'); await searchRegion.scrollIntoViewIfNeeded();
       assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true, `horizontal overflow at ${width}`);
       await page.screenshot({ path: join(sandbox.directory, `search-${width}.png`), fullPage: true });
+      await page.keyboard.press('Escape');
     }
     await page.reload(); await page.getByLabel('个人读取凭据').fill(reader.readerCredential); await page.getByRole('button', { name: '进入存档' }).click();
     await expect(page.getByRole('region', { name: '命中证据' })).toContainText('SKYNET_LONG_MATCH');
@@ -161,6 +176,7 @@ test('public search spans all pages, history, original evidence, Web and authent
     assert.equal((await sandbox.api('/mcp', tokens.access_token, json({}))).status, 401);
     proof.matches = all.length; proof.searchPages = calls; proof.largeOutputPages = pages; proof.history = { old, changed };
     proof.locations = { rawHit, attachedHit, blockHit, longHit }; proof.viewportWidths = [320, 375, 1440]; proof.exportSha256 = exported.sha256;
+    proof.rapidSearchReopens = rapidSearchReopens;
     await writeFile(join(sandbox.directory, 'search-evidence.json'), JSON.stringify(proof, null, 2));
     console.log(`Search public-flow evidence: ${sandbox.directory}; ${calls} pages, ${all.length} independent sessions, Web/MCP parity`);
   } finally { await client?.close(); await browser.close(); await faultDb.end(); await sandbox.close(); }

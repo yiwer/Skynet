@@ -72,11 +72,15 @@ test('Web account/device revocation preserves shared history and enforces every 
       const page = await browser!.newPage({ viewport: { width: 1440, height: 1000 } });
       await page.goto(origin + (snapshot ? `/#${snapshot}` : ''));
       await page.getByLabel('个人读取凭据').fill(token); await page.getByRole('button', { name: '进入存档' }).click();
-      await page.getByRole('button', { name: '刷新存档' }).waitFor(); return page;
+      await expect(page.getByRole('navigation', { name: '平台页面', exact: true }).getByRole('button', { name: '会话', exact: true })).toBeEnabled(); return page;
     };
     const alphaPage = await login(alpha.readerCredential, archived.snapshotId);
     const alphaDownloadPage = await login(alpha.readerCredential, archived.snapshotId);
-    await expect(alphaPage.getByRole('button', { name: '接入与设备', exact: true })).toHaveCount(0);
+    await alphaPage.getByRole('navigation', { name: '平台页面', exact: true }).getByRole('button', { name: '接入与设备', exact: true }).click();
+    await expect(alphaPage.getByRole('region', { name: '设备同步状态', exact: true })).toBeVisible();
+    await expect(alphaPage.getByRole('region', { name: '接入与设备维护', exact: true })).toHaveCount(0);
+    await expect(alphaPage.getByRole('button', { name: /停用设备|停用账号/ })).toHaveCount(0);
+    await alphaDownloadPage.getByText('原件与来源信息', { exact: true }).click();
     await alphaDownloadPage.getByRole('button', { name: '下载原件', exact: true }).waitFor();
     const page = await login(manager.readerCredential);
     await page.getByRole('button', { name: '接入与设备', exact: true }).click();
@@ -116,9 +120,9 @@ test('Web account/device revocation preserves shared history and enforces every 
     await alphaDownloadPage.getByRole('button', { name: '进入存档' }).waitFor();
     // Exercise the list refresh alone; a selected snapshot would also refresh and
     // could receive its own 401 before the deliberately held list response.
-    await alphaPage.getByRole('link', { name: 'Skynet 会话存档', exact: true }).click();
+    await alphaPage.getByRole('navigation', { name: '平台页面', exact: true }).getByRole('button', { name: '会话', exact: true }).click();
     await expect(alphaPage.getByRole('button', { name: '下载原件', exact: true })).toHaveCount(0);
-    await expect(alphaPage.getByRole('heading', { name: '选择一条会话', exact: true })).toBeVisible();
+    await expect(alphaPage.getByRole('region', { name: '会话列表', exact: true })).toBeVisible();
     // Keep the real revoked response pending until the refresh has visibly entered its
     // loading state. Logout aborts that request's effect, so its finally cannot reset busy.
     let releaseRevocation!: () => void;
@@ -137,7 +141,7 @@ test('Web account/device revocation preserves shared history and enforces every 
     await alphaPage.getByRole('button', { name: '进入存档', exact: true }).click();
     await expect(alphaPage.getByRole('button', { name: '刷新存档', exact: true })).toBeEnabled();
     await alphaPage.locator(`a[href="#${archived.snapshotId}"]`).click();
-    await expect(alphaPage.getByText('甲设备一的历史材料仍可核查', { exact: true })).toBeVisible();
+    await expect(alphaPage.getByRole('region', { name: '对话阅读', exact: true }).getByText('甲设备一的历史材料仍可核查', { exact: true })).toBeVisible();
     for (const path of ['/api/me', '/api/sessions', snapshotPath, `${snapshotPath}/raw`, `${snapshotPath}/readable`, `${snapshotPath}/recovery`]) {
       assert.equal((await api(path, alpha.readerCredential)).status, 401);
     }

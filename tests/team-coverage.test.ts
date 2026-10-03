@@ -167,7 +167,7 @@ test('public coverage matrix, frozen source-day statistics and original evidence
     const requestsBeforeMatrix = s.traffic.filter(item => item.method === 'POST' && item.path.startsWith('/api/daily-reports/')).length;
     browser = await chromium.launch({ headless: true }); const page = await browser.newPage({ ignoreHTTPSErrors: true });
     await page.goto(s.origin); await page.getByLabel('个人读取凭据').fill(A.readerCredential); await page.getByRole('button', { name: '进入存档' }).click();
-    await page.getByRole('button', { name: '团队覆盖', exact: true }).click();
+    await page.getByRole('navigation', { name: '平台页面', exact: true }).getByRole('button', { name: '团队概览', exact: true }).click();
     await expect(page.getByRole('region', { name: '团队覆盖矩阵' })).toContainText('采集缺口已观察');
     await expect(page.getByRole('complementary', { name: '选中员工与日期' })).toContainText('来源 Token 总量');
     await expect(page.getByRole('region', { name: '方向主题与阻塞' })).toContainText('合成blocker');
@@ -184,7 +184,7 @@ test('public coverage matrix, frozen source-day statistics and original evidence
     await dailyPanel.getByText(new RegExp(`^核查固定统计 v${fixedStatistic.revision}`)).click();
     await expect(dailyPanel.getByRole('link',{name:'synthetic/code.ts',exact:true})).toBeVisible();
     await expect(dailyPanel.getByText(`统计版本 ${fixedStatistic.version}；区间不是人工工时。`,{exact:true})).toBeVisible();
-    await page.getByRole('button', { name: '团队覆盖', exact: true }).click();
+    await page.getByRole('navigation', { name: '平台页面', exact: true }).getByRole('button', { name: '团队概览', exact: true }).click();
     const projectLink = page.getByRole('link', { name: '查看项目工作：/synthetic/coverage', exact: true }).first();
     await expect(projectLink).toHaveAttribute('href', `#work?${new URLSearchParams({ kind: 'project', subject: '/synthetic/coverage', from: day, to: day })}`);
     await projectLink.click(); await expect(page.getByRole('region', { name: '周工作与项目' })).toBeVisible();
@@ -192,12 +192,12 @@ test('public coverage matrix, frozen source-day statistics and original evidence
     await expect(projectPanel.getByRole('combobox').nth(0)).toHaveValue('project'); await expect(projectPanel.getByRole('combobox').nth(1)).toHaveValue('/synthetic/coverage');
     await expect(projectPanel.getByLabel('起始来源日期')).toHaveValue(day); await expect(projectPanel.getByLabel('结束来源日期')).toHaveValue(day);
     assert.equal(s.traffic.filter(item => item.method === 'POST' && item.path.startsWith('/api/daily-reports/')).length, requestsBeforeMatrix, 'matrix reads/drilldown never generate a report or model attempt');
-    await page.getByRole('button', { name: '团队覆盖', exact: true }).click();
+    await page.getByRole('navigation', { name: '平台页面', exact: true }).getByRole('button', { name: '团队概览', exact: true }).click();
     await page.getByText('原件统计引用', { exact: true }).click(); await page.getByRole('link', { name: 'synthetic/code.ts', exact: true }).click();
     await expect(page.getByRole('region', { name: '命中证据' })).toContainText('*** Add File: synthetic/code.ts');
-    await page.getByRole('button', { name: '团队覆盖', exact: true }).click();
+    await page.getByRole('navigation', { name: '平台页面', exact: true }).getByRole('button', { name: '团队概览', exact: true }).click();
     const layouts = [];
-    const evidence = join('F:/GenCode/Skynet-evidence/v1-2026-09-30', `coverage-${snapshotId}`); await mkdir(evidence, { recursive: true });
+    const evidence = join(s.directory, `coverage-${snapshotId}`); await mkdir(evidence, { recursive: true });
     for (const width of [320, 375, 760, 1280, 1920]) {
       await page.setViewportSize({ width, height: 900 });
       await expect(page.getByRole('region', { name: '团队覆盖矩阵' })).toBeVisible();

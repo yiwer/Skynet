@@ -61,6 +61,7 @@ export interface EvidenceLine {
 }
 export interface SessionSummary {
   id: string;
+  employeeId: string;
   employee: string;
   source_session_id: string;
   project: string;

@@ -12,7 +12,7 @@ export function ServerOperations({request}:{request:(path:string,signal?:AbortSi
     }
     void read();return()=>{abort.abort();clearTimeout(timer);};
   },[]);
-  return <section aria-label="服务器运行与备份"><h1>服务器运行与备份</h1>
+  return <section aria-label="服务器运行与备份"><div className="operations-page-head"><h1>服务器运行与备份</h1><a href="#analysis">分析与运行</a></div>
     <p className="notice">上传确认仅表示单副本接收。成功备份与恢复演练各自记录范围，原件不自动删除。</p>
     {error&&<p role="alert">{error}</p>}{!data?(error?<p>状态尚未读到；稍后自动重试。</p>:<p role="status">正在读取服务器状态…</p>):<>
     <h2>原件容量</h2><dl><div><dt>原件文件系统容量</dt><dd>{bytes(data.storage.filesystemBytes)}</dd></div>

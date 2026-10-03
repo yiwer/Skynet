@@ -12,6 +12,7 @@ import { beijingDate } from '../packages/contracts/reports.js';
 import type { ConversationPage } from '../packages/contracts/conversation.js';
 import type { MetricsPage } from '../packages/contracts/metrics.js';
 import type { SearchPage } from '../packages/contracts/search.js';
+import { readRecoveryPackage } from '../packages/recovery.js';
 
 const json = (value: unknown): RequestInit => ({ method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(value) });
 const params = (value: object) => new URLSearchParams(Object.entries(value).filter(([, v]) => v !== undefined).map(([key, v]) => [key, String(v)]));
@@ -51,7 +52,8 @@ test('V2 public originals → conversation and metrics Web → real HTTPS OAuth 
     }
     const snapshotId = await upload(raw, sessionId);
     const unknownId = randomUUID();
-    await upload(encoded([{ type: 'response_item', timestamp, payload: { type: 'message', role: 'user', content: [{ type: 'input_text', text: '没有原生用量字段，必须显示未知' }] } }]), unknownId, 'codex-cli', '');
+    const unknownRaw = encoded([{ type: 'response_item', timestamp, payload: { type: 'message', role: 'user', content: [{ type: 'input_text', text: '没有原生用量字段，必须显示未知' }] } }]);
+    const unknownSnapshotId = await upload(unknownRaw, unknownId, 'codex-cli', '');
     assert.equal((await sandbox.api('/api/metrics')).status, 401);
     assert.equal((await sandbox.api(`/api/snapshots/${snapshotId}/conversation`)).status, 401);
     const expectedAuthenticationErrors = sandbox.serverErrors.length;
@@ -112,7 +114,7 @@ test('V2 public originals → conversation and metrics Web → real HTTPS OAuth 
     // Enter metrics from a plain snapshot hash, then return through that same snapshot's
     // public link. A view switch that leaves the old hash behind cannot receive hashchange.
     assert.equal(new URL(page.url()).hash, `#${snapshotId}`);
-    await page.getByRole('navigation', { name: '平台页面', exact: true }).getByRole('button', { name: '用量指标', exact: true }).click();
+    await page.getByRole('navigation', { name: '平台页面', exact: true }).getByRole('button', { name: '用量与产出', exact: true }).click();
     await expect(page).toHaveURL(new RegExp(`#metrics$`));
     await page.getByRole('region', { name: '会话用量', exact: true }).locator(`a[href="#${snapshotId}"]`).click();
     await expect(conversation).toContainText(inputText);
@@ -124,7 +126,9 @@ test('V2 public originals → conversation and metrics Web → real HTTPS OAuth 
     await conversation.getByLabel('显示工具调用与结果').check();
     await expect(conversation).toContainText(injection);
     assert.equal(await page.evaluate(() => Reflect.get(window, 'skynetV2Injected')), undefined);
-    await conversation.locator('.conversation-message').filter({ hasText: '工具实际返回：测试尚未执行' }).getByRole('link', { name: '此消息链接', exact: true }).click();
+    const toolMessage = conversation.locator('.conversation-message').filter({ hasText: '工具实际返回：测试尚未执行' });
+    await toolMessage.locator('summary').click();
+    await toolMessage.getByRole('link', { name: '此消息链接', exact: true }).click();
     await expect(conversation.locator('.conversation-focused')).toContainText(injection);
     await expect(conversation.getByLabel('显示工具调用与结果')).toBeChecked();
     await conversation.getByLabel('显示工具调用与结果').uncheck();
@@ -136,6 +140,7 @@ test('V2 public originals → conversation and metrics Web → real HTTPS OAuth 
       if (index + 1 < defaultPages.length) await conversation.getByRole('button', { name: '继续阅读对话', exact: true }).click();
     }
     await expect(conversation.getByRole('button', { name: '继续阅读对话', exact: true })).toBeDisabled();
+    await page.keyboard.press('Control+k');
     const search = page.getByRole('region', { name: '搜索会话', exact: true });
     await search.getByLabel('会话内容').fill('V2_EXACT_MESSAGE_MATCH'); await search.getByRole('button', { name: '搜索存档', exact: true }).click();
     await search.getByRole('link', { name: '在对话中打开命中消息', exact: true }).click();
@@ -148,26 +153,72 @@ test('V2 public originals → conversation and metrics Web → real HTTPS OAuth 
       for (const colorScheme of ['light', 'dark'] as const) for (const width of [320, 1280]) {
         await target.emulateMedia({ colorScheme }); await target.setViewportSize({ width, height: 900 });
         assert.equal(await target.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true, `${surface} ${width} ${colorScheme} has document overflow`);
+        await target.evaluate(() => window.scrollTo({ top: 0, left: 0, behavior: 'instant' }));
         const name = `v2-${surface}-${width}-${colorScheme}.png`;
-        await target.screenshot({ path: join(sandbox.directory, name), fullPage: true }); screenshots.push(name);
-        await target.getByRole('region', { name: surface === 'conversation' ? '对话阅读' : '用量指标', exact: true }).getByRole('heading').first().scrollIntoViewIfNeeded();
+        await target.screenshot({ path: join(sandbox.directory, name), fullPage: true, animations: 'disabled' }); screenshots.push(name);
         const viewportName = `v2-${surface}-${width}-${colorScheme}-viewport.png`;
-        await target.screenshot({ path: join(sandbox.directory, viewportName), fullPage: false }); screenshots.push(viewportName);
+        await target.screenshot({ path: join(sandbox.directory, viewportName), fullPage: false, animations: 'disabled' }); screenshots.push(viewportName);
       }
     }
     await capture(page, 'conversation');
+    await conversation.locator('.conversation-focused summary').click();
     await conversation.locator('.conversation-focused').getByRole('link', { name: '在时间线核查原句', exact: true }).click();
     await expect(page.getByRole('region', { name: '命中证据', exact: true })).toContainText('V2_EXACT_MESSAGE_MATCH');
     await page.getByRole('navigation', { name: '会话阅读方式', exact: true }).getByRole('link', { name: '原件 JSONL', exact: true }).click();
     await expect(page.getByRole('region', { name: '命中证据', exact: true })).toContainText('"type":"user"');
-    await page.getByRole('navigation', { name: '平台页面', exact: true }).getByRole('button', { name: '用量指标', exact: true }).click();
+    await page.getByRole('navigation', { name: '平台页面', exact: true }).getByRole('button', { name: '会话找回', exact: true }).click();
+    const recovery = page.getByRole('region', { name: '会话找回', exact: true });
+    await recovery.getByRole('group', { name: '选择员工', exact: true }).getByRole('button', { name: 'V2合成员工·有原件', exact: true }).click();
+    const commitDate = recovery.getByLabel('提交日期', { exact: true }); const populatedDate = await commitDate.inputValue();
+    await commitDate.fill('1900-01-01');
+    await expect(commitDate).toHaveValue('1900-01-01');
+    await expect(recovery.getByRole('region', { name: '选择会话', exact: true })).toContainText('这一天没有已加载的存档会话');
+    await expect(recovery.getByRole('button', { name: '下一步 →', exact: true })).toHaveCount(0);
+    await commitDate.fill(populatedDate);
+    await recovery.getByRole('region', { name: '选择会话', exact: true }).getByRole('button').filter({ hasText: 'v2-public' }).click();
+    await recovery.getByRole('button', { name: '下一步 →', exact: true }).click();
+    await expect(recovery.getByRole('list', { name: '找回步骤', exact: true }).locator('[aria-current="step"]')).toContainText('选择方式');
+    await expect(recovery.getByRole('radio', { name: /完整可读导出/ })).toBeChecked();
+    await expect(recovery).toContainText(digest(raw));
+    await recovery.getByRole('button', { name: '下一步 →', exact: true }).click();
+    await expect(recovery.getByRole('list', { name: '找回步骤', exact: true }).locator('[aria-current="step"]')).toContainText('校验与恢复');
+    async function recoveryDownload(button: string, filename: string) {
+      const pending = page.waitForEvent('download'); await recovery.getByRole('button', { name: button, exact: true }).click();
+      const exported = await pending; const path = join(sandbox.directory, filename); await exported.saveAs(path); return readFile(path);
+    }
+    const readable = await recoveryDownload('下载完整可读材料', 'v2-readable-export.txt');
+    assert.equal(readable.toString('utf8'), await (await api(`/api/snapshots/${snapshotId}/readable`)).text());
+    assert.ok(readable.toString('utf8').includes(longText)); assert.ok(readable.toString('utf8').includes(injection));
+    assert.deepEqual(await recoveryDownload('下载原件 JSONL', 'v2-original-export.jsonl'), raw);
+    await recovery.getByRole('button', { name: '← 返回选择方式', exact: true }).click();
+    await recovery.getByRole('radio', { name: /恢复资料包/ }).check();
+    await expect(recovery).toContainText('原生恢复待验证');
+    await recovery.getByRole('button', { name: '下一步 →', exact: true }).click();
+    const restored = readRecoveryPackage(await recoveryDownload('下载恢复资料包', 'v2-recovery-export.json'));
+    assert.equal(restored.snapshot.id, snapshotId); assert.equal(restored.manifest.hash, digest(raw)); assert.deepEqual(restored.bytes, raw);
+    await expect(recovery.getByRole('status')).toContainText('文件保存到本机不表示原生恢复或续聊已经通过');
+    // Change only the public route's snapshot while recovery remains mounted. The
+    // next export must use the newly selected original, never the previous detail.
+    await page.goto(sandbox.origin + `/#recovery?snapshot=${unknownSnapshotId}`);
+    await expect(recovery.getByRole('list', { name: '找回步骤', exact: true }).locator('[aria-current="step"]')).toContainText('选择方式');
+    await expect(recovery).toContainText(digest(unknownRaw));
+    await expect(recovery.getByRole('link', { name: '阅读原件与关联材料', exact: true })).toHaveAttribute('href', `#${unknownSnapshotId}`);
+    await recovery.getByRole('button', { name: '下一步 →', exact: true }).click();
+    assert.deepEqual(await recoveryDownload('下载原件 JSONL', 'v2-changed-snapshot-export.jsonl'), unknownRaw);
+    await page.goto(sandbox.origin + `/#recovery?snapshot=${snapshotId}`);
+    await expect(recovery).toContainText(digest(raw));
+    await recovery.getByRole('radio', { name: /恢复资料包/ }).check();
+    await recovery.getByRole('button', { name: '下一步 →', exact: true }).click();
+    await capture(page, 'recovery');
+    await page.getByRole('navigation', { name: '平台页面', exact: true }).getByRole('button', { name: '用量与产出', exact: true }).click();
     const usagePage = page.getByRole('region', { name: '用量指标', exact: true });
     await expect(usagePage.getByRole('heading', { name: '用量指标', exact: true })).toBeVisible();
     await expect(usagePage).toContainText('1 会话未知');
-    await usagePage.getByLabel('时间范围').selectOption('custom');
+    await usagePage.getByRole('group', { name: '时间范围', exact: true }).getByRole('button', { name: '自定义', exact: true }).click();
     await usagePage.getByLabel('开始日期', { exact: true }).fill(day); await usagePage.getByLabel('结束日期', { exact: true }).fill(day);
-    await usagePage.getByLabel('Agent').selectOption('claude-code-cli');
     await usagePage.getByRole('button', { name: '应用筛选', exact: true }).click();
+    await expect(usagePage).toHaveAttribute('aria-busy', 'false');
+    await usagePage.getByRole('combobox', { name: /^Agent/ }).selectOption('claude-code-cli');
     await expect(usagePage.getByRole('region', { name: '会话用量', exact: true }).getByRole('link', { name: '查看会话', exact: true })).toHaveCount(1);
     const filteredSelection = { ...selection, source: 'claude-code-cli' };
     const filtered: MetricsPage = await (await api('/api/metrics?' + params(filteredSelection))).json();
@@ -185,9 +236,10 @@ test('V2 public originals → conversation and metrics Web → real HTTPS OAuth 
     assert.deepEqual(await tool('get_report_summary', { ...filteredSelection, version: recomputed.version }), recomputed);
     assert.deepEqual(await tool('get_report_summary', { ...filteredSelection, version: filtered.version }), filtered);
     assert.deepEqual(await (await api('/api/metrics/export?' + params({ ...filteredSelection, version: filtered.version }))).json(), filtered);
-    await usagePage.getByRole('button', { name: '切换为图表', exact: true }).click();
-    await expect(usagePage.getByRole('img')).toHaveCount(1);
-    await usagePage.getByRole('button', { name: '切换为表格', exact: true }).click();
+    const dailyUsage = usagePage.getByRole('region', { name: '每日用量', exact: true });
+    await dailyUsage.getByRole('button', { name: '切换为图表', exact: true }).click();
+    await expect(dailyUsage.getByRole('img')).toHaveCount(1);
+    await dailyUsage.getByRole('button', { name: '切换为表格', exact: true }).click();
     await expect(usagePage.getByRole('table', { name: '按来源日期归期的已知用量与未知会话', exact: true })).toBeVisible();
     await capture(page, 'metrics');
     assert.equal(await page.evaluate(() => Reflect.get(window, 'skynetV2Injected')), undefined);
@@ -199,6 +251,8 @@ test('V2 public originals → conversation and metrics Web → real HTTPS OAuth 
         knownInputTokens: recomputed.totals.knownInputTokens, unknownTokenSessions: recomputed.totals.unknownTokenSessions },
       oauth: 'actual authorization code + PKCE over private CA-validated HTTPS', sameVersionWebHttpMcp: true,
       sameSnapshotNavigation: true, toolAnchorCanHideTools: true, exactSearchSubstringHighlighted: true,
+      recovery: { threeStepSelection: true, emptyDatePreserved: true, routeSnapshotChangesExport: true,
+        readableTextComplete: true, rawBytesExact: true, packageVerified: true, nativeRecovery: 'not-executed' },
       rawUnchanged: true, scriptExecuted: false, screenshots, pageErrors }, null, 2));
   } finally { await client?.close(); await browser?.close(); await sandbox.close(); }
 });

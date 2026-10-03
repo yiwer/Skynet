@@ -1,6 +1,6 @@
 # Ubuntu 单机部署与应用回滚
 
-目标：`ubuntu@159.75.158.26`，域名 `skynet.91boy.cn`。本轮最初使用 `id_rsa` 的 SSH 授权未通过，随后用户提供 `tec.pem`，已成功登录；不修改服务器认证配置。2026-10-03 已确认 Ubuntu 24.04、4 核 / 4 GB、磁盘余约 21 GB、Docker 29.1.3、Compose 2.40.3，现有 nginx 占用 80/443，已有服务占用 127.0.0.1:3000。本目标采用既有 nginx 代理到 127.0.0.1:14311；以下部署文件与入口准备不表示 Skynet 应用已部署成功，也不表示 V2 或 V1 真实验收已完成。最终应用 release、健康验证和凭据交付另行记录。
+目标：`ubuntu@159.75.158.26`，域名 `skynet.91boy.cn`。2026-10-03 已使用用户提供的 `tec.pem` 成功部署并验证 HTTPS；不修改服务器认证配置。主机为 Ubuntu 24.04、4 核 / 4 GB、Docker 29.1.3、Compose 2.40.3，使用既有 nginx 代理到 127.0.0.1:14311。首个健康版本为 `v2-36a5c5a0e667-1`；后续视觉修订的部署记录见本文末尾。部署通过不表示完整 V2 或 V1 真实验收完成。
 
 ## 文件与部署边界
 
@@ -82,7 +82,7 @@ sudo bash "/home/ubuntu/$release/deploy/ubuntu-release.sh" \
   deploy-proxy "/home/ubuntu/$release" "$release" skynet.91boy.cn /opt/skynet 14311
 ```
 
-此目标的 `/opt/skynet` 已确认不存在，首次执行仍会拒绝接管非空未标记目录。`deploy-proxy` 的最后两个参数可省略，默认 `/opt/skynet` 与 `14311`；若指定其他高端口，只接受 1024–65535，且必须先配置好 HTTPS 代理。独立部署仍使用原命令 `deploy SOURCE RELEASE HOST [ROOT]`，要求 80/443 空闲。
+首次部署前已确认 `/opt/skynet` 不存在；现已由本部署建立，后续发布复用其私有配置与持久卷。首次执行仍会拒绝接管非空未标记目录。`deploy-proxy` 的最后两个参数可省略，默认 `/opt/skynet` 与 `14311`；若指定其他高端口，只接受 1024–65535，且必须先配置好 HTTPS 代理。独立部署仍使用原命令 `deploy SOURCE RELEASE HOST [ROOT]`，要求 80/443 空闲。
 
 脚本拒绝复用不同内容的 release，保留已有密码和固定基础镜像，检查卷归属及端口后构建应用。首次成功后创建 `current`；重跑同一源码和同一编号只协调本项目服务。变更 release 前，使用当前版本的备份工具完成 SQL 与全部原件的一致备份；备份失败时停止升级，旧应用继续运行。
 
@@ -149,3 +149,11 @@ sudo bash /opt/skynet/current/deploy/ubuntu-release.sh \
 2026-10-03 本地验证：Git Bash 的 `bash -n`、`--help`、非法 release 路径、宽泛根目录和非法高端口拒绝检查通过；Docker Compose v5.5.1 的两模式 `config --quiet` 通过。默认服务为 `db`、`app`、`https`，既有代理模式为 `db`、`app` 且应用只发布 `127.0.0.1:14311`；分析 Worker 不在其中。这些准备检查不等于 Ubuntu 应用实机部署验证。远端执行时记录 release/source hash、应用 image ID、PostgreSQL digest（独立模式另记 Caddy digest）、Engine/Compose 版本、健康检查时间与状态、备份回执和未启用的能力。
 
 此配方是单机顺序更新，应用替换存在短暂停机，不承诺零停机或异地容灾。它不自动启用分析 Worker、不扩展防火墙、不注册员工端后台，不替代 V1/V2 的真实验收。磁盘容量、数据库增长和原件长期保留需按实际部署负载观察。
+
+## 6. 实际发布记录
+
+2026-10-03 首次健康发布 `v2-36a5c5a0e667-1`，Git `36a5c5a0e6670dc0ea681fc8e433037437e12a9d`，源码归档 SHA-256 `d3ef9a2fa0726a69d58e61f3c29d0895fefeb98049c26b9cefd1800ca5160dae`。此前 `v2-5daeda3f5b02-1` 在数据库容器启动前因 Compose tmpfs 未加引号失败；修复三个配置值后，核实数据库未启动、卷为空和归属标记，保留原卷与私有配置，再发布修订版本。没有删除数据库或原件。
+
+初始同机一致备份通过，回执 `/opt/skynet/receipts/backup-20261003T103436Z-800099.json`。外部 HTTPS、主页和资产、未认证接口拒绝、维护账号权限、空存档、Web/API 固定指标导出与 OAuth HTTPS issuer 共 13 项检查通过。生产环境没有注入合成会话；完整 Web/MCP/上传验证在独立测试沙箱完成。
+
+首个维护账号已创建一次，服务器凭据文件 `/opt/skynet/private/operator.json` 为 root-only。本机交付文件 `C:\Users\yiwer\.ssh\skynet.91boy.cn-operator.json` 限当前用户和 SYSTEM 访问；网页登录使用其中 `readerCredential`。不在仓库、聊天或日志中记录凭据值，后续发布不重复创建账号。

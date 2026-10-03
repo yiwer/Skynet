@@ -1,34 +1,25 @@
-import { useEffect, useState, type FormEvent } from 'react';
+import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { createRoot } from 'react-dom/client';
-import type { Manifest, SessionSummary } from '../../packages/contracts/archive.js';
-import type { ActivityEvent, ActivitySummary, ActivityContext } from '../../packages/activity.js';
-import { sourceLabel } from '../../packages/contracts/archive.js';
+import type { SessionSummary } from '../../packages/contracts/archive.js';
 import { IdentityManagement } from './IdentityManagement.js';
-import { HistoryMaterials } from './HistoryMaterials.js';
 import { DeviceDelivery } from './DeviceDelivery.js';
-import { CaptureCoverage, type Coverage } from './CaptureCoverage.js';
 import './style.css';
+import './platform-tokens.css';
+import './platform-shell.css';
+import './conversation.css';
+import { PlatformShell } from './PlatformShell.js';
+import { SessionDetail, type Detail } from './SessionDetail.js';
+import { SessionIndex } from './SessionIndex.js';
+import { RecoveryFlow } from './RecoveryFlow.js';
 import { InstallationHelp } from './installation.js';
 import { ArchiveSearch } from './ArchiveSearch.js';
-import { EvidenceReader, selectedEvidence } from './EvidenceReader.js';
-import { SessionAnalysis } from './SessionAnalysis.js';
-import { ActivityStatistics } from './ActivityStatistics.js';
+import { selectedEvidence } from './EvidenceReader.js';
 import { AnalysisOperations } from './AnalysisOperations.js';
-import type { Provenance } from '../../packages/contracts/provenance.js';
 import { DailyReports } from './DailyReports.js';
 import { TeamCoverage } from './TeamCoverage.js';
 import { WorkViews } from './WorkViews.js';
-import { QualificationProof } from './QualificationProof.js';
 import { ServerOperations } from './ServerOperations.js';
-import { ConversationReader, conversationSelection } from './ConversationReader.js';
 import { UsageMetrics } from './UsageMetrics.js';
-
-type Detail = { snapshotId: string; employee: string; manifest: Manifest; committedAt: string; events: ActivityEvent[]; activity: ActivitySummary;
-  unrecognizedLines: number; partialLine: boolean; nextOffset: number | null; total: number; captureHealth: Coverage; provenance: Provenance;
-  recovery: { nativeRuntimeVersion: string | null; preparation: string; nativeBackend: string; limitation: string } };
-const date = (value: string) => new Date(value).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false });
-const contextLabel: Record<ActivityContext, string> = { historical: '历史上下文', 'after-enrollment': '接入后活动',
-  'unknown-time': '来源时间未知', 'unknown-enrollment': '接入边界未知' };
 
 function App() {
   const [credential, setCredential] = useState('');
@@ -36,8 +27,16 @@ function App() {
   const [name, setName] = useState('');
   const [employeeId, setEmployeeId] = useState('');
   const [canManageIdentities, setCanManageIdentities] = useState(false);
-  const hashView = () => location.hash.startsWith('#metrics') ? 'metrics' as const : location.hash.startsWith('#daily?') ? 'daily' as const : location.hash.startsWith('#work?') ? 'work' as const : 'archive' as const;
-  const [view, setView] = useState<'archive' | 'identities' | 'delivery' | 'daily' | 'analysis' | 'work' | 'coverage' | 'server' | 'metrics'>(hashView);
+  type View='archive'|'identities'|'delivery'|'daily'|'analysis'|'work'|'coverage'|'server'|'metrics'|'recovery';
+  const hashView=():View=>{const head=location.hash.slice(1).split('?')[0];const aliases:Record<string,View>={metrics:'metrics',usage:'metrics',daily:'daily',work:'work',project:'work',team:'coverage',coverage:'coverage',devices:'identities',identities:'identities',pipeline:'delivery',delivery:'delivery',ops:'analysis',analysis:'analysis',server:'server',recovery:'recovery'};return aliases[head??'']??'archive';};
+  const snapshotFromHash=()=>{const head=location.hash.slice(1).split('?')[0]??'';return /^[a-f0-9-]{36}$/.test(head)?head:'';};
+  const searchDialog=useRef<HTMLDialogElement>(null);
+  const [searchOpen,setSearchOpen]=useState(false);
+  function openSearch(){setSearchOpen(true);}
+  useEffect(()=>{if(searchOpen){searchDialog.current?.showModal();searchDialog.current?.querySelector<HTMLInputElement>('input[type=search]')?.focus();}else searchDialog.current?.close();},[searchOpen]);
+  function navigate(next:string){location.hash=next==='archive'?'sessions':next;setView(next as View);setSelected('');setSearchOpen(false);}
+
+  const [view, setView] = useState<View>(hashView);
   const hashReading = (): 'conversation' | 'timeline' | 'raw' => {
     const selected = new URLSearchParams(location.hash.split('?')[1]).get('view');
     return selected === 'raw' ? 'raw' : selected === 'timeline' || selectedEvidence(location.hash) ? 'timeline' : 'conversation';
@@ -52,7 +51,7 @@ function App() {
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailError, setDetailError] = useState('');
   const [detailRetry, setDetailRetry] = useState(0);
-  const [selected, setSelected] = useState(hashView() === 'archive' ? location.hash.slice(1).split('?')[0]! : '');
+  const [selected, setSelected] = useState(snapshotFromHash);
   const [evidenceLocation, setEvidenceLocation] = useState(() => selectedEvidence(location.hash));
   const [offset, setOffset] = useState(0);
   const [refresh, setRefresh] = useState(0);
@@ -62,13 +61,14 @@ function App() {
   const [exportError, setExportError] = useState('');
   const [exportStatus, setExportStatus] = useState('');
   function logout(message = '') {
+    setSearchOpen(false);
     setBusy(false);
     setToken(''); setName(''); setEmployeeId(''); setCanManageIdentities(false); setView('archive');
     setSessions([]); setSessionCursor(null); setNextSessionCursor(null); setDetail(null); setError(message);
   }
 
   useEffect(() => {
-    const change = () => { const next = hashView(); setView(next); setSelected(next === 'archive' ? location.hash.slice(1).split('?')[0]! : ''); setEvidenceLocation(next === 'archive' ? selectedEvidence(location.hash) : null); setReading(hashReading()); setConversationHash(location.hash); setOffset(0); };
+    const change = () => { const next = hashView(); setView(next); setSelected(next === 'archive' ? snapshotFromHash() : ''); setSearchOpen(false); setEvidenceLocation(next === 'archive' ? selectedEvidence(location.hash) : null); setReading(hashReading()); setConversationHash(location.hash); setOffset(0); };
     window.addEventListener('hashchange', change);
     return () => window.removeEventListener('hashchange', change);
   }, []);
@@ -125,97 +125,21 @@ function App() {
     finally { setExporting(false); }
   }
 
-  return <><header><a className="brand" href="#" onClick={() => setView('archive')}>Skynet <span>会话存档</span></a>{token && <div className="account"><span>{name}</span>
-    <button onClick={() => logout()}>退出</button></div>}</header>
-    <main>{!token ? <section className="login"><p className="eyebrow">工作过程，有据可查</p><h1>阅读会话原件</h1>
-      <p>登录后可查看所有员工、所有项目的已提交存档。</p>
-      <form onSubmit={login}><label htmlFor="credential">个人读取凭据</label><input id="credential" type="password" value={credential}
-        onChange={event => setCredential(event.target.value)} autoComplete="off" required aria-describedby="credential-hint" />
-        <p id="credential-hint" className="muted">使用管理员签发的读取凭据。凭据仅在当前页面内保留。</p>
-        <button className="primary" disabled={busy || !credential}>{busy ? '正在验证…' : '进入存档'}</button></form></section> : <>
-      <nav className="view-nav" aria-label="平台页面"><button aria-current={view === 'archive' ? 'page' : undefined} onClick={() => setView('archive')}>会话存档</button>
-        <button aria-current={view === 'metrics' ? 'page' : undefined} onClick={() => { location.hash = 'metrics'; setView('metrics'); }}>用量指标</button>
-        <button aria-current={view === 'coverage' ? 'page' : undefined} onClick={() => setView('coverage')}>团队覆盖</button>
-        <button aria-current={view === 'delivery' ? 'page' : undefined} onClick={() => setView('delivery')}>设备同步</button>
-        <button aria-current={view === 'analysis' ? 'page' : undefined} onClick={() => setView('analysis')}>分析队列</button>
-        <button aria-current={view === 'server' ? 'page' : undefined} onClick={() => setView('server')}>运行与备份</button>
-        <button aria-current={view === 'daily' ? 'page' : undefined} onClick={() => setView('daily')}>日工作</button>
-        <button aria-current={view === 'work' ? 'page' : undefined} onClick={() => setView('work')}>周工作与项目</button>
-        {canManageIdentities && <button aria-current={view === 'identities' ? 'page' : undefined} onClick={() => setView('identities')}>接入与设备</button>}</nav>
-      {view === 'metrics' ? <UsageMetrics key={token} request={(path,signal,method,body)=>request(path,token,signal,method,body)} /> : view === 'server' ? <ServerOperations request={(path,signal)=>request(path,token,signal)} /> : view === 'coverage' ? <TeamCoverage currentEmployeeId={employeeId} request={(path, signal) => request(path, token, signal)} onEvidence={() => setView('archive')} /> : view === 'analysis' ? <AnalysisOperations request={(path, signal) => request(path, token, signal)} /> : view === 'work' ? <WorkViews currentEmployeeId={employeeId} request={(path, signal, method) => request(path, token, signal, method)} onEvidence={() => setView('archive')} /> : view === 'daily' ? <DailyReports currentEmployeeId={employeeId} request={(path, signal, method,body) => request(path, token, signal, method,body)} onEvidence={() => setView('archive')} /> : view === 'delivery' ? <DeviceDelivery token={token} onUnauthorized={() => logout('身份已停用或凭据失效，请重新登录。')} /> : view === 'identities' && canManageIdentities ? <IdentityManagement token={token} currentEmployeeId={employeeId}
-        onUnauthorized={() => logout('身份已停用或凭据失效，请重新登录。')} /> : <>
-      <div className="heading"><div><p className="eyebrow">共享存档 · 北京时间</p><h1>会话原件</h1></div><button disabled={busy} onClick={() => { setSessionCursor(null); setRefresh(value => value + 1); }}>{busy ? '正在刷新…' : '刷新存档'}</button></div>
-      <p className="notice">当前保存单副本。原件已提交与原生恢复已验证是不同状态；Desktop 原生能力待验证。</p>
-      <InstallationHelp />
-      <ArchiveSearch key={token} request={(path, signal) => request(path, token, signal)} />
-      <div className="workspace"><aside aria-label="会话列表"><h2>最近会话 <span>{sessions.length}</span></h2>
-        {busy && <p role="status">正在读取存档…</p>}
-        {!busy && sessions.length === 0 && <p className="muted">还没有已提交的会话。后台上传后刷新；暂存材料不会显示为已存档。</p>}
-        <nav>{sessions.map(session => <a key={session.id} href={`#${session.id}`} className={`session ${selected === session.id ? 'selected' : ''}`} aria-current={selected === session.id ? 'page' : undefined}>
-          <strong>{session.employee}</strong><span>{sourceLabel(session.source)}</span><span className="project">{session.project || '未归类项目'}</span><small>{date(session.committed_at)}</small><span className="badge">原件已提交</span></a>)}</nav>
-        {nextSessionCursor && <button disabled={busy} onClick={() => { setSessionCursor(nextSessionCursor); setSessionRetry(value => value + 1); }}>加载更多会话</button>}
-        <p className="muted small">按提交时间分页读取；刷新可查看最新快照。</p></aside>
-        <article aria-label="会话详情">{!selected ? <div className="empty"><h2>选择一条会话</h2><p>阅读消息、工具结果与对应原件位置。</p></div> : detailLoading ? <p role="status">正在读取会话…</p> : detailError ? <>
-          <p className="error" role="alert">{detailError}</p><button onClick={() => setDetailRetry(value => value + 1)}>重试读取会话</button>
-        </> : detail && <>
-          <div className="detail-heading"><div><p className="eyebrow">{detail.employee} · {sourceLabel(detail.manifest.source)}</p><h2>{detail.manifest.project || '未归类项目'}</h2></div><button disabled={exporting} onClick={() => download('raw')}>下载原件</button></div>
-          <dl><div><dt>提交时间</dt><dd>{date(detail.committedAt)}</dd></div><div><dt>来源环境</dt><dd>{detail.manifest.sourceVersion} / {detail.manifest.sourceOs}</dd></div>
-            <div><dt>存档范围</dt><dd>{detail.manifest.byteLength.toLocaleString()} 字节原件 · {detail.manifest.capture?.materials.length ?? 0} 项关联材料</dd></div><div><dt>SHA-256</dt><dd className="hash">{detail.manifest.hash}</dd></div></dl>
-          <nav className="view-nav reading-nav" aria-label="会话阅读方式">{([['conversation', '对话视图'], ['timeline', '时间线'], ['raw', '原件 JSONL']] as const).map(([mode,label]) =>
-            <a key={mode} href={`#${selected}?view=${mode}`} aria-current={reading === mode ? 'page' : undefined}>{label}</a>)}</nav>
-          {reading === 'conversation' && <ConversationReader key={`${selected}:${conversationHash}:${refresh}`} snapshotId={selected} initial={conversationSelection(conversationHash)} request={(path,signal)=>request(path,token,signal)} />}
-          {reading === 'raw' && <EvidenceReader key={`raw:${selected}:${refresh}`} snapshotId={selected} location={{kind:'raw',line:1,textOffset:0}} request={(path,signal)=>request(path,token,signal)} />}
-          {reading === 'timeline' && evidenceLocation && <EvidenceReader key={`${selected}:${JSON.stringify(evidenceLocation)}:${refresh}`} snapshotId={selected} location={evidenceLocation}
-            request={(path, signal) => request(path, token, signal)} />}
-          {(detail.unrecognizedLines > 0 || detail.partialLine) && <p className="notice">{detail.unrecognizedLines} 行未解析{detail.partialLine ? '，另有未闭合的末行' : ''}。全部字节仍保存在原件中。</p>}
-          <HistoryMaterials key={detail.snapshotId} snapshotId={detail.snapshotId} capture={detail.manifest.capture} request={(path, signal) => request(path, token, signal)} />
-          <CaptureCoverage key={`coverage-${detail.snapshotId}`} initial={detail.captureHealth} path={`/api/snapshots/${detail.snapshotId}/capture-status`} request={path => request(path)} />
-          <SessionAnalysis key={`analysis-${detail.snapshotId}`} snapshotId={detail.snapshotId} request={(path, signal, method) => request(path, token, signal, method)} />
-          <section className="recovery" aria-label="历史归属"><h3>历史归属</h3><p>本快照上传员工：{detail.employee}。历史记录按每条证据的原始设备及员工归属；当前项目不覆盖历史项目。</p>
-            <p>{detail.provenance.relation === 'verified-restoration' ? '服务器已核对恢复来源与完整原件前缀。' : detail.provenance.relation === 'same-device-continuation' ? '已核对同设备会话的延续关系。' : '跨设备关系未确认。'}</p>
-            {detail.provenance.sourceSnapshotId && <a href={`#${detail.provenance.sourceSnapshotId}`}>查看来源快照</a>}
-            {detail.provenance.warning && <p className="notice">{detail.provenance.warning}</p>}</section>
-          <ActivityStatistics key={`statistics-${detail.snapshotId}:${refresh}`} request={(path, signal) => request(path, token, signal)} />
-          <section className="recovery" aria-label="来源日期与活动"><h3>来源日期与活动</h3>
-            <dl><div><dt>设备接入</dt><dd>{detail.activity.enrolledAt ? date(detail.activity.enrolledAt) : '未知（旧设备没有可信登记时间）'}</dd></div>
-              <div><dt>宿主登记</dt><dd>{date(detail.manifest.qualifiedAt)}</dd></div>
-              <div><dt>来源时间范围</dt><dd>{detail.activity.sourceFrom && detail.activity.sourceTo ? `${date(detail.activity.sourceFrom)} — ${date(detail.activity.sourceTo)}` : '未知'}</dd></div></dl>
-            <p>今日活动（北京时间 {detail.activity.today.date}）：{detail.activity.today.counts
-              ? `用户轮次 ${detail.activity.today.counts.userTurns} · 工具调用 ${detail.activity.today.counts.toolCalls} · 已解析条目 ${detail.activity.today.counts.records}`
-              : '未知，缺少可信设备接入时间。'}</p>
-            <p className="muted small">本快照包含的唯一记录（可能有多名原始员工），按已确认活动、历史或关联上下文、未知分类。材料曾被保存不证明当时存在独立员工活动；保留来源时间，不把关联上下文解释为接入前。历史或关联上下文 {detail.activity.historicalRecords} 条、来源时间未知 {detail.activity.unknownTimeRecords} 条、接入边界未知 {detail.activity.unknownEnrollmentRecords} 条；上传与提交时间不作为工作发生时间。跨快照统计见上方去重统计。</p>
-            <details><summary>按来源日期查看</summary><ul>{detail.activity.days.map(day => <li key={day.date}>
-              <strong>{day.date}</strong>：历史上下文 {day.historicalRecords} 条；接入后用户轮次 {day.afterEnrollment.userTurns}、工具调用 {day.afterEnrollment.toolCalls}
-            </li>)}</ul>{detail.activity.days.length === 0 && <p>没有可确定归属的来源日期。</p>}</details>
-          </section>
-          <section className="recovery" aria-label="导出与会话找回"><h3>导出与会话找回</h3>
-            <p>{detail.recovery.limitation}</p>
-            <p className="muted small">原生运行时：{detail.recovery.nativeRuntimeVersion ?? '未识别'}。{detail.recovery.nativeBackend === 'fixture-tested' ? '相同版本的原生运行时合成续聊已有测试；支持范围以该来源的验证记录为准。' : '该来源版本尚无原生续聊验证记录。'}</p>
-            <div className="export-actions"><button disabled={exporting} onClick={() => download('readable')}>导出完整可读材料</button>
-              <button disabled={exporting} onClick={() => download('recovery')}>下载恢复包</button></div>
-            <p className="muted small">恢复仅允许新建隔离目录，并检查来源、目标版本、操作系统、长度与哈希。现有会话不会被覆盖；代码工作区和登录状态不在恢复范围内。</p>
-            {detail.recovery.preparation !== 'candidate' && <p className="notice">当前来源或快照不满足已测恢复准备条件。可下载保存；恢复命令会给出具体原因。</p>}
-            <details><summary>{detail.manifest.source === 'codex-cli' ? '查看 CLI 恢复准备步骤' : '查看恢复准备步骤'}</summary><ol><li>保存恢复包，记录上方来源版本；保留原件。</li>
-              {detail.manifest.source === 'codex-cli' ? <><li>在 Windows x64 的独立测试环境安装相同 CLI 0.157.1。</li>
-                <li>运行 restore，指定包、全新隔离目录、--source-version 0.157.1 和 CLI 绝对路径；校验失败时不写已有目标。</li>
-                <li>以恢复目录作为新 CODEX_HOME，在自己的工作区使用原会话 ID 执行原生 resume。配置与登录独立设置；源码、依赖和附件不由此包恢复。</li>
-                <li>工具返回值及代码变更仅反映原会话可提供的材料；未记录或未解析的内容不代表没有发生。</li></>
-              : detail.manifest.source === 'claude-code-cli' ? <><li>在隔离环境安装相同 Claude Code CLI。当前仅有 Windows x64、2.1.281 的合成续聊记录。</li>
-                <li>按部署文档运行 restore，指定包文件、全新配置目录和 Claude 可执行文件；原有配置不会被覆盖。</li>
-                <li>核对恢复回执，将 CLAUDE_CONFIG_DIR 指向新目录，自行配置登录后用 --resume 和来源会话 ID 继续。关联材料及真实模型续聊仍待验证。</li></>
-              : <><li>在独立测试账户或测试设备安装相同 Desktop 与内置运行时版本。仅有 Windows x64、Desktop 26.924.2738.0、运行时 0.158.0-alpha.2.1 的后端测试记录。</li>
-                <li>按部署文档运行 collector 的 restore 命令，指定包文件、全新目录、Desktop 版本及原生运行时路径。</li>
-                <li>检查恢复回执。Desktop 中打开并继续原会话的步骤仍待验证，当前不能据此确认 Desktop 找回成功。</li></>}</ol></details>
-            {(exporting || exportStatus) && <p role="status">{exporting ? '正在准备下载…' : exportStatus}</p>}
-            {exportError && <p className="error" role="alert">{exportError} 可重新点击导出重试。</p>}
-          </section>
-          {reading === 'timeline' && <><p className="muted">共 {detail.total} 条已解析记录。消息只代表会话中记录的内容。</p>
-          {detail.events.map(event => <section className="message" key={`${event.line}:${event.block ?? 0}`}><div className="message-meta"><strong>{event.role}</strong><span>{contextLabel[event.context]}</span><span>原件第 {event.line} 行 · 来源时间：{event.timestamp ? date(event.timestamp) : '未知'}</span></div>
-            {event.origin && <p className="muted small">原始归属：{event.origin.employee} · {event.origin.project || '未归类项目'} · 设备 {event.origin.deviceId} · <a href={event.origin.webPath ?? `#${event.origin.snapshotId}`}>原始{event.origin.materialId ? '材料' : '快照'}第 {event.origin.line} 行</a></p>}<QualificationProof origin={event.origin} /><pre>{event.text}</pre></section>)}
-          {!evidenceLocation && detail.events.length === 0 && <p>当前原件没有可解析的消息；可下载原件核查。</p>}
-          {!evidenceLocation && <div className="pagination"><button disabled={offset === 0} onClick={() => setOffset(value => Math.max(0, value - 100))}>上一页</button><button disabled={detail.nextOffset === null} onClick={() => setOffset(detail.nextOffset ?? 0)}>下一页</button></div>}</>}
-        </>}</article></div></>}</>}
-      {error && <p className="error" role="alert">{error}</p>}</main><footer>Skynet · 完整性以实际收到的材料为准</footer></>;
+  return <PlatformShell authenticated={!!token} name={name} canManageIdentities={canManageIdentities} view={view} onNavigate={navigate} onLogout={()=>logout()} onSearch={openSearch}>
+    {!token?<section className="login"><p className="eyebrow">工作过程，有据可查</p><h1>阅读会话原件</h1><p>登录后可查看所有员工、所有项目的已提交存档。</p><form onSubmit={login}><label htmlFor="credential">个人读取凭据</label><input id="credential" type="password" value={credential} onChange={event=>setCredential(event.target.value)} autoComplete="off" required aria-describedby="credential-hint"/><p id="credential-hint" className="muted">使用管理员签发的读取凭据。凭据仅在当前页面内保留。</p><button className="primary" disabled={busy||!credential}>{busy?'正在验证…':'进入存档'}</button></form></section>:<>
+    {view==='metrics'?<UsageMetrics key={token} request={(path,signal,method,body)=>request(path,token,signal,method,body)}/>
+    :view==='server'?<ServerOperations request={(path,signal)=>request(path,token,signal)}/>
+    :view==='coverage'?<TeamCoverage currentEmployeeId={employeeId} request={(path,signal)=>request(path,token,signal)} onEvidence={()=>navigate('archive')}/>
+    :view==='analysis'?<AnalysisOperations request={(path,signal)=>request(path,token,signal)}/>
+    :view==='work'?<WorkViews currentEmployeeId={employeeId} request={(path,signal,method)=>request(path,token,signal,method)} onEvidence={()=>navigate('archive')}/>
+    :view==='daily'?<DailyReports currentEmployeeId={employeeId} request={(path,signal,method,body)=>request(path,token,signal,method,body)} onEvidence={()=>navigate('archive')}/>
+    :view==='delivery'?<><DeviceDelivery token={token} onUnauthorized={()=>logout('身份已停用或凭据失效，请重新登录。')}/><InstallationHelp/></>
+    :view==='recovery'?<RecoveryFlow key={conversationHash} sessions={sessions} hasMore={!!nextSessionCursor} onLoadMore={()=>{setSessionCursor(nextSessionCursor);setSessionRetry(value=>value+1);}} request={(path,signal)=>request(path,token,signal)}/>
+    :view==='identities'&&canManageIdentities?<><IdentityManagement token={token} currentEmployeeId={employeeId} onDelivery={()=>navigate('delivery')} onUnauthorized={()=>logout('身份已停用或凭据失效，请重新登录。')}/><InstallationHelp/></>
+    :selected?<>{detailLoading?<p role="status">正在读取会话…</p>:detailError?<><p className="error" role="alert">{detailError}</p><button onClick={()=>setDetailRetry(value=>value+1)}>重试读取会话</button></>:detail&&<SessionDetail detail={detail} reading={reading} conversationHash={conversationHash} refresh={refresh} offset={offset} evidenceLocation={evidenceLocation} setOffset={setOffset} request={(path,signal,method,body)=>request(path,token,signal,method,body)} download={download} exporting={exporting} exportStatus={exportStatus} exportError={exportError}/>}</>
+    :<SessionIndex sessions={sessions} busy={busy} recovery={false} hasMore={!!nextSessionCursor} onLoadMore={()=>{setSessionCursor(nextSessionCursor);setSessionRetry(value=>value+1);}} onRefresh={()=>{setSessionCursor(null);setRefresh(value=>value+1);}} onSearch={openSearch}/>}
+    <dialog className="archive-search-dialog" ref={searchDialog} onCancel={()=>setSearchOpen(false)} onClose={event=>{if(!event.currentTarget.open)setSearchOpen(false);}} onClick={event=>{if(event.target===event.currentTarget)setSearchOpen(false);}} aria-label="搜索存档"><div><div className="search-dialog-heading"><h2>搜索存档</h2><button aria-label="关闭搜索" onClick={()=>setSearchOpen(false)}>关闭</button></div>{searchOpen&&<ArchiveSearch key={token} request={(path,signal)=>request(path,token,signal)}/>}</div></dialog>
+    </>}{error&&<p className="error" role="alert">{error}</p>}
+  </PlatformShell>;
 }
-
-createRoot(document.getElementById('root')!).render(<App />);
+createRoot(document.getElementById('root')!).render(<App/>);

@@ -43,7 +43,7 @@ export function archiveQuery(db: Database, raw: RawStore) {
     const result = await db.query(`WITH boundary AS (SELECT COALESCE($1::timestamptz,statement_timestamp()) AS ceiling)
       SELECT *,to_char(committed_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS cursor_time,
       (SELECT to_char(ceiling AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"') FROM boundary) AS query_ceiling FROM (
-      SELECT DISTINCT ON (s.device_id,s.source,s.source_session_id) s.id,e.name AS employee,s.source_session_id,
+      SELECT DISTINCT ON (s.device_id,s.source,s.source_session_id) s.id,e.id AS "employeeId",e.name AS employee,s.source_session_id,
         s.manifest->>'project' AS project,s.committed_at,s.hash,(s.manifest->>'byteLength')::integer AS byte_length,
         s.manifest->>'sourceVersion' AS source_version,s.manifest->>'sourceOs' AS source_os,s.source
       FROM snapshots s JOIN devices d ON d.id=s.device_id JOIN employees e ON e.id=d.employee_id

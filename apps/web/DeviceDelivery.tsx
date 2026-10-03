@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import type { DeliveryHealth, DeliveryFailure } from '../../packages/contracts/delivery.js';
 import { sourceLabel, type Source } from '../../packages/contracts/archive.js';
 import { CaptureCoverage, type Coverage } from './CaptureCoverage.js';
+import './device-management.css';
 
 type Device = { id: string; name: string; employee: string; active: boolean; lastSeenAt: string | null; connected: boolean | null;
   sources: { source: Source; receivedAt: string; report: DeliveryHealth }[]; capture: Coverage[] };
@@ -25,20 +26,20 @@ export function DeviceDelivery({ token, onUnauthorized }: { token: string; onUna
     }).catch(failure => { if (!abort.signal.aborted) setError(failure.message); }).finally(() => { if (!abort.signal.aborted) setLoading(false); });
     return () => abort.abort();
   }, [token, offset, refresh]);
-  return <section aria-label="设备同步状态"><div className="heading"><h1>设备同步</h1>
+  return <section className="device-management device-sync-page" aria-label="设备同步状态"><div className="device-page-head"><div><h1>设备同步</h1><p>按员工查看设备、来源采集与上传状态。离线、待确认材料和来源缺口分别显示。</p></div>
     <button disabled={loading} onClick={() => setRefresh(value => value + 1)}>{loading ? '正在读取…' : '刷新设备状态'}</button></div>
-    <p className="notice">显示设备最近一次成功上报的状态。超过 90 秒没有连接确认时显示离线或状态过期；离线时服务器无法获知新增积压和本机拒绝原因，恢复连接后补报。这里的连接确认不代表宿主信任或完整备份。</p>
+    <p className="device-disclosure">显示设备最近一次成功上报的状态。超过 90 秒没有连接确认时显示离线或状态过期；离线时服务器无法获知新增积压和本机拒绝原因，恢复连接后补报。这里的连接确认不代表宿主信任或完整备份。</p>
     {error && <p role="alert">{error}</p>}{!loading && !error && !devices.length && <p>尚未登记设备。</p>}
-    {devices.map(device => <article className="device-delivery" key={device.id}><h2>{device.employee} · {device.name}</h2>
-      <p><strong>{!device.active ? '已停用' : device.connected ? '最近连接正常' : device.lastSeenAt ? '设备离线或状态已过期' : '尚未收到连接确认'}</strong> · 最后连接：{date(device.lastSeenAt)}</p>
+    {devices.map(device => <article className="device-delivery device-status-card" key={device.id} data-state={!device.active ? 'disabled' : device.connected ? 'connected' : 'unknown'}><div className="device-status-heading"><div><p className="device-owner">{device.employee}</p><h2>{device.name}</h2></div>
+      <span className="device-connection-state">{!device.active ? '已停用' : device.connected ? '最近连接正常' : device.lastSeenAt ? '设备离线或状态已过期' : '尚未收到连接确认'}</span></div><p className="device-last-seen">最后连接：{date(device.lastSeenAt)}</p>
       {!device.sources.length && <p>尚无来源同步报告，不能据此判断没有活动。</p>}
-      {device.capture.map(coverage => <div key={`${coverage.source}-${refresh}`}><h3>{sourceLabel(coverage.source as Source)}</h3><CaptureCoverage initial={coverage}
+      {device.capture.map(coverage => <div className="device-source-block" key={`${coverage.source}-${refresh}`}><h3>{sourceLabel(coverage.source as Source)}</h3><CaptureCoverage initial={coverage}
         path={`/api/devices/${device.id}/capture-status?source=${coverage.source}`} request={async path => {
           const response = await fetch(path, { headers: { Authorization: `Bearer ${token}` } }); if (response.status === 401) onUnauthorized(); return response;
         }} /></div>)}
-      {device.sources.map(({ source, receivedAt, report }) => <section key={source} aria-label={`${sourceLabel(source)}同步`}>
-        <h3>{sourceLabel(source)}</h3><p>状态收到时间：{date(receivedAt)}</p>
-        <p>{report.pendingSnapshots ? '同步中：存在未确认材料' : '当前报告没有待确认材料；不代表没有活动或完整存档。'}</p>
+      {device.sources.map(({ source, receivedAt, report }) => <section className="device-source-block" key={source} aria-label={`${sourceLabel(source)}同步`}>
+        <div className="device-source-heading"><h3>{sourceLabel(source)}</h3><p>状态收到时间：{date(receivedAt)}</p></div>
+        <p className="device-sync-summary">{report.pendingSnapshots ? '同步中：存在未确认材料' : '当前报告没有待确认材料；不代表没有活动或完整存档。'}</p>
         <dl className="delivery-facts"><div><dt>待确认存档</dt><dd>{report.pendingSnapshots} 份 · {bytes(report.pendingBytes)}</dd></div>
           <div><dt>最早积压</dt><dd>{date(report.oldestPendingAt)}</dd></div><div><dt>最后成功上传</dt><dd>{date(report.lastSuccessAt)}</dd></div>
           <div><dt>连续失败</dt><dd>{report.attempts} 次</dd></div><div><dt>下次重试</dt><dd>{date(report.nextAttemptAt)}</dd></div>
