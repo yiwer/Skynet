@@ -15,7 +15,7 @@ const { values, positionals } = parseArgs({ allowPositionals: true, options: {
 const command = positionals[0];
 const maintenance = ['repair', 'upgrade', 'rollback', 'uninstall', 'drain'];
 if (!['setup', 'status', 'start', 'stop', 'autostart-remove', 'restore', 'pack-agent', 'pack-plugins', 'entry-remove', ...maintenance].includes(command ?? '') && !values.state) throw new Error('--state must name an explicit private collector directory');
-const state = values.state ? resolve(values.state) : ['setup', 'status', 'start', 'stop', 'autostart-remove', 'entry-remove', ...maintenance].includes(command ?? '') ? (await import('./install-state.js')).defaultState() : '';
+const state = values.state ? resolve(values.state) : ['setup', 'status', 'start', 'stop', 'autostart-remove', 'entry-remove', ...maintenance].includes(command ?? '') ? await (await import('./install-state.js')).defaultState(command === 'setup') : '';
 async function stdin() {
   let input = '';
   process.stdin.setEncoding('utf8');
@@ -56,7 +56,7 @@ if (maintenance.includes(command ?? '')) {
     } catch { process.stderr.write('Skynet: host activity was not queued and local diagnostics could not be saved; check storage and skynet status.\n'); }
   }
 } else if (command === 'setup') {
-  if (values.state) {
+  if (values.state && !await (await import('./install-state.js')).installedState(state, true)) {
     // Legacy explicit-state integration harness; employee setup never consumes JSON.
     const { setup } = await import('./local.js');
     console.log(JSON.stringify(await setup(state, await stdin())));
@@ -102,7 +102,7 @@ if (maintenance.includes(command ?? '')) {
     } while (!stop.signal.aborted);
   } finally { await release(); }
 } else if (command === 'status') {
-  if (!values.state) {
+  if (!values.state || await (await import('./install-state.js')).installedState(state)) {
     console.log(JSON.stringify(await (await import('./runtime.js')).installedStatus(state)));
   } else {
   const result: Record<string, unknown> = {};
