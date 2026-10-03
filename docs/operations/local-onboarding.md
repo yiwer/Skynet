@@ -159,3 +159,5 @@ C:/Users/yiwer/AppData/Local/Packages/OpenAI.Codex_2p2nqsd0c76g0/LocalCache/Roam
 | 包外及 MSIX 命令状态 | 0.2.4 / running / connected，同一后台 |
 
 [在平台查看这次真实会话](https://skynet.91boy.cn/#03bf40a8-008d-4dfb-b091-8010372c1f2b?view=conversation)。证据位于接入目录的 `upgrade-0.2.4-evidence.json`、`upgrade-0.2.4-outside-status.json`、`upgrade-0.2.4-msix-status.json`、`upgrade-0.2.4-final-tasks.json`；临时升级任务均已移除，仅正式采集任务保持 Running。独立生产 API 核对结果为 `cli-routing-2026-10-03/production-session-green.json`。本轮修复与回归没有发起额外模型调用。
+
+22:49:50 服务端对话与 Trace 修订上线后，使用同一真实快照再次核验：默认 3 条用户/Agent 消息、4 条可展开上下文、2 次调用与 2 条结果、8 条原生 Trace。对话及工具原文完整一致，原件哈希不变，浏览器可展开工具并跳转结果、查看命令耗时与退出码；8 个生产视口/主题状态均无外层滚动或浏览器错误。完整发布指纹与验证入口见 [部署记录](deployment.md)。此次服务端发布不要求再次升级采集器、重新绑定设备或配置凭据。

@@ -169,3 +169,13 @@ sudo bash /opt/skynet/current/deploy/ubuntu-release.sh \
 前一个工作区发布通过9个只读页面×1280/375×浅深主题共36个生产浏览器状态、16个下拉菜单的展开/键盘恢复和搜索快速重开，无页面/控制台/HTTP错误。随后独立扩展视口发现会话在768—1199px重叠、团队日期控件裁切和320px隐藏文本撑高外层；最终补丁在本地7个宽度×浅深主题×两页共28态全部通过。独立报告、各轮截图与生产验证保存在 `E:/GenCode/Skynet-evidence/polish-2026-10-03/`，入口为 `REPORT.md` 和 `index.html`；前一次生产验证记录仍保留在 `production/2026-10-03T12-16-33-603Z/`，未覆盖失败或旧版本证据。
 
 最终发布后补验团队320/414及授权接入合成会话320/768/1199/1280、浅深主题共12态全部通过，10个有内容溢出的区域实际滚轮与尾端检查通过，无外层滚动、正文重叠、日期裁切或浏览器错误。确认实际加载最终资产，并等待真实消息渲染后截图；证据为 `production-responsive/2026-10-03T12-23-25-415Z/audit.json` 与22张截图。前次误截加载态的记录标记为被后次替代，仍保留。
+
+2026-10-03 22:49:50（北京时间）发布真实对话与工具 Trace 修订 **`v2-1dc46a1e8fb2-1`**，固定 Git `1dc46a1e8fb2b18ad62c8c2dd9b2dc12fe95ec9b`。归档为 3,737,130 bytes，SHA-256 `49955b21cb47a0a399ba03bbb4ebc60c6e47d7fba30b6489ce89044387b1ac68`；服务器源码 SHA-256 `765ba05ebf29a916b4123854edd8d0614baa68a995741d9989f85bda8c419383`；应用镜像 `sha256:0bd7a4033ff3fdf40efb7bdc8fdc6ae8178755aac82d0a2e8e5bb0bb45728c98`。实际加载资产 `index-BqQ1yFax.js` / `index-CyxpUAeW.css`。
+
+第一次构建期间 SSH 长连接中断，确认当时未进行备份或切换，旧 app/db 仍健康。随后从同一已校验源码和 release 幂等重试，使用会自动回收的独立 systemd oneshot 持续执行；npm 安装层已在第一次中断前完成，第二次命中该缓存。未更改 Dockerfile、锁文件、镜像基线或 TLS 检查。另行准备的本地 `playwright-core` tarball 已按锁文件 SHA-512 校验，但未用于服务器构建。两次日志均保留，临时 unit 已回收。
+
+切换前 SQL 与全部原件一致备份完成，回执 `/opt/skynet/receipts/backup-20261003T144941Z-1136175.json`，备份 ID `630cce51-1b16-4d2d-a23d-4b83cb07ac82`，包含 5 个原件对象、132,332 bytes。仅替换 app；db 容器与启动时间不变，旧 release、镜像和持久卷保留，previous 指向 `v2-745c2be6df44-1`。13 项外部 API/HTTPS 检查通过；四个既有 nginx site 哈希不变，证书续期任务 active，分析 Worker 仍未启用。
+
+发布后独立读取用户实际快照 `03bf40a8-008d-4dfb-b091-8010372c1f2b`：默认 1 条用户消息与 2 条 Agent 消息，4 条系统/环境上下文可选展开；2 次调用与 2 条结果跨两页逐字拼回，8 条 Trace 正常读取。原件仍为 106,317 bytes，SHA-256 与采集前本机文件及升级后下载一致。浏览器验证实际最终资产，完成上下文切换、工具展开及结果锚点跳转、全部 Trace 与命令耗时/退出码检查；320/768/1199/1280 × 浅深主题共 8 态，外层滚动、双栏重叠、浏览器错误均为 0，8 个内部滚动区的滚轮与到达尾端检查通过。侧栏已移除会把环境封套误计为提示词的旧展示行。
+
+本轮生产证据保存在 `E:/GenCode/Skynet-evidence/cli-routing-2026-10-03/`：`production-conversation.json`、`production-browser.json`；发布子目录 `deploy-v2-1dc46a1e8fb2-1` 含归档、部署日志、备份回执、`remote-verification.json` 和 `production-smoke.json`。隔离 UI 验收 45 态和移动端全展开尾部截图保存在 `conversation-2026-10-03/REPORT.md`，独立 HTTP/OAuth MCP、旧对话/统计及旧 Web 整链回归证据位于 `conversation-trace-2026-10-03/manifest.json` 与其中 `v2-public-compatibility/manifest.json`。本轮没有新增生产合成会话或额外模型调用。
