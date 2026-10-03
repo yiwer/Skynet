@@ -31,10 +31,11 @@ async function routeCodex(state: string, installation: ReturnType<typeof install
       const end = buffer.indexOf(10, 0); if (end < 0 || end >= count!) throw new Error('Native metadata is incomplete or exceeds the routing limit');
       const metadata = JSON.parse(buffer.subarray(0, end).toString('utf8'));
       if (metadata.type !== 'session_meta' || metadata.payload?.id !== event.session_id) throw new Error('Native session identity mismatch');
-      // These values were measured in the real installed CLI. Do not classify
-      // every other app-server origin as Desktop: that would misattribute IDEs.
+      // The default shared-daemon TUI records source=vscode in Codex 0.160.0;
+      // its codex-tui originator distinguishes it from extension/Desktop work.
+      // Only accept measured pairs rather than guessing from source alone.
       const source = (metadata.payload.source === 'exec' && metadata.payload.originator === 'codex_exec')
-        || (metadata.payload.source === 'cli' && metadata.payload.originator === 'codex-tui') ? 'codex-cli' : null;
+        || (['cli', 'vscode'].includes(metadata.payload.source) && metadata.payload.originator === 'codex-tui') ? 'codex-cli' : null;
       if (!source) throw new Error('Codex origin is not yet verified; activity is queued without guessing CLI or Desktop');
       if (!installation.clients.some(client => client.source === source && client.configured)) throw new Error('The observed Codex source has not been configured');
       const destination = join(state, 'sources', source, 'spool', file);
