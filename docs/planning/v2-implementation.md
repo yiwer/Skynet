@@ -1,0 +1,69 @@
+# V2 实施记录
+
+日期：2026-10-03。当前分支：`codex/v2`，开发起点：`6626a4f`。
+
+## 本轮授权与验收边界
+
+用户在项目进度分析后直接要求“开始实现V2”。本轮据此启动 V2 开发，先交付 #34 与 #36 的数据链纵向切片，并完成 #3 / S0 文档对齐。原任务图要求先通过 V1 G2/G3 才开始产品代码；这项开发顺序由本轮指示覆盖，验收依赖仍保留。
+
+V1 G0–G4 尚未签收，实际证据以 [V1 验收台账](../implementation/v1-acceptance-ledger.md) 为准。`83537e6` 的既有 Linux 普通回归通过不等于本轮复跑，也不等于真实 Desktop、Windows 生命周期、PAYG 或五日试点通过。V2 发布仍须满足 [PRD v2.0](../requirements/PRD-v2.md) 的 AC-23…AC-38 与 V1 回归；评估全员开放仍依赖 #52 试点校准及参数确认。
+
+## 首批范围
+
+| Ticket | 本轮范围 | 当前状态与完成边界 |
+| --- | --- | --- |
+| [#3](https://github.com/yiwer/Skynet/issues/3) / S0 | ADR-0004、术语、V1 评分与验收条款、V2 实现指引及执行顺序对齐 | 本地修订已准备；文档交付审阅和 GitHub 同步分别记录，未声称用户已审阅文本或 ticket 已完成 |
+| [#34](https://github.com/yiwer/Skynet/issues/34) | 从已提交原件产生同源、可重算的 Token 与基础用量，并经公开 Web/MCP/导出读取 | 基础切片已实现并通过定向验证；独立增量缓存和生产规模验收仍待完成，ticket 不关闭 |
+| [#36](https://github.com/yiwer/Skynet/issues/36) | 从既有证据投影对话阅读，保持原文、分页、工具展开与原句定位，经 Web/MCP 读取 | 首批阅读链已实现并通过公开整链验证；等待、并行与其他未知状态仍按后续任务推进，ticket 不关闭 |
+
+产品数据来自 V1 存档链；开发测试经公开上传契约注入合成原件，页面不持有原型假数据。沿用已有模块、认证、原件与版本语义，不复制另一套 Web/MCP 统计口径。
+
+## 后续依赖
+
+- #35 组装审计依赖 #34；#37 等待与并行、#38 任务类型和提示词证据依赖 #34 与 #36。
+- #39 活动记录依赖 #37/#38；#40–#43 报表和 #45 使用能力模型按各自的 #37/#38 前置推进。
+- #44 团队增强、#46–#51 画像/历史/备注/更正继续按 [既有任务图](tracer-bullet-tickets.md) 的功能依赖实施。
+- #52 试点校准保留 #33（V1 G4）及 #47/#49/#51 依赖；#53 团队画像联动与 #54 完整验收按任务图收口。
+
+本轮未将后续 tickets 标为完成。开发可提前开始不表示可跳过原件可靠性、真实分析、支持矩阵或发布签收。
+
+## S0 修订与同步
+
+领域决定见 [ADR-0004](../adr/0004-v2-reporting-guardrails.md)，术语沿用根 [CONTEXT.md](../../CONTEXT.md)。V1 PRD 的 US 71、分析统计守则与范围外条款，以及 V1 验收 AC-13/第 7 节、需求基线、访谈历史说明和 V2 实现提示词已对齐到当前 V2 范围。
+
+本地 PRD 正文变更需要同步既有 GitHub Issue #1/#2；S0 子票 #3 的进度可引用本次差异。同步前保留 issue 开放，不将本地文件写入视为远端已更新。本轮没有可用的 GitHub API 凭据，`gh` 未安装，非交互 credential helper 未返回凭据；远端正文和 ticket 状态未更新。
+
+## 已实现的数据链
+
+指标服务经 `effective_event_origins` 获取已确认归属，校验原件字节后，在同一 `REPEATABLE READ` 事务中计算并保存追加式 `metric_revisions`。已验证恢复前缀去重；用户轮次排除明确标记的压缩摘要，工具按请求计数；Claude 原生 usage 与 Codex 累计基线沿用来源统计提取器。未知、未上报、重置和已知零分别呈现。按员工、Agent、项目及北京时间日期筛选，提供固定版本分页、每日表格/图表、原件重算及完整 JSON 导出。
+
+HTTP 入口为 `/api/metrics/catalog`、`/api/metrics`、`/api/snapshots/:id/metrics`、`POST /api/metrics/recompute` 和 `/api/metrics/export`；MCP 的 `get_metric_catalog`、`get_report_summary` 调用同一服务。读取响应共用 80 KiB 上限，完整导出 16 MiB；超过界限明确失败，不截断总数。原件读取上限 128 MiB。目前重算采用有界原件重建，尚未实现独立增量缓存或原生用量日期索引；发现无普通消息的 Token 日期需要扫描匹配员工/项目的有界历史原件，缩小日期范围不一定减少扫描量。大范围员工/日期聚合仍需后续生产负载验证。
+
+对话为固定快照的阅读投影，默认隐藏工具，允许展开；每页最多 2,048 个 UTF-16 文字单元和 25 条消息，长文本连续游标不省略原文。搜索保留原件行、block、文字位置与解析器版本，在对话中高亮精确命中；对话、时间线和原件 JSONL 可切换。分页绑定原件哈希与归属版本，归属改变后拒绝旧分页混读。离线补传、是否进行中和未上报等待明确为未知；存在工具结果不表示结论已核验。HTTP `/api/snapshots/:id/conversation` 与 MCP `read_conversation` 使用同一读取器。
+
+新增接口沿用已认证的共享阅读范围；MCP 沿用实际 HTTPS OAuth 和逐请求撤销检查。对话及工具内容均作为文本显示，未把原文作为 HTML 执行。
+
+## 验证记录
+
+S0 文档核查只验证相对链接、覆盖声明与差异格式，不替代产品测试。
+
+2026-10-03 S0 本地核查：9 份修改/新增文档的 56 处相对文件链接全部存在；`git diff --check`（限定本轮文档路径）通过。旧停止开发和全面禁止综合指数的表述仅在注明已被覆盖的历史说明中保留。未运行产品测试、安装后台、读取真实员工会话或调用付费模型；未提交或发布这些文档。
+
+2026-10-03 首批产品验证环境：Windows，Node 24.21.0，PostgreSQL 17.10，Playwright Chromium 1243。此机 Docker Desktop 无法启动且没有 WSL，本轮使用显式 `SKYNET_TEST_POSTGRES_BIN` 的独立测试数据库适配器；每个沙箱创建随机端口和密码的新集群，带所有权标记并负责停止，不注册系统服务。默认测试路径仍使用 Docker。未运行历史处于 HOLD 的 Windows 完整安装/后台套件，未启动真实员工采集或付费分析。
+
+- `npm run typecheck` 与 `npm run build` 通过；Vite 的第三方 Zod PURE 注释警告不影响构建。
+- `tests/metrics.test.ts` 4/4 通过：手工预期 Claude 142/31、压缩摘要排除、跨日、恢复去重、筛选、23 会话全量分页/导出、重算/重启/旧版本，以及 Codex 基线、重复、reset、未知版本和零事件原件缺口。独立评审还发现纯 `token_count` 日期无普通事件时漏算；新增回归先复现 RED，修复后单独次日 20/10、双日合计 40/20，且保留历史项目、恢复前缀和固定导出。纯 Token 日期不会虚构业务会话、用户轮次或工具调用；指标目录版本为 `recorded-metrics-2`。
+- `tests/conversation.test.ts` 与 `tests/conversation-public.test.ts` 共 3/3 通过：工具投影、长文本、原句定位、公开上传，以及归属资格变化后拒绝旧游标。
+- `tests/v2-public.test.ts` 1/1 通过：公开上传 → 实际 HTTPS OAuth + PKCE → Web/HTTP/MCP 同值，对话 4 页、MCP 工具展开 8 页、7,622 UTF-16 长原文、精确命中 line 5/block 1/textOffset 5100，指标筛选、下载、重算和旧固定版本不变。另验证从指标页返回同一会话及工具命中后收起工具。脚本文字未执行，原始字节不变，浏览器无 pageerror。
+- 既有 `tests/mcp.test.ts`、`tests/search.test.ts`、`tests/source-statistics.test.ts`、`tests/evidence-integrity.test.ts` 共 7/7 通过。此结果仅为所列定向回归，不代替完整 V1 验收。
+- 320/1280px × light/dark 的对话与指标页面共 16 张整页/视口截图，浏览器检测无页面横向溢出，人工抽检无遮挡。首轮整链测试因测试 locator 对内嵌 select 的 exact 假设错误而 RED，修正 locator 后第二轮与最终轮均 PASS；没有通过放宽 timeout 掩盖产品问题。
+
+公开整链证据与截图已从 TEMP 保全到 `E:\GenCode\Skynet-evidence\v2-2026-10-03\`，主要索引为 `v2-public-evidence.json`。独立评审发现并修复指标页面 hash 导航及工具锚点强制展开两个问题，最终整链已含对应回归。这里的合成流程通过不表示真实 Desktop、Windows 生命周期、PAYG、异机恢复或五日运营通过。
+
+## 部署准备
+
+用户指定目标 `ubuntu@159.75.158.26`，域名 `skynet.91boy.cn`，DNS 已解析到目标 IP。新增 [Ubuntu 部署配方](../operations/deployment.md) 与固定版本 Docker/Compose 发布脚本：HTTPS、独立数据库/原件/证书卷、root-only 私有配置、升级前一致备份和保留数据的应用回滚。分析 Worker 默认不启用。
+
+最初指定的 `C:\Users\yiwer\.ssh\id_rsa` 未能认证；云助手只读检查发现当时 `ubuntu` 的 `authorized_keys` 为空。用户随后新增 `C:\Users\yiwer\.ssh\tec.pem` 绑定，已用该私钥成功登录并取得免密 sudo。后续操作不修改 SSH 认证配置。
+
+实机为 Ubuntu 24.04，4 核/4GB，Docker 29.1.3、Compose 2.40.3，根磁盘约余 21GB。现有 Nginx 占用 80/443，已有其他应用占用 3000 等端口，因此使用独立 `/opt/skynet` 目录和 `127.0.0.1:14311`，由现有 Nginx 代理本域名。已增加专属 site 并取得有效证书（到期 2027-01-01），Certbot 定时续期与 reload hook 已配置；既有四个站点配置 SHA-256 未变。Node/PostgreSQL 基础镜像已拉取；应用镜像和首批数据链的最终部署验证结果另行补记。

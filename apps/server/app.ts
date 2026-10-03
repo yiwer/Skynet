@@ -28,6 +28,10 @@ import { migrateWorkViews, workViewService } from './work-views.js';
 import { workViewQuery } from '../../packages/contracts/work-views.js';
 import { assertRestoreReady } from './backup-files.js';
 import {reconcileOriginIntegrity} from './evidence-integrity.js';
+import { conversationQuery } from './conversation.js';
+import { conversationInputSchema } from '../../packages/contracts/conversation.js';
+import { migrateMetrics, metricsService } from './metrics.js';
+import { metricsQuerySchema } from '../../packages/contracts/metrics.js';
 
 export async function createApp(options: { db: Database; rawDirectory: string; webDirectory?: string; publicOrigin?: string; reportClock?: () => Date }) {
   const { db } = options;
@@ -39,6 +43,7 @@ export async function createApp(options: { db: Database; rawDirectory: string; w
   await migrateServerOperations(db);
   await migrateCoverage(db);
   await migrateWorkViews(db);
+  await migrateMetrics(db);
   const raw = new RawStore(options.rawDirectory);
   await backfillOrigins(db, raw);
   await reconcileOriginIntegrity(db,raw);
@@ -188,6 +193,27 @@ export async function createApp(options: { db: Database; rawDirectory: string; w
 
   app.get('/api/me', { onRequest: readerGuard }, async request => reader(request.headers.authorization));
   const archive = archiveQuery(db, raw);
+  const conversation = conversationQuery(db, raw);
+  const metrics = metricsService(db, raw, options.reportClock);
+  app.get('/api/snapshots/:id/conversation', { onRequest: readerGuard }, async request => {
+    const { id } = z.object({ id: z.uuid() }).parse(request.params);
+    const q = z.object({ cursor: z.string().optional(), includeTools: z.enum(['true', 'false']).optional(),
+      limit: z.coerce.number().optional(), line: z.coerce.number().optional(), block: z.coerce.number().optional(),
+      textOffset: z.coerce.number().optional(), parserVersion: z.string().optional() }).strict().parse(request.query);
+    return conversation.page(id, conversationInputSchema.parse({ cursor: q.cursor, includeTools: q.includeTools === 'true', limit: q.limit,
+      ...(q.line === undefined ? {} : { anchor: { line: q.line, block: q.block, textOffset: q.textOffset, parserVersion: q.parserVersion } }) }));
+  });
+  app.get('/api/metrics/catalog', { onRequest: readerGuard }, () => metrics.readMetricCatalog());
+  app.get('/api/metrics', { onRequest: readerGuard }, request => metrics.readMetrics(metricsQuerySchema.parse(request.query)));
+  app.get('/api/snapshots/:id/metrics', { onRequest: readerGuard }, request => {
+    const { id } = z.object({ id: z.uuid() }).parse(request.params);
+    return metrics.readSnapshotMetrics(id, metricsQuerySchema.parse(request.query));
+  });
+  app.post('/api/metrics/recompute', { onRequest: readerGuard }, request => metrics.recompute(metricsQuerySchema.parse(request.body)));
+  app.get('/api/metrics/export', { onRequest: readerGuard }, async (request, reply) => {
+    const data = await metrics.exportMetrics(metricsQuerySchema.parse(request.query));
+    return reply.header('Content-Disposition', `attachment; filename="skynet-metrics-${data.version}.json"`).type('application/json').send(data);
+  });
   const analysis = analysisService(db, archive);
   const reports = reportService(db, analysis,workStatistics, options.reportClock);
   const workViews = workViewService(db, reports, options.reportClock);
@@ -318,7 +344,7 @@ export async function createApp(options: { db: Database; rawDirectory: string; w
     const file = await archive.exported((request.params as { id: string }).id, format);
     return reply.header('Content-Disposition', `attachment; filename="${file.filename}"`).type(file.contentType).send(file.bytes);
   });
-  if (options.publicOrigin) await registerMcp(app, db, archive, options.publicOrigin, analysis, reports, coverage, workStatistics, workViews,operations);
+  if (options.publicOrigin) await registerMcp(app, db, archive, options.publicOrigin, analysis, reports, coverage, workStatistics, workViews,operations,conversation,metrics);
   if (options.webDirectory) {
     await app.register(fastifyStatic, { root: resolve(options.webDirectory), wildcard: false });
   }

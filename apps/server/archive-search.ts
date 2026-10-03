@@ -10,6 +10,7 @@ import { manifestSchema, sourceTimestamp, type SessionSummary } from '../../pack
 import { evidenceLink, searchSchema, type SearchInput, type SearchHit, type EvidenceLocation } from '../../packages/contracts/search.js';
 import { eventOrigins } from './provenance.js';
 import {verifySnapshotIntegrity} from './evidence-integrity.js';
+import { conversationLink } from '../../packages/contracts/conversation.js';
 
 const cursorSchema = z.object({ scan: z.uuid(), offset: z.number().int().min(0), query: z.string().length(64) });
 const scope = '每个匹配快照返回首个命中：已解析原文、原件 JSONL（含未知和未闭合行）、文本关联材料；二进制不做 OCR。员工和项目按已确认事件原始归属匹配；无法解析的原件行及关联材料只能按上传设备员工/清单项目匹配。内容、员工、项目均为不区分大小写的字面包含。日期是命中记录的北京时间来源日期，未知日期不匹配日期筛选；关联材料日期未知。';
@@ -132,7 +133,9 @@ export function archiveSearch(db: Database, raw: RawStore) {
         if (hit) {
           const session: SessionSummary = { id: row.id, employee: hitEmployee, source_session_id: row.source_session_id, project: hitProject,
             committed_at: row.committed_at.toISOString(), hash: row.hash, byte_length: manifest.byteLength, source_version: manifest.sourceVersion, source_os: manifest.sourceOs, source: manifest.source };
-          const result = { ...session, ...hit, origin: hitOrigin, generation: manifest.capture?.generation ?? null, revision: manifest.capture?.revision ?? null, webPath: evidenceLink(row.id, hit.location) };
+            const conversationPath = conversationLink(row.id, hit.location);
+            const result = { ...session, ...hit, origin: hitOrigin, generation: manifest.capture?.generation ?? null, revision: manifest.capture?.revision ?? null, webPath: evidenceLink(row.id, hit.location),
+              conversationPath: conversationPath && hit.matchLength > 0 ? `${conversationPath}&matchLength=${hit.matchLength}` : conversationPath };
           if (hits.length && Buffer.byteLength(JSON.stringify([...hits, result])) > 7000) break;
           hits.push(result);
         }

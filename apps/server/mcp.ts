@@ -15,8 +15,12 @@ import type { WorkStatisticsService } from './work-statistics.js';
 import type { WorkViewService } from './work-views.js';
 import { workViewQuery } from '../../packages/contracts/work-views.js';
 import type { ServerOperationsService } from './server-operations.js';
+import { conversationInputSchema } from '../../packages/contracts/conversation.js';
+import { metricsQuerySchema } from '../../packages/contracts/metrics.js';
+import type { conversationQuery } from './conversation.js';
+import type { metricsService } from './metrics.js';
 
-export async function registerMcp(app: FastifyInstance, db: Database, archive: ArchiveQuery, publicOrigin: string, analysis: AnalysisService, reports: ReportService, coverage: CoverageService, workStatistics: WorkStatisticsService, workViews: WorkViewService,operations:ServerOperationsService) {
+export async function registerMcp(app: FastifyInstance, db: Database, archive: ArchiveQuery, publicOrigin: string, analysis: AnalysisService, reports: ReportService, coverage: CoverageService, workStatistics: WorkStatisticsService, workViews: WorkViewService,operations:ServerOperationsService, conversation: ReturnType<typeof conversationQuery>, metrics: ReturnType<typeof metricsService>) {
   const { guard } = await registerMcpAuth(app, db, publicOrigin);
   const offset = z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).default(0);
   const snapshotId = z.uuid().describe('Immutable snapshot ID from list_sessions, never a mutable session ID');
@@ -34,6 +38,13 @@ export async function registerMcp(app: FastifyInstance, db: Database, archive: A
         return { isError: true, content: [{ type: 'text' as const, text: error instanceof HttpError ? error.message : '查询暂时不可用，请重试；上传不受影响' }] };
       }
     }
+    mcp.registerTool('read_conversation', { description: '按原件顺序分页读取对话，默认隐藏工具。固定快照和解析版本，长消息沿 nextCursor 继续。anchor 使用原件 line/block/textOffset；工具结果存在不表示助手结论已核验。',
+      annotations, inputSchema: conversationInputSchema.safeExtend({ snapshotId }) },
+      input => result(() => { const { snapshotId: id, ...query } = input; return conversation.page(id, query); }));
+    mcp.registerTool('get_metric_catalog', { description: '读取 Web、MCP、导出共用的确定性指标定义、来源和未知值口径。',
+      annotations, inputSchema: {} }, () => result(async () => metrics.readMetricCatalog()));
+    mcp.registerTool('get_report_summary', { description: '读取来源日期归期、去重且版本化的基础用量。Token 未知单列；会话可下钻原件。后续页传入同一 version 和 nextOffset，不混用新版本。',
+      annotations, inputSchema: metricsQuerySchema }, input => result(() => metrics.readMetrics(input)));
     mcp.registerTool('list_sessions', { description: '分页列出全体员工的会话快照。nextCursor 保持同一查询时间范围。',
       annotations, inputSchema: { cursor: z.string().max(1024).optional(), limit: z.number().int().min(1).max(10).default(10) } },
     input => result(() => archive.sessions(input.cursor, input.limit)));

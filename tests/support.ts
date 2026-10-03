@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { randomUUID, randomBytes } from 'node:crypto';
 import { setTimeout } from 'node:timers/promises';
+import { localPostgres } from './local-postgres.js';
 
 const execute=(file:string,args:string[],options:CommandOptions={})=>ownedCommand(file,args,process.env,'',{timeoutMs:5000,...options});
 export async function command(file: string, args: string[], env: NodeJS.ProcessEnv, input = '',options:CommandOptions={}) {
@@ -25,18 +26,28 @@ export async function createSandbox() {
   const owner=randomUUID();
   let server: ChildProcess | undefined;
   let collector: ChildProcess | undefined;
+  let native: Awaited<ReturnType<typeof localPostgres>> | undefined;
+  const nativeBinaries = process.env.SKYNET_TEST_POSTGRES_BIN;
+  const closeDatabase = () => nativeBinaries ? native?.close() ?? Promise.resolve() : removeOwnedContainer(name, owner);
   try {
-    await ownedCommand('docker', ['run', '--detach', '--name', name,'--label',`org.skynet.test-owner=${owner}`, '--publish', '127.0.0.1::5432',
+    let databaseUrl: string;
+    if (nativeBinaries) {
+      native = await localPostgres(directory, password, database, nativeBinaries);
+      databaseUrl = native.url;
+    } else {
+      await ownedCommand('docker', ['run', '--detach', '--name', name,'--label',`org.skynet.test-owner=${owner}`, '--publish', '127.0.0.1::5432',
       '--env','POSTGRES_PASSWORD','--env', `POSTGRES_DB=${database}`, 'postgres:17-alpine'],{...process.env,POSTGRES_PASSWORD:password},'',{timeoutMs:60000});
-    const { stdout } = await execute('docker', ['port', name, '5432/tcp']);
-    const port = stdout.trim().split(':').at(-1);
-    const env = { ...process.env, DATABASE_URL: `postgresql://postgres:${password}@127.0.0.1:${port}/${database}`, RAW_DIRECTORY: join(directory, 'raw') };
-    const readyDeadline=Date.now()+30000;
-    for (let attempt = 0; attempt < 60; attempt++) {
-      // The image's initialization server accepts sockets before the final TCP server starts.
-      try { await execute('docker', ['exec', name, 'pg_isready', '-h', '127.0.0.1', '-U', 'postgres', '-d', database]); break; }
-      catch { if (attempt === 59||Date.now()>=readyDeadline) throw new Error('Isolated PostgreSQL readiness deadline exceeded'); await setTimeout(500); }
+      const { stdout } = await execute('docker', ['port', name, '5432/tcp']);
+      const port = stdout.trim().split(':').at(-1);
+      databaseUrl = `postgresql://postgres:${password}@127.0.0.1:${port}/${database}`;
+      const readyDeadline=Date.now()+30000;
+      for (let attempt = 0; attempt < 60; attempt++) {
+        // The image's initialization server accepts sockets before the final TCP server starts.
+        try { await execute('docker', ['exec', name, 'pg_isready', '-h', '127.0.0.1', '-U', 'postgres', '-d', database]); break; }
+        catch { if (attempt === 59||Date.now()>=readyDeadline) throw new Error('Isolated PostgreSQL readiness deadline exceeded'); await setTimeout(500); }
+      }
     }
+    const env = { ...process.env, DATABASE_URL: databaseUrl, RAW_DIRECTORY: join(directory, 'raw') };
     async function startServer(portNumber = 0) {
       server = spawn(process.execPath, ['dist/apps/server/main.js'], { env: { ...env, PORT: String(portNumber) }, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
       return ownedReady(server,/Skynet listening on (http:\/\/[^;]+)/);
@@ -52,16 +63,16 @@ export async function createSandbox() {
       collector.on('error', () => undefined);
     }
     async function close() {
-      const results=await Promise.allSettled([stop(collector),stop(server),removeOwnedContainer(name,owner)]);
+      const results=await Promise.allSettled([stop(collector),stop(server),closeDatabase()]);
       const errors=results.filter(value=>value.status==='rejected').map(value=>(value as PromiseRejectedResult).reason);
       if(errors.length)throw new AggregateError(errors,'Owned sandbox cleanup incomplete');
     }
-    const inspected = await execute('docker', ['inspect', '--format', '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}', name]);
-    const containerDatabaseUrl = `postgresql://postgres:${password}@${inspected.stdout.trim()}:5432/${database}`;
+    const inspected = native ? null : await execute('docker', ['inspect', '--format', '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}', name]);
+    const containerDatabaseUrl = native ? databaseUrl : `postgresql://postgres:${password}@${inspected!.stdout.trim()}:5432/${database}`;
     return { directory, env, name, containerDatabaseUrl, startServer, stopServer: () => stop(server), crashServer: () => crash(server), startCollector, stopCollector: () => stop(collector),
       provision, collectorCommand, close };
   } catch (error) {
-    const cleanup=await Promise.allSettled([stop(collector),stop(server),removeOwnedContainer(name,owner)]);
+    const cleanup=await Promise.allSettled([stop(collector),stop(server),closeDatabase()]);
     const failed=cleanup.filter(value=>value.status==='rejected');
     if(failed.length)throw new AggregateError([error,...failed.map(value=>(value as PromiseRejectedResult).reason)],'Sandbox failed; owned cleanup requires inspection');
     throw error;

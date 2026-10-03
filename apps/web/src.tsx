@@ -20,6 +20,8 @@ import { TeamCoverage } from './TeamCoverage.js';
 import { WorkViews } from './WorkViews.js';
 import { QualificationProof } from './QualificationProof.js';
 import { ServerOperations } from './ServerOperations.js';
+import { ConversationReader, conversationSelection } from './ConversationReader.js';
+import { UsageMetrics } from './UsageMetrics.js';
 
 type Detail = { snapshotId: string; employee: string; manifest: Manifest; committedAt: string; events: ActivityEvent[]; activity: ActivitySummary;
   unrecognizedLines: number; partialLine: boolean; nextOffset: number | null; total: number; captureHealth: Coverage; provenance: Provenance;
@@ -34,8 +36,14 @@ function App() {
   const [name, setName] = useState('');
   const [employeeId, setEmployeeId] = useState('');
   const [canManageIdentities, setCanManageIdentities] = useState(false);
-  const hashView = () => location.hash.startsWith('#daily?') ? 'daily' as const : location.hash.startsWith('#work?') ? 'work' as const : 'archive' as const;
-  const [view, setView] = useState<'archive' | 'identities' | 'delivery' | 'daily' | 'analysis' | 'work' | 'coverage' | 'server'>(hashView);
+  const hashView = () => location.hash.startsWith('#metrics') ? 'metrics' as const : location.hash.startsWith('#daily?') ? 'daily' as const : location.hash.startsWith('#work?') ? 'work' as const : 'archive' as const;
+  const [view, setView] = useState<'archive' | 'identities' | 'delivery' | 'daily' | 'analysis' | 'work' | 'coverage' | 'server' | 'metrics'>(hashView);
+  const hashReading = (): 'conversation' | 'timeline' | 'raw' => {
+    const selected = new URLSearchParams(location.hash.split('?')[1]).get('view');
+    return selected === 'raw' ? 'raw' : selected === 'timeline' || selectedEvidence(location.hash) ? 'timeline' : 'conversation';
+  };
+  const [reading, setReading] = useState(hashReading);
+  const [conversationHash, setConversationHash] = useState(location.hash);
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
   const [sessionCursor, setSessionCursor] = useState<string | null>(null);
   const [nextSessionCursor, setNextSessionCursor] = useState<string | null>(null);
@@ -60,7 +68,7 @@ function App() {
   }
 
   useEffect(() => {
-    const change = () => { const next = hashView(); setView(next); setSelected(next === 'archive' ? location.hash.slice(1).split('?')[0]! : ''); setEvidenceLocation(next === 'archive' ? selectedEvidence(location.hash) : null); setOffset(0); };
+    const change = () => { const next = hashView(); setView(next); setSelected(next === 'archive' ? location.hash.slice(1).split('?')[0]! : ''); setEvidenceLocation(next === 'archive' ? selectedEvidence(location.hash) : null); setReading(hashReading()); setConversationHash(location.hash); setOffset(0); };
     window.addEventListener('hashchange', change);
     return () => window.removeEventListener('hashchange', change);
   }, []);
@@ -97,12 +105,12 @@ function App() {
     setExportError(''); setExportStatus('');
     if (!token || !selected) return;
     const abort = new AbortController(); setDetailLoading(true);
-    request(`/api/snapshots/${encodeURIComponent(selected)}?offset=${offset}${evidenceLocation ? '&summary=true' : ''}`, token, abort.signal)
+    request(`/api/snapshots/${encodeURIComponent(selected)}?offset=${offset}${evidenceLocation || reading !== 'timeline' ? '&summary=true' : ''}`, token, abort.signal)
       .then(response => response.json()).then(data => { if (!abort.signal.aborted) setDetail(data); })
       .catch(failure => { if (!abort.signal.aborted) setDetailError(failure.message); })
       .finally(() => { if (!abort.signal.aborted) setDetailLoading(false); });
     return () => abort.abort();
-  }, [token, selected, offset, evidenceLocation, refresh, detailRetry]);
+  }, [token, selected, offset, evidenceLocation, reading, refresh, detailRetry]);
   async function download(kind: 'raw' | 'readable' | 'recovery') {
     if (!detail) return;
     setExporting(true); setExportError(''); setExportStatus('');
@@ -126,6 +134,7 @@ function App() {
         <p id="credential-hint" className="muted">使用管理员签发的读取凭据。凭据仅在当前页面内保留。</p>
         <button className="primary" disabled={busy || !credential}>{busy ? '正在验证…' : '进入存档'}</button></form></section> : <>
       <nav className="view-nav" aria-label="平台页面"><button aria-current={view === 'archive' ? 'page' : undefined} onClick={() => setView('archive')}>会话存档</button>
+        <button aria-current={view === 'metrics' ? 'page' : undefined} onClick={() => { location.hash = 'metrics'; setView('metrics'); }}>用量指标</button>
         <button aria-current={view === 'coverage' ? 'page' : undefined} onClick={() => setView('coverage')}>团队覆盖</button>
         <button aria-current={view === 'delivery' ? 'page' : undefined} onClick={() => setView('delivery')}>设备同步</button>
         <button aria-current={view === 'analysis' ? 'page' : undefined} onClick={() => setView('analysis')}>分析队列</button>
@@ -133,7 +142,7 @@ function App() {
         <button aria-current={view === 'daily' ? 'page' : undefined} onClick={() => setView('daily')}>日工作</button>
         <button aria-current={view === 'work' ? 'page' : undefined} onClick={() => setView('work')}>周工作与项目</button>
         {canManageIdentities && <button aria-current={view === 'identities' ? 'page' : undefined} onClick={() => setView('identities')}>接入与设备</button>}</nav>
-      {view === 'server' ? <ServerOperations request={(path,signal)=>request(path,token,signal)} /> : view === 'coverage' ? <TeamCoverage currentEmployeeId={employeeId} request={(path, signal) => request(path, token, signal)} onEvidence={() => setView('archive')} /> : view === 'analysis' ? <AnalysisOperations request={(path, signal) => request(path, token, signal)} /> : view === 'work' ? <WorkViews currentEmployeeId={employeeId} request={(path, signal, method) => request(path, token, signal, method)} onEvidence={() => setView('archive')} /> : view === 'daily' ? <DailyReports currentEmployeeId={employeeId} request={(path, signal, method,body) => request(path, token, signal, method,body)} onEvidence={() => setView('archive')} /> : view === 'delivery' ? <DeviceDelivery token={token} onUnauthorized={() => logout('身份已停用或凭据失效，请重新登录。')} /> : view === 'identities' && canManageIdentities ? <IdentityManagement token={token} currentEmployeeId={employeeId}
+      {view === 'metrics' ? <UsageMetrics key={token} request={(path,signal,method,body)=>request(path,token,signal,method,body)} /> : view === 'server' ? <ServerOperations request={(path,signal)=>request(path,token,signal)} /> : view === 'coverage' ? <TeamCoverage currentEmployeeId={employeeId} request={(path, signal) => request(path, token, signal)} onEvidence={() => setView('archive')} /> : view === 'analysis' ? <AnalysisOperations request={(path, signal) => request(path, token, signal)} /> : view === 'work' ? <WorkViews currentEmployeeId={employeeId} request={(path, signal, method) => request(path, token, signal, method)} onEvidence={() => setView('archive')} /> : view === 'daily' ? <DailyReports currentEmployeeId={employeeId} request={(path, signal, method,body) => request(path, token, signal, method,body)} onEvidence={() => setView('archive')} /> : view === 'delivery' ? <DeviceDelivery token={token} onUnauthorized={() => logout('身份已停用或凭据失效，请重新登录。')} /> : view === 'identities' && canManageIdentities ? <IdentityManagement token={token} currentEmployeeId={employeeId}
         onUnauthorized={() => logout('身份已停用或凭据失效，请重新登录。')} /> : <>
       <div className="heading"><div><p className="eyebrow">共享存档 · 北京时间</p><h1>会话原件</h1></div><button disabled={busy} onClick={() => { setSessionCursor(null); setRefresh(value => value + 1); }}>{busy ? '正在刷新…' : '刷新存档'}</button></div>
       <p className="notice">当前保存单副本。原件已提交与原生恢复已验证是不同状态；Desktop 原生能力待验证。</p>
@@ -152,7 +161,11 @@ function App() {
           <div className="detail-heading"><div><p className="eyebrow">{detail.employee} · {sourceLabel(detail.manifest.source)}</p><h2>{detail.manifest.project || '未归类项目'}</h2></div><button disabled={exporting} onClick={() => download('raw')}>下载原件</button></div>
           <dl><div><dt>提交时间</dt><dd>{date(detail.committedAt)}</dd></div><div><dt>来源环境</dt><dd>{detail.manifest.sourceVersion} / {detail.manifest.sourceOs}</dd></div>
             <div><dt>存档范围</dt><dd>{detail.manifest.byteLength.toLocaleString()} 字节原件 · {detail.manifest.capture?.materials.length ?? 0} 项关联材料</dd></div><div><dt>SHA-256</dt><dd className="hash">{detail.manifest.hash}</dd></div></dl>
-          {evidenceLocation && <EvidenceReader key={`${selected}:${JSON.stringify(evidenceLocation)}:${refresh}`} snapshotId={selected} location={evidenceLocation}
+          <nav className="view-nav reading-nav" aria-label="会话阅读方式">{([['conversation', '对话视图'], ['timeline', '时间线'], ['raw', '原件 JSONL']] as const).map(([mode,label]) =>
+            <a key={mode} href={`#${selected}?view=${mode}`} aria-current={reading === mode ? 'page' : undefined}>{label}</a>)}</nav>
+          {reading === 'conversation' && <ConversationReader key={`${selected}:${conversationHash}:${refresh}`} snapshotId={selected} initial={conversationSelection(conversationHash)} request={(path,signal)=>request(path,token,signal)} />}
+          {reading === 'raw' && <EvidenceReader key={`raw:${selected}:${refresh}`} snapshotId={selected} location={{kind:'raw',line:1,textOffset:0}} request={(path,signal)=>request(path,token,signal)} />}
+          {reading === 'timeline' && evidenceLocation && <EvidenceReader key={`${selected}:${JSON.stringify(evidenceLocation)}:${refresh}`} snapshotId={selected} location={evidenceLocation}
             request={(path, signal) => request(path, token, signal)} />}
           {(detail.unrecognizedLines > 0 || detail.partialLine) && <p className="notice">{detail.unrecognizedLines} 行未解析{detail.partialLine ? '，另有未闭合的末行' : ''}。全部字节仍保存在原件中。</p>}
           <HistoryMaterials key={detail.snapshotId} snapshotId={detail.snapshotId} capture={detail.manifest.capture} request={(path, signal) => request(path, token, signal)} />
@@ -196,11 +209,11 @@ function App() {
             {(exporting || exportStatus) && <p role="status">{exporting ? '正在准备下载…' : exportStatus}</p>}
             {exportError && <p className="error" role="alert">{exportError} 可重新点击导出重试。</p>}
           </section>
-          <p className="muted">共 {detail.total} 条已解析记录。消息只代表会话中记录的内容。</p>
+          {reading === 'timeline' && <><p className="muted">共 {detail.total} 条已解析记录。消息只代表会话中记录的内容。</p>
           {detail.events.map(event => <section className="message" key={`${event.line}:${event.block ?? 0}`}><div className="message-meta"><strong>{event.role}</strong><span>{contextLabel[event.context]}</span><span>原件第 {event.line} 行 · 来源时间：{event.timestamp ? date(event.timestamp) : '未知'}</span></div>
             {event.origin && <p className="muted small">原始归属：{event.origin.employee} · {event.origin.project || '未归类项目'} · 设备 {event.origin.deviceId} · <a href={event.origin.webPath ?? `#${event.origin.snapshotId}`}>原始{event.origin.materialId ? '材料' : '快照'}第 {event.origin.line} 行</a></p>}<QualificationProof origin={event.origin} /><pre>{event.text}</pre></section>)}
           {!evidenceLocation && detail.events.length === 0 && <p>当前原件没有可解析的消息；可下载原件核查。</p>}
-          {!evidenceLocation && <div className="pagination"><button disabled={offset === 0} onClick={() => setOffset(value => Math.max(0, value - 100))}>上一页</button><button disabled={detail.nextOffset === null} onClick={() => setOffset(detail.nextOffset ?? 0)}>下一页</button></div>}
+          {!evidenceLocation && <div className="pagination"><button disabled={offset === 0} onClick={() => setOffset(value => Math.max(0, value - 100))}>上一页</button><button disabled={detail.nextOffset === null} onClick={() => setOffset(detail.nextOffset ?? 0)}>下一页</button></div>}</>}
         </>}</article></div></>}</>}
       {error && <p className="error" role="alert">{error}</p>}</main><footer>Skynet · 完整性以实际收到的材料为准</footer></>;
 }

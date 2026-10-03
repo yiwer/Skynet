@@ -49,7 +49,7 @@ export function ArchiveSearch({ request }: Props) {
       <ol>{hits.map(hit => <li key={hit.id}><a className="search-hit" href={hit.webPath}><strong>{hit.employee} · {hit.project || '未归类项目'}</strong>
         <span>{sourceLabel(hit.source)} · {hit.sourceDate ?? '来源日期未知'} · {hit.revision === null ? '修订未知' : `修订 ${hit.revision}`}</span>
         <span>{hit.location?.kind === 'material' ? '关联材料' : hit.location?.kind === 'raw' ? `原件第 ${hit.line} 行（原始格式）` : hit.line ? `原件第 ${hit.line} 行${hit.block === null ? '' : ` / block ${hit.block}`}` : '空原件'} · 打开首个命中</span>
-        <q>{hit.excerpt}</q></a></li>)}</ol>
+        <q>{hit.excerpt}</q></a>{hit.conversationPath && <a href={hit.conversationPath}>在对话中打开命中消息</a>}</li>)}</ol>
       {page.nextCursor && <button disabled={busy} onClick={() => setQuery({ ...query, cursor: page.nextCursor! })}>继续搜索更多快照</button>}
       <p className="muted small">每份快照列出首个命中。本次搜索保留 15 分钟；上传新版本后重新搜索可查看。完整材料仍可在详情导出。</p>
     </div>}

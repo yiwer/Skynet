@@ -1,0 +1,8 @@
+# Apply after compose.production.yml only via deploy-proxy. The existing host
+# proxy owns TLS and forwards to this loopback port; Skynet never manages it.
+services:
+  app:
+    ports:
+      - "127.0.0.1:${SKYNET_HTTP_PORT:?persist the loopback HTTP port}:3000"
+  https:
+    profiles: [standalone-proxy]

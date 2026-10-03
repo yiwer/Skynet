@@ -1,0 +1,113 @@
+# Used only by ubuntu-release.sh. Persistent volumes are created and ownership
+# checked by that script, never silently adopted from another deployment.
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: 10m
+    max-file: "3"
+
+services:
+  db:
+    image: ${SKYNET_POSTGRES_IMAGE:?persist the PostgreSQL image digest}
+    environment:
+      POSTGRES_DB: skynet
+      POSTGRES_USER: skynet
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?use the existing private hex password}
+    volumes:
+      - database:/var/lib/postgresql/data
+    labels:
+      com.skynet.deployment-root: ${SKYNET_ROOT:?set the dedicated deployment root}
+    healthcheck:
+      test: [CMD-SHELL, "pg_isready -h 127.0.0.1 -U skynet -d skynet"]
+      interval: 5s
+      timeout: 3s
+      retries: 24
+    restart: unless-stopped
+    logging: *logging
+  app:
+    image: ${SKYNET_APP_IMAGE:?select a built release image}
+    environment:
+      DATABASE_URL: postgresql://skynet:${POSTGRES_PASSWORD:?preserve the private password}@db:5432/skynet
+      SKYNET_PUBLIC_ORIGIN: https://${SKYNET_HOST:?set the HTTPS host}
+    volumes:
+      - originals:/data/raw
+    labels:
+      com.skynet.deployment-root: ${SKYNET_ROOT:?set the dedicated deployment root}
+    healthcheck:
+      test: [CMD, node, -e, "fetch('http://127.0.0.1:3000/health').then(async r=>{if(!r.ok||(await r.json()).status!=='ok')process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 5s
+      timeout: 5s
+      start_period: 30s
+      retries: 24
+    depends_on:
+      db:
+        condition: service_healthy
+    read_only: true
+    tmpfs: [/tmp:size=64m,mode=1777]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    restart: unless-stopped
+    logging: *logging
+  https:
+    image: ${SKYNET_CADDY_IMAGE:?persist the Caddy image digest}
+    environment:
+      SKYNET_HOST: ${SKYNET_HOST:?set the HTTPS host}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ${SKYNET_RELEASE_PATH:?select the immutable source directory}/deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - tls-data:/data
+      - tls-config:/config
+    labels:
+      com.skynet.deployment-root: ${SKYNET_ROOT:?set the dedicated deployment root}
+    depends_on:
+      app:
+        condition: service_healthy
+    read_only: true
+    tmpfs: [/tmp:size=16m,mode=1777]
+    cap_drop: [ALL]
+    cap_add: [NET_BIND_SERVICE]
+    security_opt: [no-new-privileges:true]
+    restart: unless-stopped
+    logging: *logging
+  backup:
+    profiles: [backup]
+    image: ${SKYNET_BACKUP_IMAGE:?select the release backup helper}
+    environment:
+      DATABASE_URL: postgresql://skynet:${POSTGRES_PASSWORD:?preserve the private password}@db:5432/skynet
+    volumes:
+      - originals:/data/raw:ro
+      - backups:/backups
+    labels:
+      com.skynet.deployment-root: ${SKYNET_ROOT:?set the dedicated deployment root}
+    read_only: true
+    tmpfs: [/tmp:size=64m,mode=1777]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    pids_limit: 128
+    mem_limit: 512m
+    cpus: 1
+    logging: *logging
+
+networks:
+  default:
+    labels:
+      com.skynet.deployment-root: ${SKYNET_ROOT:?set the dedicated deployment root}
+
+volumes:
+  database:
+    external: true
+    name: ${SKYNET_PROJECT:?set the dedicated Compose project}-database
+  originals:
+    external: true
+    name: ${SKYNET_PROJECT:?set the dedicated Compose project}-originals
+  tls-data:
+    external: true
+    name: ${SKYNET_PROJECT:?set the dedicated Compose project}-tls-data
+  tls-config:
+    external: true
+    name: ${SKYNET_PROJECT:?set the dedicated Compose project}-tls-config
+  backups:
+    external: true
+    name: ${SKYNET_PROJECT:?set the dedicated Compose project}-backups
