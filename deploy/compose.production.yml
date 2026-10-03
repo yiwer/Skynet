@@ -43,7 +43,7 @@ services:
       db:
         condition: service_healthy
     read_only: true
-    tmpfs: [/tmp:size=64m,mode=1777]
+    tmpfs: ["/tmp:size=64m,mode=1777"]
     cap_drop: [ALL]
     security_opt: [no-new-privileges:true]
     restart: unless-stopped
@@ -65,7 +65,7 @@ services:
       app:
         condition: service_healthy
     read_only: true
-    tmpfs: [/tmp:size=16m,mode=1777]
+    tmpfs: ["/tmp:size=16m,mode=1777"]
     cap_drop: [ALL]
     cap_add: [NET_BIND_SERVICE]
     security_opt: [no-new-privileges:true]
@@ -82,7 +82,7 @@ services:
     labels:
       com.skynet.deployment-root: ${SKYNET_ROOT:?set the dedicated deployment root}
     read_only: true
-    tmpfs: [/tmp:size=64m,mode=1777]
+    tmpfs: ["/tmp:size=64m,mode=1777"]
     cap_drop: [ALL]
     security_opt: [no-new-privileges:true]
     pids_limit: 128
