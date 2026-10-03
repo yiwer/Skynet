@@ -1,0 +1,28 @@
+# Explicit opt-in overlay: docker compose -f compose.yml -f compose.analysis.yml up --build
+# config.json and credential are private operator-owned files outside the repository.
+services:
+  analysis:
+    build:
+      context: ..
+      dockerfile: Dockerfile.analysis
+    environment:
+      DATABASE_URL: postgresql://skynet:${POSTGRES_PASSWORD:?set a generated hex password}@db:5432/skynet
+      SKYNET_ANALYSIS_CONFIG: /run/analysis/config.json
+    volumes:
+      - ${SKYNET_ANALYSIS_CONFIG_FILE:?set dedicated configuration path}:/run/analysis/config.json:ro
+      - ${SKYNET_ANALYSIS_CREDENTIAL_FILE:?set dedicated PAYG credential path}:/run/analysis/credential:ro
+      - analysis-work:/data/analysis
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    pids_limit: 64
+    mem_limit: 1g
+    cpus: 1
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+volumes:
+  analysis-work:

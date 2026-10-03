@@ -1,0 +1,236 @@
+/* Hallmark · pre-emit critique: P5 H4 E4 S5 R4 V5 */
+/* Hallmark · genre: modern-minimal · macrostructure: Workbench (app shell) · nav: rail + N13 inline ⌘K pill · footer: none (app)
+ * theme: studied-DNA (source: https://calendly.com/) · paper oklch(98.8% 0.004 91.4) magnolia · ground oklch(96.4% 0.007 88.6) linen
+ * ink oklch(21.6% 0.052 254.5) midnight · accent oklch(74.7% 0.134 252.4) cornflower (focus/selection only, ≤3% footprint)
+ * display: geometric grotesk role (source: Calendly Sans → Geist 600) · narrative: editorial serif role (source: Wulkan Text → Noto Serif SC 600)
+ * body: Geist · outlier: Geist Mono — raw evidence only
+ * studied: yes · DNA-source: url · rhythm: screenshot pass via browser pane
+ * PROTOTYPE — throwaway. Validated decisions get re-implemented in the real React/Vite app.
+ */
+
+:root {
+  color-scheme: light;
+
+  /* ---- surfaces (studied: linen ground → magnolia panel → white objects) ---- */
+  --color-ground:      oklch(96.4% 0.007 88.6);
+  --color-paper:       oklch(98.8% 0.004 91.4);
+  --color-card:        oklch(99.8% 0.002 91);
+  --color-paper-2:     oklch(95.4% 0.008 88);
+  --color-rule-soft:   oklch(92.4% 0.005 258);
+  --color-rule:        oklch(89.3% 0.007 248);
+  --color-rule-2:      oklch(84.2% 0.011 248);
+
+  /* ---- ink ---- */
+  --color-ink:         oklch(21.6% 0.052 254.5);
+  --color-ink-2:       oklch(34.5% 0.097 254.7);
+  --color-muted:       oklch(52.7% 0.023 239);
+  --color-faint:       oklch(69.9% 0.021 241);
+  --color-hover:       color-mix(in oklch, var(--color-ink) 5%, transparent);
+  --color-press:       color-mix(in oklch, var(--color-ink) 10%, transparent);
+  --color-scrim:       color-mix(in oklch, var(--color-ink) 32%, transparent);
+
+  /* ---- accent (cornflower family) ---- */
+  --color-accent:        oklch(74.7% 0.134 252.4);
+  --color-accent-strong: oklch(48.2% 0.133 254.6);
+  --color-accent-ink:    oklch(39.2% 0.113 254.9);
+  --color-accent-soft:   oklch(92.4% 0.036 252.1);
+  --color-accent-wash:   oklch(96.7% 0.016 253.9);
+  --color-focus:         oklch(55% 0.15 254);
+  --color-on-accent:     oklch(21.6% 0.052 254.5); /* text/icons on accent or tone-dot fills — midnight in both themes */
+
+  /* ---- actions (studied: primary action = midnight, not the accent) ---- */
+  --color-action:       var(--color-ink);
+  --color-action-ink:   var(--color-paper);
+  --color-action-hover: oklch(31% 0.08 254.6);
+
+  /* ---- semantic states (separate from the accent) ---- */
+  --color-ok:        oklch(38.5% 0.069 120);
+  --color-ok-soft:   oklch(96.8% 0.035 117.6);
+  --color-ok-dot:    oklch(72% 0.15 128);
+  --color-warn:      oklch(34.5% 0.07 90.6);
+  --color-warn-soft: oklch(95.8% 0.06 96);
+  --color-warn-dot:  oklch(80% 0.16 88);
+  --color-crit:      oklch(40.6% 0.139 32.1);
+  --color-crit-soft: oklch(94.6% 0.028 28.7);
+  --color-crit-dot:  oklch(50.2% 0.178 31.7);
+
+  /* ---- project tones (studied pastel ramp: rain · honeydew · lavender · teal · orange) ---- */
+  --tone-blue-soft:     oklch(94.4% 0.03 252);
+  --tone-blue-ink:      oklch(39.2% 0.113 255);
+  --tone-blue-dot:      oklch(65.7% 0.152 254);
+  --tone-lime-soft:     oklch(96.3% 0.045 118);
+  --tone-lime-ink:      oklch(38.5% 0.069 120);
+  --tone-lime-dot:      oklch(78% 0.16 121);
+  --tone-lavender-soft: oklch(95.2% 0.03 296);
+  --tone-lavender-ink:  oklch(45% 0.14 294);
+  --tone-lavender-dot:  oklch(72% 0.13 296);
+  --tone-teal-soft:     oklch(95.4% 0.032 190);
+  --tone-teal-ink:      oklch(40% 0.07 192);
+  --tone-teal-dot:      oklch(76% 0.115 190);
+  --tone-orange-soft:   oklch(95.6% 0.035 70);
+  --tone-orange-ink:    oklch(43% 0.1 58);
+  --tone-orange-dot:    oklch(75.9% 0.165 63.4);
+  --tone-slate-soft:    oklch(94.6% 0.006 250);
+  --tone-slate-ink:     oklch(43.7% 0.02 245);
+  --tone-slate-dot:     oklch(69.9% 0.021 241);
+
+  /* ---- data viz (validated: validate_palette.js · light adjacent + all-pairs(3) PASS on #fffefd) ---- */
+  --viz-1: oklch(63.5% 0.156 253.9);   /* Claude Code CLI · emphasis */
+  --viz-2: oklch(66.5% 0.167 47.4);    /* Codex CLI */
+  --viz-3: oklch(63.5% 0.110 181.5);   /* Codex Desktop */
+  --viz-4: oklch(56.3% 0.177 291.6);
+  --viz-deemph: oklch(80% 0.012 250);  /* context marks */
+  --viz-wait: oklch(84% 0.03 250);     /* 等待用户（中性） */
+  --viz-grid: var(--color-rule-soft);
+  --viz-axis: var(--color-rule-2);
+  --viz-surface: var(--color-card);
+  --heat-1: oklch(96.7% 0.016 253.9); --heat-2: oklch(92.4% 0.036 252.1); --heat-3: oklch(86.4% 0.066 251.4); --heat-4: oklch(78.2% 0.104 250.1);
+  --heat-5: oklch(69.4% 0.136 252.6); --heat-6: oklch(62.5% 0.148 254.7); --heat-7: oklch(51.3% 0.146 255.8); --heat-8: oklch(42.6% 0.128 256.6);
+  --hink-1: oklch(21.6% 0.052 254.5); --hink-2: oklch(21.6% 0.052 254.5); --hink-3: oklch(21.6% 0.052 254.5); --hink-4: oklch(21.6% 0.052 254.5);
+  --hink-5: oklch(21.6% 0.052 254.5); --hink-6: oklch(21.6% 0.052 254.5); --hink-7: oklch(98.8% 0.004 91.4); --hink-8: oklch(98.8% 0.004 91.4);
+
+  /* ---- type ---- */
+  --font-sans:  "Geist", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei UI", "Microsoft YaHei", "Noto Sans SC", system-ui, sans-serif;
+  --font-serif: "Noto Serif SC", "Source Han Serif SC", "Songti SC", "STSong", "SimSun", serif;
+  --font-mono:  "Geist Mono", "SFMono-Regular", Menlo, Consolas, "Liberation Mono", monospace;
+
+  --text-xs:   0.75rem;    /* 12 — labels, table heads */
+  --text-sm:   0.875rem;   /* 14 — UI */
+  --text-base: 1rem;       /* 16 — reading */
+  --text-md:   1.25rem;    /* 20 — narrative heads */
+  --text-lg:   1.5625rem;  /* 25 — lead / mobile title */
+  --text-xl:   clamp(1.5625rem, 1.2vw + 1.1rem, 1.953rem); /* 25→31 — page title */
+
+  /* ---- space (4pt) ---- */
+  --space-3xs: 0.125rem;
+  --space-2xs: 0.25rem;
+  --space-xs:  0.5rem;
+  --space-sm:  0.75rem;
+  --space-md:  1rem;
+  --space-lg:  1.5rem;
+  --space-xl:  2.5rem;
+  --space-2xl: 4rem;
+  --space-3xl: 6rem;
+
+  /* ---- radius (studied: btn 10 · control 8 · object 16–20 · framed panel 24) ---- */
+  --radius-xs:    6px;
+  --radius-sm:    8px;
+  --radius-btn:   10px;
+  --radius-md:    16px;
+  --radius-lg:    20px;
+  --radius-panel: 24px;
+  --radius-pill:  999px;
+
+  /* ---- depth: one whisper shadow, only on floating layers ---- */
+  --shadow-float: 0 12px 32px color-mix(in oklch, var(--color-muted) 18%, transparent);
+  --rule-hair: 1px solid var(--color-rule);
+
+  /* ---- motion ---- */
+  --ease-out:    cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-in:     cubic-bezier(0.7, 0, 0.84, 0);
+  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+  --dur-micro: 120ms;
+  --dur-short: 200ms;
+  --dur-long:  320ms;
+
+  /* ---- layers ---- */
+  --z-base: 1;
+  --z-raised: 10;
+  --z-dropdown: 100;
+  --z-sticky: 200;
+  --z-modal: 400;
+  --z-toast: 500;
+  --z-tooltip: 600;
+}
+
+/* Dark — studied dark ramp: midnight ground → blue-800 panel → navy objects, magnolia ink, magnolia primary action */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --color-ground:      oklch(19.5% 0.048 254.5);
+    --color-paper:       oklch(23.5% 0.055 255);
+    --color-card:        oklch(27.5% 0.062 255);
+    --color-paper-2:     oklch(26.5% 0.06 255);
+    --color-rule-soft:   oklch(30% 0.055 255);
+    --color-rule:        oklch(35% 0.055 255);
+    --color-rule-2:      oklch(42% 0.05 254);
+    --color-ink:         oklch(97.5% 0.005 91);
+    --color-ink-2:       oklch(88% 0.03 252);
+    --color-muted:       oklch(77% 0.03 250);
+    --color-faint:       oklch(60% 0.04 250);
+    --color-accent:        oklch(74.7% 0.134 252.4);
+    --color-accent-strong: oklch(80% 0.105 250);
+    --color-accent-ink:    oklch(89% 0.055 252);
+    --color-accent-soft:   oklch(35% 0.085 255);
+    --color-accent-wash:   oklch(28% 0.07 255);
+    --color-focus:         oklch(80% 0.105 250);
+    --color-action:       oklch(97.5% 0.005 91);
+    --color-action-ink:   oklch(21.6% 0.052 254.5);
+    --color-action-hover: oklch(90% 0.02 250);
+    --color-ok:        oklch(88% 0.11 121);
+    --color-ok-soft:   oklch(32% 0.05 125);
+    --color-ok-dot:    oklch(78% 0.15 125);
+    --color-warn:      oklch(91% 0.1 94);
+    --color-warn-soft: oklch(34% 0.055 92);
+    --color-warn-dot:  oklch(84% 0.15 90);
+    --color-crit:      oklch(87% 0.07 30);
+    --color-crit-soft: oklch(33% 0.07 30);
+    --color-crit-dot:  oklch(70% 0.15 32);
+    --tone-blue-soft: oklch(32% 0.07 254);     --tone-blue-ink: oklch(88% 0.06 252);     --tone-blue-dot: oklch(72% 0.13 254);
+    --tone-lime-soft: oklch(33% 0.05 121);     --tone-lime-ink: oklch(90% 0.1 120);      --tone-lime-dot: oklch(80% 0.15 121);
+    --tone-lavender-soft: oklch(33% 0.06 296); --tone-lavender-ink: oklch(88% 0.06 296); --tone-lavender-dot: oklch(76% 0.12 296);
+    --tone-teal-soft: oklch(33% 0.045 192);    --tone-teal-ink: oklch(90% 0.06 190);     --tone-teal-dot: oklch(78% 0.11 190);
+    --tone-orange-soft: oklch(34% 0.055 62);   --tone-orange-ink: oklch(90% 0.07 70);    --tone-orange-dot: oklch(76% 0.15 63);
+    --tone-slate-soft: oklch(31% 0.03 250);    --tone-slate-ink: oklch(85% 0.02 250);    --tone-slate-dot: oklch(62% 0.03 250);
+    --shadow-float: 0 12px 32px color-mix(in oklch, oklch(8% 0.03 255) 55%, transparent);
+    --viz-1: oklch(64.2% 0.152 252.9); --viz-2: oklch(66.5% 0.154 48.8); --viz-3: oklch(65.8% 0.114 179.9); --viz-4: oklch(63.0% 0.161 290.2);
+    --viz-deemph: oklch(46% 0.03 252); --viz-wait: oklch(40% 0.04 254);
+    --heat-1: oklch(32.5% 0.080 256.0); --heat-2: oklch(39.1% 0.096 253.9); --heat-3: oklch(46.2% 0.112 253.1); --heat-4: oklch(48% 0.12 253);
+    --heat-5: oklch(61.8% 0.135 253.0); --heat-6: oklch(69.9% 0.123 251.9); --heat-7: oklch(78.5% 0.093 251.9); --heat-8: oklch(87.5% 0.055 251.8);
+    --hink-1: oklch(97.5% 0.005 91); --hink-2: oklch(97.5% 0.005 91); --hink-3: oklch(97.5% 0.005 91); --hink-4: oklch(97.5% 0.005 91); --hink-5: oklch(21.6% 0.052 254.5); --hink-6: oklch(21.6% 0.052 254.5); --hink-7: oklch(21.6% 0.052 254.5); --hink-8: oklch(21.6% 0.052 254.5);
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --color-ground:      oklch(19.5% 0.048 254.5);
+  --color-paper:       oklch(23.5% 0.055 255);
+  --color-card:        oklch(27.5% 0.062 255);
+  --color-paper-2:     oklch(26.5% 0.06 255);
+  --color-rule-soft:   oklch(30% 0.055 255);
+  --color-rule:        oklch(35% 0.055 255);
+  --color-rule-2:      oklch(42% 0.05 254);
+  --color-ink:         oklch(97.5% 0.005 91);
+  --color-ink-2:       oklch(88% 0.03 252);
+  --color-muted:       oklch(77% 0.03 250);
+  --color-faint:       oklch(60% 0.04 250);
+  --color-accent:        oklch(74.7% 0.134 252.4);
+  --color-accent-strong: oklch(80% 0.105 250);
+  --color-accent-ink:    oklch(89% 0.055 252);
+  --color-accent-soft:   oklch(35% 0.085 255);
+  --color-accent-wash:   oklch(28% 0.07 255);
+  --color-focus:         oklch(80% 0.105 250);
+  --color-action:       oklch(97.5% 0.005 91);
+  --color-action-ink:   oklch(21.6% 0.052 254.5);
+  --color-action-hover: oklch(90% 0.02 250);
+  --color-ok:        oklch(88% 0.11 121);
+  --color-ok-soft:   oklch(32% 0.05 125);
+  --color-ok-dot:    oklch(78% 0.15 125);
+  --color-warn:      oklch(91% 0.1 94);
+  --color-warn-soft: oklch(34% 0.055 92);
+  --color-warn-dot:  oklch(84% 0.15 90);
+  --color-crit:      oklch(87% 0.07 30);
+  --color-crit-soft: oklch(33% 0.07 30);
+  --color-crit-dot:  oklch(70% 0.15 32);
+  --tone-blue-soft: oklch(32% 0.07 254);     --tone-blue-ink: oklch(88% 0.06 252);     --tone-blue-dot: oklch(72% 0.13 254);
+  --tone-lime-soft: oklch(33% 0.05 121);     --tone-lime-ink: oklch(90% 0.1 120);      --tone-lime-dot: oklch(80% 0.15 121);
+  --tone-lavender-soft: oklch(33% 0.06 296); --tone-lavender-ink: oklch(88% 0.06 296); --tone-lavender-dot: oklch(76% 0.12 296);
+  --tone-teal-soft: oklch(33% 0.045 192);    --tone-teal-ink: oklch(90% 0.06 190);     --tone-teal-dot: oklch(78% 0.11 190);
+  --tone-orange-soft: oklch(34% 0.055 62);   --tone-orange-ink: oklch(90% 0.07 70);    --tone-orange-dot: oklch(76% 0.15 63);
+  --tone-slate-soft: oklch(31% 0.03 250);    --tone-slate-ink: oklch(85% 0.02 250);    --tone-slate-dot: oklch(62% 0.03 250);
+  --shadow-float: 0 12px 32px color-mix(in oklch, oklch(8% 0.03 255) 55%, transparent);
+  --viz-1: oklch(64.2% 0.152 252.9); --viz-2: oklch(66.5% 0.154 48.8); --viz-3: oklch(65.8% 0.114 179.9); --viz-4: oklch(63.0% 0.161 290.2);
+  --viz-deemph: oklch(46% 0.03 252); --viz-wait: oklch(40% 0.04 254);
+  --heat-1: oklch(32.5% 0.080 256.0); --heat-2: oklch(39.1% 0.096 253.9); --heat-3: oklch(46.2% 0.112 253.1); --heat-4: oklch(48% 0.12 253);
+  --heat-5: oklch(61.8% 0.135 253.0); --heat-6: oklch(69.9% 0.123 251.9); --heat-7: oklch(78.5% 0.093 251.9); --heat-8: oklch(87.5% 0.055 251.8);
+  --hink-1: oklch(97.5% 0.005 91); --hink-2: oklch(97.5% 0.005 91); --hink-3: oklch(97.5% 0.005 91); --hink-4: oklch(97.5% 0.005 91); --hink-5: oklch(21.6% 0.052 254.5); --hink-6: oklch(21.6% 0.052 254.5); --hink-7: oklch(21.6% 0.052 254.5); --hink-8: oklch(21.6% 0.052 254.5);
+}

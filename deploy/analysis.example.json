@@ -1,0 +1,22 @@
+{
+  "mode": "qwen-payg",
+  "executable": "/opt/claude/node_modules/.bin/claude",
+  "runtimeVersion": "2.1.281",
+  "model": "REPLACE_WITH_EXPLICIT_MODEL_ID",
+  "workDirectory": "/data/analysis",
+  "credentialFile": "/run/analysis/credential",
+  "budgetId": "REPLACE_WITH_DEDICATED_BUDGET_ID",
+  "budgetCny": 0,
+  "inputCnyPerMillion": 0,
+  "outputCnyPerMillion": 0,
+  "pricingEvidence": "REPLACE_WITH_VERIFIED_MODEL_CACHE_AND_HIDDEN_TOKEN_PRICE_CEILING_REFERENCE",
+  "pricingVerifiedAt": "2026-09-30T00:00:00.000Z",
+  "inputTokensPerByteUpperBound": 1,
+  "maxInputBytes": 65536,
+  "maxSessionBytes": 1048576,
+  "maxSegments": 4,
+  "maxRequests": 3,
+  "maxOutputTokens": 4096,
+  "maxRequestBytes": 262144,
+  "timeoutSeconds": 90
+}

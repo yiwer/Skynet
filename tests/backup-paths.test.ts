@@ -1,0 +1,33 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { mkdtemp,mkdir,writeFile,symlink,rename,readFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { randomUUID } from 'node:crypto';
+import { digest } from '../apps/server/database.js';
+import { verifyBundle } from '../apps/server/backup-files.js';
+import { backupCommandSchema } from '../packages/contracts/server-backup.js';
+
+test('bounded bundle verification rejects directory-chain aliases, traversal and altered bytes',async()=>{
+  const root=await mkdtemp(join(tmpdir(),'skynet-backup-paths-')),id=randomUUID(),deviceId=randomUUID(),raw=Buffer.from('private exact raw'),dump=Buffer.from('synthetic dump-only verifier fixture');
+  await mkdir(join(root,'objects',deviceId),{recursive:true});await mkdir(join(root,'pages'));
+  await writeFile(join(root,'database.dump'),dump);await writeFile(join(root,'objects',deviceId,digest(raw)),raw);
+  const page=[{deviceId,hash:digest(raw),byteLength:raw.length}],pageBytes=Buffer.from(JSON.stringify(page));await writeFile(join(root,'pages','00000000.json'),pageBytes);
+  const receipt={version:1,id,snapshotAt:new Date().toISOString(),completedAt:new Date().toISOString(),objects:1,bytes:raw.length,dumpHash:digest(dump),dumpBytes:dump.length,postgresMajor:17,schema:'skynet-server-backup-1',nodeVersion:'v24.21.0',pgDumpVersion:'pg_dump (PostgreSQL) 17.11',failureDomain:'same-host',pages:[{index:0,hash:digest(pageBytes),count:1}]};
+  await writeFile(join(root,'complete.json'),JSON.stringify(receipt));await writeFile(join(root,'published.json'),JSON.stringify({version:1,id,dumpHash:receipt.dumpHash}));
+  assert.equal((await verifyBundle(root)).receipt.id,id);
+  await rename(join(root,'pages'),join(root,'actual-pages'));await symlink(join(root,'actual-pages'),join(root,'pages'),process.platform==='win32'?'junction':'dir');
+  await assert.rejects(verifyBundle(root),/unsafe-directory/,'pages ancestor symlink inside the same root still fails');
+  await rename(join(root,'pages'),join(root,'pages-alias'));await rename(join(root,'actual-pages'),join(root,'pages'));
+  await rename(join(root,'objects',deviceId),join(root,'objects','actual-device'));await symlink(join(root,'objects','actual-device'),join(root,'objects',deviceId),process.platform==='win32'?'junction':'dir');
+  await assert.rejects(verifyBundle(root),/unsafe-directory/,'device ancestor symlink inside the same root still fails');
+  await rename(join(root,'objects',deviceId),join(root,'objects','device-alias'));await rename(join(root,'objects','actual-device'),join(root,'objects',deviceId));
+  await writeFile(join(root,'complete.json'),JSON.stringify({...receipt,pages:[{...receipt.pages[0],path:'../outside'}]}));await assert.rejects(verifyBundle(root));
+  await writeFile(join(root,'complete.json'),JSON.stringify(receipt));
+  await writeFile(join(root,'pages','00000000.json'),JSON.stringify([{...page[0],deviceId:'../outside'}]));await assert.rejects(verifyBundle(root));
+  await writeFile(join(root,'pages','00000000.json'),pageBytes);await writeFile(join(root,'objects',deviceId,digest(raw)),Buffer.from('changed'));
+  await assert.rejects(verifyBundle(root),/object-integrity/);
+  await writeFile(join(root,'objects',deviceId,digest(raw)),raw);await writeFile(join(root,'complete.json'),Buffer.from([255]));await assert.rejects(verifyBundle(root),/encoded data/);
+  assert.equal(backupCommandSchema.safeParse({action:'verify',bundleDirectory:root,path:'../outside'}).success,false);
+  assert.deepEqual(await readFile(join(root,'objects',deviceId,digest(raw))),raw);
+});

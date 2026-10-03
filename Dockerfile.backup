@@ -1,0 +1,19 @@
+FROM node:24-bookworm-slim@sha256:0e0ff40c39bc087845bfb27465a0df4ea419520094bc35842ff83dd8cbe6f9b6 AS build
+WORKDIR /app
+COPY package.json package-lock.json ./
+RUN npm ci
+COPY tsconfig.json vite.config.ts ./
+COPY packages ./packages
+COPY apps ./apps
+RUN npm run build && npm prune --omit=dev
+
+FROM postgres:17.11-bookworm@sha256:639ab7ceb90e13123085b741fb31ef493fba25463002f6da665352e7b534b652
+COPY --from=build /usr/local/bin/node /usr/local/bin/node
+WORKDIR /app
+COPY --from=build --chown=1000:1000 /app/package.json ./
+COPY --from=build --chown=1000:1000 /app/node_modules ./node_modules
+COPY --from=build --chown=1000:1000 /app/dist ./dist
+RUN node --version && pg_dump --version && pg_restore --version && chmod 0755 /app \
+    && mkdir -p /data/raw /backups && chown -R 1000:1000 /data /backups && chmod 0700 /data/raw /backups
+USER 1000:1000
+ENTRYPOINT ["node", "dist/apps/server/backup-cli.js"]

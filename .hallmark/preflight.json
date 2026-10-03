@@ -1,0 +1,9 @@
+{
+  "date": "2026-09-24",
+  "summary": "No pre-flight signals — docs-only repository (no package.json, no stylesheets, no tokens, no design.md).",
+  "framework": "none yet (PRD v1.0 plans React/Vite for the Web app)",
+  "fonts": "none",
+  "palette": "none",
+  "motion": "none (motion-cut)",
+  "spacing": "none"
+}
