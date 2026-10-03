@@ -15,7 +15,7 @@ import type { WorkStatisticsService } from './work-statistics.js';
 import type { WorkViewService } from './work-views.js';
 import { workViewQuery } from '../../packages/contracts/work-views.js';
 import type { ServerOperationsService } from './server-operations.js';
-import { conversationInputSchema } from '../../packages/contracts/conversation.js';
+import { conversationInputSchema, conversationTraceInputSchema } from '../../packages/contracts/conversation.js';
 import { metricsQuerySchema } from '../../packages/contracts/metrics.js';
 import type { conversationQuery } from './conversation.js';
 import type { metricsService } from './metrics.js';
@@ -38,9 +38,12 @@ export async function registerMcp(app: FastifyInstance, db: Database, archive: A
         return { isError: true, content: [{ type: 'text' as const, text: error instanceof HttpError ? error.message : '查询暂时不可用，请重试；上传不受影响' }] };
       }
     }
-    mcp.registerTool('read_conversation', { description: '按原件顺序分页读取对话，默认隐藏工具。固定快照和解析版本，长消息沿 nextCursor 继续。anchor 使用原件 line/block/textOffset；工具结果存在不表示助手结论已核验。',
+    mcp.registerTool('read_conversation', { description: '按原件顺序分页读取对话，默认隐藏工具及系统、开发者与纯环境上下文；includeTools / includeContext 可分别展开。固定快照和解析版本，长消息沿 nextCursor 继续。anchor 使用原件 line/block/textOffset 并展开该记录；工具结果存在不表示助手结论已核验。',
       annotations, inputSchema: conversationInputSchema.safeExtend({ snapshotId }) },
       input => result(() => { const { snapshotId: id, ...query } = input; return conversation.page(id, query); }));
+    mcp.registerTool('read_conversation_trace', { description: '分页读取原件中记录的 Trace 标识、时间与执行状态。仅精确标识关联，不包含或重建工具正文。turnId 可限定记录的轮次。',
+      annotations, inputSchema: conversationTraceInputSchema.extend({ snapshotId }) },
+      input => result(() => { const { snapshotId: id, ...query } = input; return conversation.trace(id, query); }));
     mcp.registerTool('get_metric_catalog', { description: '读取 Web、MCP、导出共用的确定性指标定义、来源和未知值口径。',
       annotations, inputSchema: {} }, () => result(async () => metrics.readMetricCatalog()));
     mcp.registerTool('get_report_summary', { description: '读取来源日期归期、去重且版本化的基础用量。Token 未知单列；会话可下钻原件。后续页传入同一 version 和 nextOffset，不混用新版本。',

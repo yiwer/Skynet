@@ -121,26 +121,39 @@ test('V2 public originals → conversation and metrics Web → real HTTPS OAuth 
     assert.equal(new URL(page.url()).hash, `#${snapshotId}`);
     assert.equal(defaultPages[0]!.messages.find(message => message.line === 2)!.toolEvidence, 'none-observed');
     assert.equal(defaultPages[0]!.status.verification, 'not-assessed');
-    await expect(conversation).toContainText('1 次工具调用、2 条工具记录（已隐藏）');
+    await expect(conversation.getByRole('button', { name: '显示 1 次工具调用、2 条工具记录', exact: true })).toBeVisible();
     assert.deepEqual([defaultPages[0]!.trailingHiddenToolCalls, defaultPages[0]!.trailingHiddenToolEvents], [1, 1]);
     await expect(conversation.getByRole('button', { name: '显示 1 次工具调用', exact: true })).toBeVisible();
     assert.equal(await conversation.locator('pre').filter({ hasText: injection }).count(), 0);
     await conversation.getByLabel('显示工具调用与结果').check();
-    await expect(conversation).toContainText(injection);
-    assert.equal(await page.evaluate(() => Reflect.get(window, 'skynetV2Injected')), undefined);
     const toolMessage = conversation.locator('.conversation-message').filter({ hasText: '工具实际返回：测试尚未执行' });
-    await toolMessage.locator('summary').click();
+    await expect(toolMessage.locator('.conversation-tool-card')).not.toHaveAttribute('open');
+    await toolMessage.locator('.conversation-tool-card > summary').click();
+    await expect(toolMessage.locator('pre')).toBeVisible();
+    const expectedToolText = `read-1\n工具实际返回：测试尚未执行\n${injection}`;
+    await expect(toolMessage.locator('pre')).toHaveText(expectedToolText);
+    assert.equal(await toolMessage.locator('pre').textContent(), expectedToolText);
+    assert.equal(await page.evaluate(() => Reflect.get(window, 'skynetV2Injected')), undefined);
+    await toolMessage.locator('.conversation-evidence > summary').click();
     await toolMessage.getByRole('link', { name: '此消息链接', exact: true }).click();
     await expect(conversation.locator('.conversation-focused')).toContainText(injection);
+    await expect(conversation.locator('.conversation-focused .conversation-tool-card pre')).toBeVisible();
     await expect(conversation.getByLabel('显示工具调用与结果')).toBeChecked();
     await conversation.getByLabel('显示工具调用与结果').uncheck();
     await expect(conversation.locator('.conversation-message pre')).toHaveText(defaultPages[0]!.messages.map(message => message.text));
     await expect(conversation.getByLabel('显示工具调用与结果')).not.toBeChecked();
+    let segmentContinuations = 0;
     for (const [index, expectedPage] of defaultPages.entries()) {
       await expect(conversation.locator('.conversation-message pre')).toHaveText(expectedPage.messages.map(message => message.text));
       assert.deepEqual(await conversation.locator('.conversation-message pre').allTextContents(), expectedPage.messages.map(message => message.text));
-      if (index + 1 < defaultPages.length) await conversation.getByRole('button', { name: '继续阅读对话', exact: true }).click();
+      if (index + 1 < defaultPages.length) {
+        const last = expectedPage.messages.at(-1)!;
+        const fragmented = last.textOffset + last.text.length < last.textLength;
+        if (fragmented) segmentContinuations++;
+        await conversation.getByRole('button', { name: fragmented ? '继续读取下一段' : '继续阅读对话', exact: true }).click();
+      }
     }
+    assert.ok(segmentContinuations > 0, 'the long original must be read through the explicit segment action');
     await expect(conversation.getByRole('button', { name: '继续阅读对话', exact: true })).toBeDisabled();
     await page.keyboard.press('Control+k');
     const search = page.getByRole('region', { name: '搜索会话', exact: true });
@@ -168,7 +181,7 @@ test('V2 public originals → conversation and metrics Web → real HTTPS OAuth 
       }
     }
     await capture(page, 'conversation');
-    await conversation.locator('.conversation-focused summary').click();
+    await conversation.locator('.conversation-focused .conversation-evidence > summary').click();
     await conversation.locator('.conversation-focused').getByRole('link', { name: '在时间线核查原句', exact: true }).click();
     await expect(page.getByRole('region', { name: '命中证据', exact: true })).toContainText('V2_EXACT_MESSAGE_MATCH');
     await page.getByRole('navigation', { name: '会话阅读方式', exact: true }).getByRole('link', { name: '原件 JSONL', exact: true }).click();
@@ -258,7 +271,8 @@ test('V2 public originals → conversation and metrics Web → real HTTPS OAuth 
       metrics: { original: metrics.version, filtered: filtered.version, recomputed: recomputed.version,
         knownInputTokens: recomputed.totals.knownInputTokens, unknownTokenSessions: recomputed.totals.unknownTokenSessions },
       oauth: 'actual authorization code + PKCE over private CA-validated HTTPS', sameVersionWebHttpMcp: true,
-      sameSnapshotNavigation: true, toolAnchorCanHideTools: true, exactSearchSubstringHighlighted: true,
+      sameSnapshotNavigation: true, toolCardExpandedOriginal: true, toolAnchorCanHideTools: true,
+      segmentContinuations, exactSearchSubstringHighlighted: true,
       recovery: { threeStepSelection: true, emptyDatePreserved: true, routeSnapshotChangesExport: true,
         readableTextComplete: true, rawBytesExact: true, packageVerified: true, nativeRecovery: 'not-executed' },
       rawUnchanged: true, scriptExecuted: false, screenshots, pageErrors }, null, 2));

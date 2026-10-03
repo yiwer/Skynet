@@ -24,7 +24,7 @@ function SessionFacts({snapshotId,request}:{snapshotId:string;request:Props['req
  const [totals,setTotals]=useState<MetricTotals|null>(null);const [error,setError]=useState('');
  useEffect(()=>{const abort=new AbortController();setTotals(null);setError('');request('/api/snapshots/'+snapshotId+'/metrics?period=since-enrollment',abort.signal).then(r=>r.json()).then(v=>{if(!abort.signal.aborted)setTotals(v.totals);}).catch(e=>{if(!abort.signal.aborted)setError(e.message);});return()=>abort.abort();},[snapshotId]);
  const rows:Array<[string,number]>=[];
- if(totals){if(totals.inputTokens!==null)rows.push(['输入 Token',totals.inputTokens]);if(totals.outputTokens!==null)rows.push(['输出 Token',totals.outputTokens]);rows.push(['提示词轮次',totals.userTurns],['工具调用',totals.toolCalls]);}
+ if(totals){if(totals.inputTokens!==null)rows.push(['输入 Token',totals.inputTokens]);if(totals.outputTokens!==null)rows.push(['输出 Token',totals.outputTokens]);rows.push(['工具调用',totals.toolCalls]);}
  if(!rows.length&&!error)return null;
  return <section className="session-facts"><h2>会话数据</h2><dl>{rows.map(([label,n])=><div key={label}><dt>{label}</dt><dd>{n.toLocaleString('zh-CN')}</dd></div>)}</dl>{error&&<p role="alert">数据读取失败</p>}</section>;
 }

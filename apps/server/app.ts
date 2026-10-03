@@ -29,7 +29,7 @@ import { workViewQuery } from '../../packages/contracts/work-views.js';
 import { assertRestoreReady } from './backup-files.js';
 import {reconcileOriginIntegrity} from './evidence-integrity.js';
 import { conversationQuery } from './conversation.js';
-import { conversationInputSchema } from '../../packages/contracts/conversation.js';
+import { conversationInputSchema, conversationTraceInputSchema } from '../../packages/contracts/conversation.js';
 import { migrateMetrics, metricsService } from './metrics.js';
 import { metricsQuerySchema } from '../../packages/contracts/metrics.js';
 
@@ -197,11 +197,16 @@ export async function createApp(options: { db: Database; rawDirectory: string; w
   const metrics = metricsService(db, raw, options.reportClock);
   app.get('/api/snapshots/:id/conversation', { onRequest: readerGuard }, async request => {
     const { id } = z.object({ id: z.uuid() }).parse(request.params);
-    const q = z.object({ cursor: z.string().optional(), includeTools: z.enum(['true', 'false']).optional(),
+    const q = z.object({ cursor: z.string().optional(), includeTools: z.enum(['true', 'false']).optional(), includeContext: z.enum(['true', 'false']).optional(),
       limit: z.coerce.number().optional(), line: z.coerce.number().optional(), block: z.coerce.number().optional(),
       textOffset: z.coerce.number().optional(), parserVersion: z.string().optional() }).strict().parse(request.query);
-    return conversation.page(id, conversationInputSchema.parse({ cursor: q.cursor, includeTools: q.includeTools === 'true', limit: q.limit,
+    return conversation.page(id, conversationInputSchema.parse({ cursor: q.cursor, includeTools: q.includeTools === 'true', includeContext: q.includeContext === 'true', limit: q.limit,
       ...(q.line === undefined ? {} : { anchor: { line: q.line, block: q.block, textOffset: q.textOffset, parserVersion: q.parserVersion } }) }));
+  });
+  app.get('/api/snapshots/:id/conversation/trace', { onRequest: readerGuard }, async request => {
+    const { id } = z.object({ id: z.uuid() }).parse(request.params);
+    const q = z.object({ cursor: z.string().optional(), turnId: z.string().optional(), limit: z.coerce.number().optional() }).strict().parse(request.query);
+    return conversation.trace(id, conversationTraceInputSchema.parse(q));
   });
   app.get('/api/metrics/catalog', { onRequest: readerGuard }, () => metrics.readMetricCatalog());
   app.get('/api/metrics', { onRequest: readerGuard }, request => metrics.readMetrics(metricsQuerySchema.parse(request.query)));

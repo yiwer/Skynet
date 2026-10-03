@@ -10,10 +10,37 @@ export const conversationAnchorSchema = z.object({
 }).strict();
 export const conversationInputSchema = z.object({
   cursor: z.string().max(2048).optional(), includeTools: z.boolean().default(false),
+  includeContext: z.boolean().default(false),
   limit: z.number().int().min(1).max(25).default(10), anchor: conversationAnchorSchema.optional(),
 }).strict().refine(value => !(value.cursor && value.anchor), '对话分页与定位不能同时指定');
 export type ConversationInput = z.input<typeof conversationInputSchema>;
 export type ConversationAnchor = z.infer<typeof conversationAnchorSchema>;
+
+/** Only recorded identifiers/timing. No reasoning text or reconstructed tool output. */
+export interface ConversationTrace {
+  nativeId?: string; callId?: string; turnId?: string; model?: string; channel?: string;
+  toolName?: string; status?: string; startedAt?: string; completedAt?: string;
+  durationMs?: number; durationSource?: 'recorded' | 'source-timestamps';
+  executionDurationMs?: number; exitCode?: number; traceLine?: number;
+}
+export interface ConversationTool {
+  callId: string; name?: string; kind: 'request' | 'result';
+  association: 'paired' | 'unmatched' | 'ambiguous';
+  peer?: { line: number; block: number; role: string };
+}
+export interface ConversationTraceSpan extends ConversationTrace {
+  line: number; kind: string;
+}
+export const conversationTraceInputSchema = z.object({
+  cursor: z.string().max(2048).optional(), turnId: z.string().min(1).max(256).optional(),
+  limit: z.number().int().min(1).max(25).default(10),
+}).strict();
+export type ConversationTraceInput = z.input<typeof conversationTraceInputSchema>;
+export interface ConversationTracePage {
+  snapshotId: string; parserVersion: string; readingVersion: string;
+  spans: Array<ConversationTraceSpan & { evidencePath: string }>;
+  total: number; nextCursor: string | null;
+}
 
 export interface ConversationMessage {
   id: string; offset: number; line: number; block: number; role: string;
@@ -22,10 +49,14 @@ export interface ConversationMessage {
   hiddenToolCalls: number; hiddenToolEvents: number;
   toolEvidence: 'none-observed' | 'present-not-assessed' | 'not-applicable';
   evidencePath: string; conversationPath: string;
+  contextKind?: 'system' | 'developer' | 'environment';
+  trace?: ConversationTrace; tool?: ConversationTool;
 }
 export interface ConversationPage {
   snapshotId: string; hash: string; parserVersion: string; attributionRevision: string;
   source: Source; sourceSessionId: string; employee: string; includeTools: boolean;
+  includeContext: boolean; readingVersion: string; totalContextEvents: number;
+  traceCount: number; tracePath: string;
   totalMessages: number; totalToolCalls: number; totalToolEvents: number;
   trailingHiddenToolCalls: number; trailingHiddenToolEvents: number;
   messages: ConversationMessage[]; nextCursor: string | null; anchor: ConversationAnchor | null;
