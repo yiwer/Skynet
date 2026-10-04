@@ -64,7 +64,7 @@ test('public conversation freezes originals across continuation/restart, keeps f
     assert.equal(first.messages[0]!.context, 'historical'); assert.equal(first.status.compacted, true);
     assert.equal(first.status.partialLine, true); assert.equal(first.status.unrecognizedLines, 1);
     assert.equal(first.status.captureGapCount, 1); assert.equal(first.status.offlineBackfill, 'unknown'); assert.equal(first.status.ongoing, 'unknown');
-    assert.equal(first.totalToolCalls, 2); assert.equal(first.totalToolEvents, 3); assert.equal(first.trailingHiddenToolCalls, 1);
+    assert.equal(first.totalToolCalls, 2); assert.equal(first.totalToolEvents, 3); assert.equal(first.trailingHiddenToolCalls, 0);
     assert.equal(first.relatedTotal, 1); assert.equal(first.related[0]!.materialId, child.id);
     const newer = await commit(Buffer.concat([bytes, Buffer.from('\n' + JSON.stringify(message('user', '新追加不进入旧快照')) + '\n')]), 2, id);
     assert.notEqual(newer, id);
@@ -76,6 +76,12 @@ test('public conversation freezes originals across continuation/restart, keeps f
     assert.equal(all.find(event => event.line === 6)!.hiddenToolCalls, 1);
     assert.equal(all.find(event => event.line === 6)!.toolEvidence, 'present-not-assessed');
     assert.equal(all.filter(event => event.line === 6).map(event => event.text).join(''), large);
+    assert.equal(all.filter(event => event.line === 6).reduce((total, event) => total + event.hiddenToolCalls, 0), 1,
+      'one original assistant message reports preceding hidden calls only once across its text segments');
+    const legacy = await read({ readingVersion: 'conversation-2', limit: 1 });
+    assert.equal(legacy.readingVersion, 'conversation-2'); assert.equal(legacy.trailingHiddenToolCalls, 1);
+    const legacyContinued = await read({ cursor: legacy.nextCursor!, limit: 1 });
+    assert.equal(legacyContinued.readingVersion, 'conversation-2', 'an existing cursor preserves its original reading interpretation');
     for (const event of all) {
       assert.equal(event.text, (event.line === 6 ? large : event.line === 2 ? '旧内容\n不可改写' : '所有测试通过（没有工具结果的自述）').slice(event.textOffset, event.textOffset + event.text.length));
       assert.ok(!/[\uD800-\uDBFF]$/.test(event.text), 'page must not split a Unicode surrogate pair');

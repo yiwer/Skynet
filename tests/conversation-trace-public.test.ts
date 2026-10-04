@@ -5,18 +5,20 @@ import { writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
+import { chromium, expect, type Browser } from '@playwright/test';
 import { mcpSandbox } from './mcp-support.js';
 import { digest } from '../apps/server/database.js';
 import type { ConversationPage, ConversationTracePage } from '../packages/contracts/conversation.js';
 
 const params = (value: object) => new URLSearchParams(Object.entries(value).filter(([, item]) => item !== undefined).map(([key, item]) => [key, String(item)]));
-const json = (value: unknown): RequestInit => ({ method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(value) });
+const json = (value: unknown, headers: Record<string, string> = {}): RequestInit => ({ method: 'POST', headers: { 'Content-Type': 'application/json', ...headers }, body: JSON.stringify(value) });
 const stringSize = (value: unknown): number => typeof value === 'string' ? value.length
   : value && typeof value === 'object' ? Object.values(value).reduce<number>((total, item) => total + stringSize(item), 0) : 0;
 
 test('conversation trace stays source-grounded across context filters, tool pagination and real OAuth MCP', { timeout: 120_000 }, async () => {
   const sandbox = await mcpSandbox();
   let client: Client | undefined;
+  let browser: Browser | undefined;
   console.log(`Conversation trace evidence directory: ${sandbox.directory}`);
   try {
     const employee = await sandbox.provision('Trace synthetic author');
@@ -86,14 +88,25 @@ test('conversation trace stays source-grounded across context filters, tool pagi
     add(completed({ type: 'Reasoning', id: 'reasoning-native', raw_content: ['REASONING_BODY_NOT_TRACE'], summary_text: ['REASONING_SUMMARY_NOT_TRACE'] }, started, started + 10));
     const trailingContextLine = add(message('developer', 'Trailing context must not create an empty continuation page.'));
     const bytes = Buffer.from(rows.map(row => JSON.stringify(row)).join('\n') + '\n');
+    const childId = randomUUID();
+    const childBytes = Buffer.from(JSON.stringify({ type: 'session_meta', payload: { id: childId } }) + '\n'
+      + JSON.stringify(message('assistant', 'CHILD_CONVERSATION_ORIGINAL')) + '\n');
+    const child = { id: digest('trace-public-child'), role: 'child-transcript', name: 'children/trace-child.jsonl', placement: 'portable',
+      sourceSessionId: childId, hash: digest(childBytes), byteLength: childBytes.length, mediaType: 'jsonl' };
+    assert.ok([200, 201].includes((await sandbox.api(`/api/chunks/${digest(childBytes)}`, device.deviceCredential,
+      { method: 'PUT', headers: { 'Content-Type': 'application/octet-stream' }, body: new Uint8Array(childBytes) })).status));
     const uploaded = await sandbox.api(`/api/chunks/${digest(bytes)}`, device.deviceCredential,
       { method: 'PUT', headers: { 'Content-Type': 'application/octet-stream' }, body: new Uint8Array(bytes) });
     assert.ok([200, 201].includes(uploaded.status));
+    const uploadId = randomUUID();
     const committed = await sandbox.api('/api/snapshots', device.deviceCredential, json({
       protocolVersion: 1, sourceSessionId: sessionId, source: 'codex-cli', sourceVersion: '0.160.0', sourceOs: process.platform,
       project: '/synthetic/conversation-trace', hash: digest(bytes), byteLength: bytes.length,
       qualifiedAt: new Date().toISOString(), capability: 'unverified',
-    }));
+      capture: { generation: digest('trace-public-generation'), revision: 1, change: 'initial', materials: [child],
+        lineage: [{ relation: 'child', sessionId: childId, materialId: child.id }], compacted: true, partialLine: false,
+        gaps: [{ code: 'history-unavailable', reference: 'Synthetic compacted prefix' }] },
+    }, { 'Idempotency-Key': uploadId }));
     assert.equal(committed.status, 200);
     const snapshotId = (await committed.json()).snapshotId as string;
     const path = `/api/snapshots/${snapshotId}/conversation`;
@@ -138,7 +151,7 @@ test('conversation trace stays source-grounded across context filters, tool pagi
         const page = await read(query);
         assert.deepEqual(await tool('read_conversation', query), page);
         assert.equal(page.parserVersion, 'codex-jsonl-4', 'display metadata must not silently change evidence/provenance parsing');
-        assert.equal(page.readingVersion, 'conversation-2');
+        assert.equal(page.readingVersion, 'conversation-3');
         assert.equal(page.includeContext, includeContext);
         assert.ok(page.messages.length > 0 || page.nextCursor === null, 'a filtered page must make progress');
         assert.ok(page.messages.reduce((total, message) => total + message.text.length + stringSize(message.trace) + stringSize(message.tool), 0) <= 2048,
@@ -150,6 +163,7 @@ test('conversation trace stays source-grounded across context filters, tool pagi
       return { messages, pages };
     }
     const ordinary = await collect(false, false);
+    assert.equal(ordinary.pages[0]!.status.ongoing, 'in-progress', 'the last native task_started is an active turn, not a permanently ended session');
     assert.deepEqual([...new Set(ordinary.messages.map(message => message.line))],
       [mixedLine, mixedWrappersLine, noTurnLine, assistantLine, fillerLine, duplicateNativeA, duplicateNativeB]);
     assert.equal(ordinary.pages[0]!.totalContextEvents, 4);
@@ -237,12 +251,88 @@ test('conversation trace stays source-grounded across context filters, tool pagi
     assert.deepEqual(await tool('read_conversation_trace', { turnId: 'turn-two', limit: 1 }), filtered);
     if (filtered.nextCursor) assert.equal((await api(path + '/trace?' + params({ cursor: filtered.nextCursor, turnId: 'turn-one' }))).status, 400);
     assert.deepEqual(Buffer.from(await (await api(`/api/snapshots/${snapshotId}/raw`)).arrayBuffer()), bytes);
+    const legacy = await read({ readingVersion: 'conversation-2', limit: 1 });
+    assert.equal(legacy.status.ongoing, 'unknown'); assert.equal(legacy.status.offlineBackfill, 'unknown');
+    assert.deepEqual(await tool('read_conversation', { readingVersion: 'conversation-2', limit: 1 }), legacy);
+    const pending = await read({ limit: 1 }); assert.ok(pending.nextCursor);
+    const receipt = { uploadId, snapshotId, capturedAt: timestamp, acknowledgedAt: new Date(started + 60_000).toISOString(),
+      disconnectedAttempts: 2, firstDisconnectedAt: timestamp, lastDisconnectedAt: new Date(started + 30_000).toISOString() };
+    assert.equal((await sandbox.api('/api/delivery/receipts', undefined, json(receipt))).status, 401);
+    assert.equal((await api('/api/delivery/receipts', json(receipt))).status, 401, 'a reader cannot report a device observation');
+    const foreign = await (await sandbox.api('/api/devices/enroll', reader.enrollmentCredential,
+      json({ installationId: randomUUID(), name: 'other synthetic device' }))).json();
+    assert.equal((await sandbox.api('/api/delivery/receipts', foreign.deviceCredential, json(receipt))).status, 409);
+    assert.equal((await sandbox.api('/api/delivery/receipts', device.deviceCredential, json({ ...receipt, snapshotId: randomUUID() }))).status, 409);
+    assert.equal((await sandbox.api('/api/delivery/receipts', device.deviceCredential,
+      json({ ...receipt, acknowledgedAt: `2026-10-04T00:00:00.${'0'.repeat(3000)}Z` }))).status, 400,
+    'delivery metadata cannot bypass the bounded reading display with oversized ISO fractional seconds');
+    const saved = await sandbox.api('/api/delivery/receipts', device.deviceCredential, json(receipt));
+    assert.equal(saved.status, 200); const savedAck = await saved.json();
+    assert.deepEqual(await (await sandbox.api('/api/delivery/receipts', device.deviceCredential, json(receipt))).json(), savedAck);
+    assert.equal((await sandbox.api('/api/delivery/receipts', device.deviceCredential, json({ ...receipt, disconnectedAttempts: 3 }))).status, 409);
+    assert.equal((await api(path + '?' + params({ cursor: pending.nextCursor, limit: 1 }))).status, 409, 'late receipt never silently changes a continued interpretation');
+    const observed = await read({ limit: 1 });
+    assert.equal(observed.status.offlineBackfill, 'observed'); assert.equal(observed.status.delivery?.disconnectedAttempts, 2);
+    assert.equal(observed.status.delivery?.receiptCount, 1); assert.equal(observed.status.delivery?.receivedAt, savedAck.receivedAt);
+    assert.deepEqual(await tool('read_conversation', { limit: 1 }), observed);
+    assert.equal((await read({ cursor: legacy.nextCursor!, limit: 1 })).readingVersion, 'conversation-2');
+    for (const [type, turnId, expected] of [['task_complete', 'turn-two', 'waiting-input'],
+      ['turn_aborted', 'turn-two', 'interrupted'], ['task_complete', 'other-turn', 'in-progress'],
+      ['turn_aborted', null, 'unknown']] as const) {
+      const next = Buffer.concat([bytes, Buffer.from(JSON.stringify({ type: 'event_msg', timestamp,
+        payload: { type, turn_id: turnId, reason: 'interrupted' } }) + '\n')]);
+      assert.ok([200, 201].includes((await sandbox.api(`/api/chunks/${digest(next)}`, device.deviceCredential,
+        { method: 'PUT', headers: { 'Content-Type': 'application/octet-stream' }, body: new Uint8Array(next) })).status));
+      const committedNext = await sandbox.api('/api/snapshots', device.deviceCredential, json({
+        protocolVersion: 1, sourceSessionId: sessionId, source: 'codex-cli', sourceVersion: '0.160.0', sourceOs: process.platform,
+        project: '/synthetic/conversation-trace', hash: digest(next), byteLength: next.length,
+        qualifiedAt: new Date().toISOString(), capability: 'unverified' }));
+      assert.equal(committedNext.status, 200); const nextId = (await committedNext.json()).snapshotId;
+      const nextPage: ConversationPage = await (await api(`/api/snapshots/${nextId}/conversation`)).json();
+      assert.equal(nextPage.status.ongoing, expected);
+      assert.equal(nextPage.status.offlineBackfill, 'unknown', 'old source time is not evidence of offline delivery');
+    }
+    assert.deepEqual(Buffer.from(await (await api(`/api/snapshots/${snapshotId}/raw`)).arrayBuffer()), bytes);
+    await client.close(); client = undefined; await sandbox.restart();
+    assert.deepEqual((await read({ limit: 1 })).status, observed.status, 'durable receipt and native state survive server restart');
+    assert.deepEqual(await (await sandbox.api('/api/delivery/receipts', device.deviceCredential, json(receipt))).json(), savedAck);
+    browser = await chromium.launch();
+    const page = await browser.newPage({ ignoreHTTPSErrors: true, viewport: { width: 1280, height: 900 } });
+    const pageErrors: string[] = []; page.on('pageerror', error => pageErrors.push(error.message));
+    await page.goto(`${sandbox.origin}/#${snapshotId}?view=conversation`);
+    await page.getByLabel('个人读取凭据').fill(reader.readerCredential);
+    await page.getByRole('button', { name: '进入存档', exact: true }).click();
+    const status = page.locator('.conversation-source-status');
+    await expect(status).not.toHaveAttribute('open');
+    await expect(status.locator('summary')).toContainText('本轮进行中');
+    await expect(status.locator('summary')).toContainText('已压缩');
+    await expect(status.locator('summary')).toContainText('1 处采集缺口');
+    await expect(status.locator('summary')).toContainText('离线补传');
+    await status.locator('summary').focus(); await page.keyboard.press('Enter');
+    await expect(status).toHaveAttribute('open'); await expect(status).toContainText('连接中断2 次');
+    await expect(status).toContainText('采集端确认'); await expect(status).toContainText('服务端接收');
+    const screenshots: string[] = [];
+    for (const colorScheme of ['light', 'dark'] as const) for (const width of [320, 768, 1280]) {
+      await page.emulateMedia({ colorScheme, reducedMotion: 'reduce' }); await page.setViewportSize({ width, height: 900 });
+      const overflow = await page.evaluate(() => ({ x: document.documentElement.scrollWidth > innerWidth, y: document.documentElement.scrollHeight > innerHeight }));
+      assert.deepEqual(overflow, { x: false, y: false }, `${width} ${colorScheme} source states stay within the product scroll regions`);
+      const filename = `conversation-source-${width}-${colorScheme}.png`; screenshots.push(filename);
+      await page.screenshot({ path: join(sandbox.directory, filename), animations: 'disabled' });
+    }
+    await status.locator('summary').focus(); await page.keyboard.press('Space'); await expect(status).not.toHaveAttribute('open');
+    const related = page.locator('.conversation-related'); await related.locator('summary').click();
+    await related.getByRole('link', { name: child.name, exact: true }).click();
+    await expect(page.getByRole('region', { name: '命中证据', exact: true })).toContainText('CHILD_CONVERSATION_ORIGINAL');
+    assert.deepEqual(Buffer.from(await (await api(`/api/snapshots/${snapshotId}/materials/${child.id}`)).arrayBuffer()), childBytes);
+    assert.deepEqual(pageErrors, []);
     const evidence = { snapshotId, parserVersion: ordinary.pages[0]!.parserVersion, readingVersion: ordinary.pages[0]!.readingVersion,
       ordinaryPages: ordinary.pages.length, expandedPages: expanded.pages.length, tracePages,
       originalBytes: bytes.length, toolInputUtf16: argumentsText.length, toolOutputUtf16: output.length,
       contextHiddenByDefault: true, mixedUserTextPreserved: true, exactToolPeersAcrossPages: true,
-      ambiguousIdsNotPaired: true, originalBytesPreserved: true, httpMcpParity: true, syntheticOnly: true };
+      ambiguousIdsNotPaired: true, originalBytesPreserved: true, httpMcpParity: true, syntheticOnly: true,
+      deliveryReceiptAuthenticatedImmutable: true, lateReceiptCursorGuard: true, nativeTurnStates: true,
+      sourceStatusKeyboard: true, sourceStatusScreenshots: screenshots, childMaterialReadable: true };
     await writeFile(join(sandbox.directory, 'conversation-trace-public-evidence.json'), JSON.stringify(evidence, null, 2));
     console.log(JSON.stringify(evidence));
-  } finally { await client?.close(); await sandbox.close(); }
+  } finally { await browser?.close(); await client?.close(); await sandbox.close(); }
 });

@@ -8,6 +8,28 @@ const date = (value: string) => new Date(value).toLocaleString('zh-CN', { timeZo
 const traceDate = (value: string) => new Date(value).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', fractionalSecondDigits: 3, hour12: false });
 const duration = (value: number) => `${value.toLocaleString('zh-CN', { maximumFractionDigits: 6 })} ms`;
 const contextNames = { system: '系统上下文', developer: '开发者上下文', environment: '环境上下文' };
+const turnNames = { 'in-progress': '本轮进行中', 'waiting-input': '本轮已结束', interrupted: '本轮已中断', unknown: '未知' };
+
+function SourceStatus({ page }: { page: ConversationPage }) {
+  const { status } = page;
+  return <details className="conversation-source-status"><summary>来源状态
+    {status.ongoing !== 'unknown' && <span className="badge">{turnNames[status.ongoing]}</span>}
+    {status.compacted && <span className="badge">已压缩</span>}
+    {status.captureGapCount > 0 && <span className="badge">{status.captureGapCount} 处采集缺口</span>}
+    {status.partialLine && <span className="badge">末行未完成</span>}
+    {status.offlineBackfill === 'observed' && <span className="badge">离线补传</span>}
+  </summary><dl className="conversation-trace-facts">
+    <div><dt>本轮状态</dt><dd>{turnNames[status.ongoing]}{status.turn?.line && <> · <a href={evidenceLink(page.snapshotId, { kind: 'raw', line: status.turn.line, textOffset: 0 })}>来源 #{status.turn.line}</a></>}</dd></div>
+    {status.turn?.timestamp && <div><dt>来源时间</dt><dd>{date(status.turn.timestamp)}</dd></div>}
+    <div><dt>离线补传</dt><dd>{status.offlineBackfill === 'unknown' ? '未知' : status.offlineBackfill === 'observed' ? '已记录' : '未记录连接中断'}</dd></div>
+    {!!status.delivery?.disconnectedAttempts && <div><dt>连接中断</dt><dd>{status.delivery.disconnectedAttempts} 次</dd></div>}
+    {status.delivery?.acknowledgedAt && <div><dt>采集端确认</dt><dd>{date(status.delivery.acknowledgedAt)}</dd></div>}
+    {status.delivery?.receivedAt && <div><dt>服务端接收</dt><dd>{date(status.delivery.receivedAt)}</dd></div>}
+    <div><dt>上下文压缩</dt><dd>{status.compacted === null ? '未知' : status.compacted ? '已记录' : '未记录'}</dd></div>
+    <div><dt>采集缺口</dt><dd>{status.captureGapCount}</dd></div>
+    {status.unrecognizedLines > 0 && <div><dt>未解析行</dt><dd>{status.unrecognizedLines}</dd></div>}
+  </dl>{status.captureGapExamples.length > 0 && <ul>{status.captureGapExamples.map((gap, index) => <li key={index}>{gap.code} · {gap.reference}</li>)}</ul>}</details>;
+}
 
 function AgentAvatar() { return <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="8" width="12" height="10" rx="2"/><path d="M12 4v4M9 12h.01M15 12h.01M10 15h4"/></svg>; }
 
@@ -118,6 +140,7 @@ export function ConversationReader({ snapshotId, initial, request, navigation, o
     {error && <><p className="error" role="alert">{error}</p><button onClick={() => { setCursors([undefined]); setRetry(value => value + 1); }}>重新读取对话</button></>}
     {page && <>
       <p className="sr-only">{page.totalMessages} 条消息 · {page.totalToolCalls} 次工具调用 · 来源时间按北京时间显示</p>
+      <SourceStatus page={page}/>
       {page.traceCount > 0 && <details className="conversation-session-trace" open={traceOpen} onToggle={event => setTraceOpen(event.currentTarget.open)}><summary>Trace <span>{page.traceCount}</span></summary>
         <TracePanel key={page.tracePath} path={page.tracePath} open={traceOpen} request={request}/></details>}
       {page.messages.length === 0 && <p>暂无消息</p>}
@@ -149,7 +172,7 @@ export function ConversationReader({ snapshotId, initial, request, navigation, o
             <div className="message-meta"><strong>{roleName}</strong>
               {message.timestamp && <time dateTime={message.timestamp} title={date(message.timestamp)}>{new Date(message.timestamp).toLocaleTimeString('zh-CN', { timeZone: 'Asia/Shanghai', hour: '2-digit', minute: '2-digit', hour12: false })}</time>}
               {message.context === 'historical' && <span className="badge">历史上下文</span>}{focused && <strong>命中位置</strong>}
-              <details className="conversation-evidence"><summary aria-label={`原件第 ${message.line} 行`}>#{message.line}</summary><div className="conversation-evidence-popup"><p>{message.origin?.employee ?? page.employee} · block {message.block}{' · '}<a href={message.evidencePath}>在时间线核查原句</a>{' · '}<a href={message.conversationPath}>此消息链接</a></p></div></details>
+              <details className="conversation-evidence"><summary aria-label={`原件第 ${message.line} 行`}>#{message.line}</summary><div className="conversation-evidence-popup"><p>{message.origin?.employee ?? page.employee} · block {message.block}{' · '}<a href={message.evidencePath}>在时间线核查原句</a>{' · '}<a href={message.conversationPath}>此消息链接</a></p>{isAssistant && <p>工具结果 · {message.toolEvidence === 'none-observed' ? '未出现' : '有记录'}</p>}</div></details>
               {!includeTools && message.hiddenToolEvents > 0 && <button className="conversation-hidden-tools" onClick={() => changeTools(true)} aria-label={`显示 ${message.hiddenToolCalls} 次工具调用、${message.hiddenToolEvents} 条工具记录`}>{message.hiddenToolCalls} 次工具调用（已隐藏）</button>}
             </div>
             {message.trace && <details className="conversation-message-trace"><summary>Trace</summary><TraceFacts trace={message.trace}/><a href={message.trace.traceLine ? evidenceLink(snapshotId, { kind: 'raw', line: message.trace.traceLine, textOffset: 0 }) : message.evidencePath}>查看 Trace 原件</a></details>}
