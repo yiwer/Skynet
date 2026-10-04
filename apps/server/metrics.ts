@@ -368,6 +368,15 @@ export function metricsService(db: Database, raw: RawStore, clock: () => Date = 
           includedSessions: new Set(included.map(row => row.sessionId)).size, excludedSessions,
         } };
       });
+      const byEmployeeDay = new Map<string, Slice[]>();
+      for (const slice of selected) { const key = JSON.stringify([slice.employeeId, slice.date]); byEmployeeDay.set(key, [...byEmployeeDay.get(key) ?? [], slice]); }
+      const employeeDaily = [...byEmployeeDay.values()].map(values => {
+        const first = values[0]!, rows = summarize(values), included = rows.filter(row => !unknownSessions.has(row.sessionId)), known = total(included);
+        const excludedSessions = new Set(rows.filter(row => unknownSessions.has(row.sessionId)).map(row => row.sessionId)).size;
+        return { employeeId: first.employeeId, employee: first.employee, date: first.date, ...total(rows), tokenTrend: {
+          inputTokens: !included.length && excludedSessions ? null : known.knownInputTokens, outputTokens: !included.length && excludedSessions ? null : known.knownOutputTokens,
+          includedSessions: new Set(included.map(row => row.sessionId)).size, excludedSessions } };
+      }).sort((a,b) => a.employee.localeCompare(b.employee, 'zh-CN') || a.employeeId.localeCompare(b.employeeId) || a.date.localeCompare(b.date));
       const byEmployee = new Map<string, SessionMetrics[]>();
       for (const session of sessions) byEmployee.set(session.employeeId, [...byEmployee.get(session.employeeId) ?? [], session]);
       const employees = [...new Map(sessions.map(s => [s.employeeId, s.employee])).entries()]
@@ -388,7 +397,7 @@ export function metricsService(db: Database, raw: RawStore, clock: () => Date = 
       const inputVersion = digest(JSON.stringify([events, rawInputs, unscoped]));
       const totals = total(sessions);
       if (unscoped.length || discoveryGaps.size) { totals.inputTokens = null; totals.outputTokens = null; }
-      const content = { scope, totals, sessions, daily, employees, sources, dataAsOf,
+      const content = { scope, totals, sessions, daily, employeeDaily, employees, sources, dataAsOf,
         catalogVersion, definition, sourceInputsComplete: unscoped.length === 0 && discoveryGaps.size === 0 && sessions.every(s => s.sourceInputsComplete), unknownReasons };
       const version = digest(JSON.stringify([content, inputVersion, requestSelection(q)]));
       const existing = (await client.query('SELECT payload FROM metric_revisions WHERE version=$1', [version])).rows[0];
