@@ -58,6 +58,8 @@ node --import tsx --test tests/profile-coaching*.test.ts
 
 `browser/manifest.json` 记录最后浏览器结果版本及实际 MCP 包装字节数，12 张截图对应两个新区域、三个宽度与两套主题；无页面运行时错误。最终结果不依赖真实员工会话或付费模型。
 
-最终目视发现宽屏负变化值的负号可能单独换行，`23-number-wrap-red.txt` 公开复现；将当前值与变化值分别保持完整一行后，`24-layout-build.txt` 构建和 `25-number-wrap-green.txt` 完整 HTTP/Web/OAuth MCP 旅程 **1/1** 通过（20.57 秒）。这是 18 项通过后的唯一产品变更，最终截图已更新。
+最终目视发现宽屏负变化值的负号可能单独换行，`23-number-wrap-red.txt` 公开复现；将当前值与变化值分别保持完整一行后，`24-layout-build.txt` 构建和 `25-number-wrap-green.txt` 完整 HTTP/Web/OAuth MCP 旅程 **1/1** 通过（20.57 秒）。该次仅调整数字排版，最终截图已更新。
 
 随后合入实际集成 `2380a97` 的原件故障隔离，`26-source-count-red.txt` 暴露画像尚未提供不可计数来源标记；窄接入后 `27-source-integrated-build.txt` 通过，`28-source-integrated-public.txt` 故障归属和完整浏览器/MCP **2/2** 通过（19.89 秒）。后续实际基线与最终 SHA 由外部 manifest 记录。
+
+最后合入独立接受的画像计算复用 `c2c80b6`，保留 `efficiency.exportFromMetric(..., report.metricVersion, full)`。在作者 `61de5a7` 上 `29-final-build.txt` 构建通过，`30-final-public.txt` 三项核心统计/证据、不可读来源归属与完整 Web/OAuth MCP **5/5** 通过（47.78 秒）。其后只补本记录。
