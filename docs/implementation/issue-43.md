@@ -35,3 +35,5 @@ node --import tsx --test --test-concurrency=1 tests/wait-report.test.ts tests/wa
 ```
 
 RED/GREEN、构建日志及稳定截图在上述外部证据目录。千会话性能仍由 #54 验收；本票的小型公开旅程不代表 AC-32 通过。
+
+最终验证：功能 `23d9892` 已以 `d1a2149` 合入最新集成 `fde4196`（含性能基础）。先前本票两项加原等待旅程共 **3/3 通过，52.36 秒**；合入后 TypeScript/Vite 构建通过，本票两项 **2/2 通过，33.91 秒**。最终八张稳定图像在 `integrated/`，日志 `09-integrated-build.txt` 与 `10-integrated-public.txt`；提交后交独立 merger 验证。尚未部署或关闭远端票。
