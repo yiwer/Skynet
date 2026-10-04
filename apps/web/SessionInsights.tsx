@@ -1,4 +1,4 @@
-import { useEffect,useState } from 'react';
+import { useEffect,useRef,useState } from 'react';
 import { promptElementLabels,taskTypeLabels,type InsightCitation,type SessionInsights as Insights } from '../../packages/contracts/session-insights.js';
 import { evidenceLink } from '../../packages/contracts/search.js';
 import './session-insights.css';
@@ -12,15 +12,16 @@ export function SessionInsights({snapshotId,request,analysisRefresh=0}:{snapshot
   const [hash,setHash]=useState(location.hash);
   useEffect(()=>{const changed=()=>setHash(location.hash);addEventListener('hashchange',changed);return()=>removeEventListener('hashchange',changed);},[]);
   const fixedVersion=new URLSearchParams(hash.split('?')[1]??'').get('insightVersion');
-  useEffect(()=>{const abort=new AbortController();let timer:ReturnType<typeof setTimeout>|undefined;setData(null);setError('');
+  const selection=snapshotId+':'+(fixedVersion??'current'),loadedSelection=useRef(selection);
+  useEffect(()=>{const abort=new AbortController();let timer:ReturnType<typeof setTimeout>|undefined;if(loadedSelection.current!==selection){setData(null);loadedSelection.current=selection;}setError('');
     const read=async()=>{try{const value=await(await request(`/api/snapshots/${snapshotId}/insights${fixedVersion?'?version='+encodeURIComponent(fixedVersion):''}`,abort.signal)).json();if(abort.signal.aborted)return;setData(value);if(value.state==='pending'&&!fixedVersion)timer=setTimeout(read,1500);}catch(failure){if(!abort.signal.aborted)setError((failure as Error).message);}};
     void read();return()=>{abort.abort();clearTimeout(timer);};},[snapshotId,refresh,analysisRefresh,fixedVersion]);
   const inferences=data?.inferences;
   return <section className="session-insights" aria-label="会话洞察"><header><h2>会话洞察</h2><button type="button" aria-label="刷新会话洞察" onClick={()=>setRefresh(value=>value+1)}>↻</button></header>
-    {error?<p role="alert">{error}</p>:!data?<p role="status">正在读取…</p>:<>
+    {error&&<p role="alert">{error}</p>}{!data?<p role="status">正在读取…</p>:<>
       <div className="insight-status"><span>{states[data.state]}{data.corrections?.appliedIds.length?' · 已更正':''}</span>{inferences&&<strong>{taskTypeLabels[inferences.taskType.value]}</strong>}</div>
       <dl className="insight-counts">{([['已验证',data.metrics.verified],['仅声称',data.metrics.claimed],['返工',data.metrics.rework],['追问',data.metrics.clarifications]] as const).map(([label,value])=><div key={label}><dt>{label}</dt><dd>{value===null?'未完成':value}</dd></div>)}</dl>
-      <InferenceCorrections key={data.version} view={data} request={request} fixed={!!fixedVersion} onUpdated={()=>setRefresh(value=>value+1)}/>
+      <InferenceCorrections key={selection} view={data} request={request} fixed={!!fixedVersion} onUpdated={()=>setRefresh(value=>value+1)}/>
       {inferences&&<>
         <details><summary>任务类型 · {inferences.taskType.correctionId?'人工更正':'模型推断'}</summary><p>{taskTypeLabels[inferences.taskType.value]}</p><Evidence citations={inferences.taskType.citations}/></details>
         <details><summary>提示词 · {inferences.prompts.length}</summary><div className="insight-items">{inferences.prompts.map((prompt,index)=><article key={prompt.event}><h3>{prompt.first?'首条提示词':`提示词 ${index+1}`}{prompt.rework&&<span className="insight-tag">返工</span>}{prompt.corrections&&<span className="insight-tag">人工更正</span>}</h3><dl className="insight-elements">{Object.entries(promptElementLabels).map(([key,label])=><div key={key}><dt>{label}</dt><dd>{prompt.elements[key as keyof typeof prompt.elements]===null?'未知':prompt.elements[key as keyof typeof prompt.elements]?'有':'无'}</dd></div>)}</dl><Evidence citations={prompt.citations}/></article>)}</div></details>
