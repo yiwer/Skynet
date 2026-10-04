@@ -3,6 +3,8 @@ import { NativeAnalysisFailure, runNativeAnalysis } from './native.js';
 import { validateAnalysis, type AnalysisInput } from '../server/analysis.js';
 import type { AnalysisItem, AnalysisRun } from '../../packages/contracts/analysis.js';
 import { initialProcessing, mapOutput, planAggregation, planSegments, validateAggregate } from './long.js';
+import { validateInsights,mergeInsights } from '../server/analysis-insights.js';
+import type { SessionInferences } from '../../packages/contracts/session-insights.js';
 
 // #23 can add a bounded segment/aggregate pipeline here, without changing durable ownership.
 // Each native call must use beforeForward; intermediate summaries never become original citations.
@@ -16,11 +18,21 @@ export async function executeAnalysis(config: AnalysisConfig, input: AnalysisInp
   };
   const unknownUsage = () => { usage.inputTokens = usage.outputTokens = usage.runtimeCostUsd = null; };
   const extracted: AnalysisItem[] = [];
+  const insightParts:SessionInferences[]=[];
   for (const stage of plan.stages) {
     if (signal.aborted || forwarded >= config.maxRequests) { processing.ranges.push({ start: stage.start, end: stage.end, state: 'skipped', reason: '全任务请求或时间限额' }); continue; }
     try {
       const result = await native(config, stage.input, signal, forward); addUsage(result.usage);
-      extracted.push(...validateAnalysis(input, mapOutput(stage, result.output)));
+      const mapped=mapOutput(stage,result.output);
+      const stageInsights=mapped.insights?validateInsights(input,mapped.insights):undefined;
+      extracted.push(...validateAnalysis(input, mapped));
+      if(stageInsights){
+        for(const row of [...stageInsights.prompts,...stageInsights.replies]){
+          const local=stage.anchors.findIndex(anchor=>anchor.event===row.event);
+          row.complete=local>=0&&stage.anchors[local]!.textOffset===0&&stage.input.events[local]!.text.length===input.events[row.event]!.text.length;
+        }
+        insightParts.push(stageInsights);
+      }
       processing.ranges.push({ start: stage.start, end: stage.end, state: 'extracted' });
     } catch { unknownUsage(); processing.ranges.push({ start: stage.start, end: stage.end, state: 'failed', reason: '该段模型、限额或原句校验失败；没有使用该段结论' }); }
   }
@@ -40,5 +52,7 @@ export async function executeAnalysis(config: AnalysisConfig, input: AnalysisInp
   usage.requests = forwarded;
   processing.complete = processing.ranges.every(range => range.state === 'extracted') && ['not-needed', 'succeeded'].includes(processing.aggregation) && !processing.omittedFindings;
   if (signal.aborted) throw new NativeAnalysisFailure(forwarded, 'timeout-or-cancelled');
-  return { items, usage, fixture: config.mode === 'fixture', processing };
+  const insights=mergeInsights(input,insightParts,processing.complete&&insightParts.length===plan.stages.length);
+  if(insights&&Buffer.byteLength(JSON.stringify({items,insights}))>64*1024)throw new NativeAnalysisFailure(forwarded,'result-size-limit');
+  return { items, usage, fixture: config.mode === 'fixture', processing, ...(insights?{insights}: {}) };
 }

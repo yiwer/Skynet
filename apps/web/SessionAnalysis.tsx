@@ -3,7 +3,7 @@ import { analysisLabels, assessmentLabels, type AnalysisPage, type AnalysisRun }
 import { evidenceLink } from '../../packages/contracts/search.js';
 
 export const analysisStates = { queued: '等待分析', running: '正在分析', 'retry-wait': '等待有限重试', superseded: '版本已过期', succeeded: '分析已完成', failed: '分析失败' };
-export function SessionAnalysis({ snapshotId, request }: { snapshotId: string; request: (path: string, signal?: AbortSignal, method?: 'POST') => Promise<Response> }) {
+export function SessionAnalysis({ snapshotId, request,onChange }: { snapshotId: string; request: (path: string, signal?: AbortSignal, method?: 'POST') => Promise<Response>;onChange?:()=>void }) {
   const [page, setPage] = useState<AnalysisPage | null>(null); const [error, setError] = useState('');
   const [refresh, setRefresh] = useState(0); const [busy, setBusy] = useState(false); const [offset, setOffset] = useState(0);
   useEffect(() => {
@@ -14,6 +14,7 @@ export function SessionAnalysis({ snapshotId, request }: { snapshotId: string; r
         if (abort.signal.aborted) return;
         setPage(previous => ({ ...value, runs: offset ? [...(previous?.runs ?? []).filter(run => !value.runs.some(next => next.id === run.id)), ...value.runs] : value.runs }));
         setError('');
+        onChange?.();
         if (value.runs.some(run => ['queued', 'running', 'retry-wait'].includes(run.state))) timer = setTimeout(read, 1500);
       } catch (failure) { if (!abort.signal.aborted) setError((failure as Error).message); }
     }
