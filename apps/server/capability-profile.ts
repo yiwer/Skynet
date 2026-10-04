@@ -142,7 +142,8 @@ export function capabilityProfileService(db: Database, assessments: ReturnType<t
       rows.splice(0, offset); rows.splice(limit);
       value.pages[section] = { total, offset, nextOffset: offset + rows.length < total ? offset + rows.length : null };
     }
-    while (Buffer.byteLength(JSON.stringify(value)) > 80 * 1024) {
+    // Leave room for the MCP text envelope, including worst-case JSON escaping.
+    while (Buffer.byteLength(JSON.stringify(value)) > 48 * 1024 - 512) {
       const section = profileSections.filter(key => sections[key].length > (q.section === key ? 1 : 0))
         .sort((a, b) => Buffer.byteLength(JSON.stringify(sections[b])) - Buffer.byteLength(JSON.stringify(sections[a])))[0];
       if (!section) throw new HttpError(413, '画像单条内容超过响应上限，请使用完整导出');
@@ -150,5 +151,8 @@ export function capabilityProfileService(db: Database, assessments: ReturnType<t
     }
     return value;
   }
-  return { read, export: load, recompute: (employeeId: string, input: unknown) => read(employeeId, input, true) };
+  return { read, export: (employeeId: string, input: unknown) => {
+    const q = profileQuery.parse(input); if (q.section || q.offset) throw new HttpError(400, '完整导出不能指定分页');
+    return load(employeeId, q);
+  }, recompute: (employeeId: string, input: unknown) => read(employeeId, input, true) };
 }

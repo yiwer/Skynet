@@ -40,6 +40,8 @@ test('large profiles page sessions at one frozen version while export retains ev
     assert.equal(page.sessions.length, 5); assert.equal(page.pages.sessions.nextOffset, null); assert.equal(page.version, profile.version);
     assert.deepEqual([...profile.sessions, ...page.sessions], fixed.sessions);
     assert.equal((await fixture.api(owner, path + '?section=sessions&offset=20')).status, 400);
+    assert.equal((await fixture.api(owner, path + '?version=' + profile.version + '&offset=20')).status, 400, 'a cursor must identify the paged section');
+    assert.equal((await fixture.api(owner, path + '/export?version=' + profile.version + '&section=sessions')).status, 400, 'full export does not silently accept section pagination');
     assert.equal((await fixture.api(owner, path + '?version=' + profile.version + '&section=sessions&offset=26')).status, 400);
   } finally { await fixture.close(); }
 });
