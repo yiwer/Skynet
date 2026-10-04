@@ -1,4 +1,4 @@
-import {useEffect,useState,type ReactNode,type CSSProperties} from 'react';
+import {useEffect,useLayoutEffect,useRef,useState,type ReactNode,type CSSProperties} from 'react';
 import type {PromptReport,PromptReportQuery,PromptFraction,PromptExample} from '../../packages/contracts/prompt-report.js';
 import {promptElementLabels,type InsightCitation} from '../../packages/contracts/session-insights.js';
 import {sourceLabel} from '../../packages/contracts/archive.js';
@@ -11,7 +11,28 @@ const pct=(value:number|null)=>value===null?'—':new Intl.NumberFormat('zh-CN',
 const count=(f:PromptFraction)=>`${f.numerator} / ${f.denominator}${f.unknown?` · ${f.unknown} 未知`:''}`;
 const groups=[{label:'实现与修复',types:['implementation','fix']},{label:'排查',types:['investigation']},{label:'重构与测试',types:['refactor','test']},{label:'运维与整理',types:['operations','documentation']},{label:'未知',types:['unknown']}];
 function Figure({label,title,children,table,note}:{label:string;title:string;children:ReactNode;table:ReactNode;note?:ReactNode}){const [chart,setChart]=useState(true);return <section className="usage-figure prompt-figure" aria-label={label}><div className="usage-figure-head"><h2>{title}</h2><div className="usage-view-toggle"><button aria-label={`${label}切换为图表`} aria-pressed={chart} onClick={()=>setChart(true)}>图表</button><button aria-label={`${label}切换为表格`} aria-pressed={!chart} onClick={()=>setChart(false)}>表格</button></div></div>{chart?children:<div className="prompt-table-wrap">{table}</div>}{note&&<p className="prompt-note">{note}</p>}</section>;}
-function Bars({rows,percent=false}:{rows:{label:string;value:number|null;detail:string}[];percent?:boolean}){const [tooltip,setTooltip]=useState(''),max=percent?1:Math.max(1,...rows.map(row=>row.value??0));return <div className="prompt-bars" onKeyDown={event=>{if(event.key==='Escape')setTooltip('');}}>{rows.map(row=><div className="prompt-bar-row" key={row.label}><span>{row.label}</span><button aria-label={`${row.label}：${percent?pct(row.value):row.value??'未知'}，${row.detail}`} onFocus={()=>setTooltip(row.detail)} onBlur={()=>setTooltip('')} onMouseEnter={()=>setTooltip(row.detail)} onMouseLeave={()=>setTooltip('')} style={{'--bar-width':`${(row.value??0)/max*100}%`} as CSSProperties}><span className="prompt-bar-fill"/></button><strong>{percent?pct(row.value):row.value??'—'}</strong></div>)}<div className="prompt-axis"><span>0{percent?'%':''}</span><span>{percent?'100%':max}</span></div>{tooltip&&<p role="tooltip" className="prompt-tooltip">{tooltip}</p>}</div>;}
+function usePromptTooltip(active:string){
+  const root=useRef<HTMLDivElement>(null),tip=useRef<HTMLParagraphElement>(null);
+  useLayoutEffect(()=>{
+    if(!active)return;
+    const position=()=>{
+      const box=root.current,popup=tip.current,anchor=box?.querySelector<HTMLElement>('[aria-expanded="true"]');if(!box||!popup||!anchor)return;
+      const base=box.getBoundingClientRect(),target=anchor.getBoundingClientRect();let top=0,bottom=innerHeight;
+      for(let parent=box.parentElement;parent;parent=parent.parentElement){const css=getComputedStyle(parent);if(/auto|scroll|hidden|clip/.test(css.overflowY)){const rect=parent.getBoundingClientRect();top=Math.max(top,rect.top+parent.clientTop);bottom=Math.min(bottom,rect.top+parent.clientTop+parent.clientHeight);}}
+      const above=Math.max(0,target.top-top-6),below=Math.max(0,bottom-target.bottom-6),up=above>below,room=Math.max(above,below);
+      popup.style.maxHeight=Math.min(180,room)+'px';const height=popup.getBoundingClientRect().height;
+      popup.style.top=((up?target.top-height-4:target.bottom+4)-base.top)+'px';
+    };
+    position();window.addEventListener('resize',position);window.addEventListener('scroll',position,true);
+    return()=>{window.removeEventListener('resize',position);window.removeEventListener('scroll',position,true);};
+  },[active]);
+  return {root,tip};
+}
+function Bars({rows,percent=false}:{rows:{label:string;value:number|null;detail:string}[];percent?:boolean}){
+  const [active,setActive]=useState(''),clicked=useRef(''),max=percent?1:Math.max(1,...rows.map(row=>row.value??0));
+  const close=()=>{clicked.current='';setActive('');},tooltip=rows.find(row=>row.label===active)?.detail,{root,tip}=usePromptTooltip(active);
+  return <div ref={root} className="prompt-bars" onPointerLeave={event=>{if(event.pointerType==='mouse')close();}} onKeyDown={event=>{if(event.key==='Escape')close();}}>{rows.map(row=><div className="prompt-bar-row" key={row.label}><span>{row.label}</span><button aria-label={`${row.label}：${percent?pct(row.value):row.value??'未知'}，${row.detail}`} aria-expanded={active===row.label} onFocus={()=>setActive(row.label)} onBlur={close} onPointerEnter={event=>{if(event.pointerType==='mouse')setActive(row.label);}} onClick={()=>{const next=clicked.current===row.label?'':row.label;clicked.current=next;setActive(next);}} style={{'--bar-width':`${(row.value??0)/max*100}%`} as CSSProperties}><span className="prompt-bar-fill"/></button><strong>{percent?pct(row.value):row.value??'—'}</strong></div>)}<div className="prompt-axis"><span>0{percent?'%':''}</span><span>{percent?'100%':max}</span></div>{tooltip&&<p ref={tip} role="tooltip" className="prompt-tooltip prompt-chart-tooltip">{tooltip}</p>}</div>;
+}
 function Citation({cites}:{cites:InsightCitation[]}){return <span className="prompt-citations">{cites.map((cite,index)=><a key={index} href={cite.webPath}>原句 {index+1}</a>)}</span>;}
 function Examples({items,positive}:{items:PromptExample[];positive:boolean}){return <div className="prompt-example-column"><h3>{positive?'后续未返工的写法':'后续发生返工的写法'}</h3>{!items.length?<p className="prompt-empty">暂无匹配示例</p>:items.map(item=><article className="prompt-example" data-positive={positive} key={item.messageId}><blockquote>{item.citations.map(cite=>cite.quote).join('\n')}</blockquote><p>{item.elements.map(key=>promptElementLabels[key]).join(' · ')}</p><div><strong>{item.employee}</strong><span className="prompt-inference">{item.correctionIds?.length?'含人工更正':'模型推断'}</span><Citation cites={item.citations}/></div><details><summary>后续提示词与分析版本</summary>{item.followingCitations.map((cite,index)=><p key={index}><a href={cite.webPath}>{cite.quote}</a></p>)}<p className="prompt-version">{item.analysisVersions.join(' · ')}</p></details></article>)}</div>;}
 export function PromptReportPage({request}:{request:Request}){
