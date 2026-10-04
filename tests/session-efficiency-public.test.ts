@@ -104,8 +104,10 @@ test('session efficiency keeps OAuth MCP, export, review, sorting, fixed evidenc
     await panel.getByRole('button',{name:'产效分布表格',exact:true}).click();
     await expect(panel.getByRole('table',{name:'任务类型产效',exact:true})).toContainText('10,000');
     await panel.getByRole('button',{name:'产效分布图表',exact:true}).click();
-    const point=panel.getByRole('img',{name:'实现 · 10,000 · 1 个会话',exact:true});
-    await point.focus();await expect(panel.getByRole('tooltip')).toContainText('10,000');await page.keyboard.press('Escape');await expect(panel.getByRole('tooltip')).toHaveCount(0);
+    const point=panel.getByRole('button',{name:'实现 · 10,000 · 1 / 100 Token',exact:true});
+    await point.focus();await expect(panel.getByRole('tooltip')).toContainText('1 / 100 Token');await page.keyboard.press('Escape');await expect(panel.getByRole('tooltip')).toHaveCount(0);
+    await point.press('Enter');await expect(panel.getByRole('region',{name:'选中会话',exact:true})).toBeVisible();
+    await panel.getByRole('button',{name:'关闭会话分段',exact:true}).click();
     await panel.getByRole('button',{name:'按 Token 排序',exact:true}).click();
     await panel.getByRole('table',{name:'会话明细',exact:true}).getByRole('button',{name:'查看会话分段',exact:true}).click();
     const detail=panel.getByRole('region',{name:'选中会话',exact:true});await expect(detail).toContainText('1 / 100 Token');
@@ -118,9 +120,11 @@ test('session efficiency keeps OAuth MCP, export, review, sorting, fixed evidenc
     await panel.getByRole('table',{name:'会话明细',exact:true}).getByRole('button',{name:'查看会话分段',exact:true}).click();
     for(const width of [320,768,1280,1920])for(const theme of ['light','dark']){
       await page.setViewportSize({width,height:900});await page.evaluate(value=>document.documentElement.dataset.theme=value,theme);
-      await panel.getByRole('heading',{name:'会话产效',exact:true}).scrollIntoViewIfNeeded();
+      await panel.locator('.workspace-scroll').evaluate(el=>{el.scrollTop=0;});
       assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth||document.documentElement.scrollHeight>innerHeight),false,width+' '+theme+' no outer scroll');
       await page.screenshot({path:join(sandbox.directory,'efficiency-'+width+'-'+theme+'.png'),animations:'disabled'});
+      await panel.getByRole('region',{name:'选中会话',exact:true}).scrollIntoViewIfNeeded();
+      await page.screenshot({path:join(sandbox.directory,'efficiency-detail-'+width+'-'+theme+'.png'),animations:'disabled'});
     }
     assert.deepEqual(errors,[]);await writeFile(join(sandbox.directory,'efficiency-public.json'),JSON.stringify(report,null,2));
     console.log('Efficiency public evidence: '+sandbox.directory);

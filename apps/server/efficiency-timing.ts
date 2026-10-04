@@ -9,6 +9,8 @@ import type {EfficiencySession,EfficiencySegment,EfficiencyQuery} from '../../pa
 import type {MetricsScope} from '../../packages/contracts/metrics.js';
 import type {TurnBoundary} from '../../packages/native/waits.js';
 import {addDays} from '../../packages/contracts/work-views.js';
+import {primaryInputCoverage} from './evidence-integrity.js';
+import {readEvidence} from './evidence.js';
 
 function unionDuration(segments:EfficiencySegment[]){
   const ranges=segments.filter(s=>s.durationMs!==null&&s.startedAt&&s.endedAt).map(s=>[Date.parse(s.startedAt!),Date.parse(s.endedAt!)] as const).sort((a,b)=>a[0]-b[0]);
@@ -16,7 +18,7 @@ function unionDuration(segments:EfficiencySegment[]){
   for(const [a,b]of ranges){if(start===undefined){start=a;end=b;}else if(a<=end)end=Math.max(end,b);else{duration+=end-start;start=a;end=b;}}
   return duration+(start===undefined?0:end-start);
 }
-function nativeSegments(originals:WaitOriginal[],parts:UsageSession[],scope:MetricsScope):EfficiencySegment[]{
+function nativeSegments(originals:WaitOriginal[],parts:UsageSession[],scope:MetricsScope,incomplete:Set<string>):EfficiencySegment[]{
   const result:EfficiencySegment[]=[],leaves=new Set(parts.flatMap(p=>p.latestCarrierSnapshotIds));
   const selected=originals.filter(o=>leaves.has(o.record.id)&&parts.some(p=>p.sourceSessionId===o.record.source_session_id));
   const turns=new Map<string,EfficiencySegment>(),rangeStart=Date.parse(scope.from+'T00:00:00+08:00'),rangeEnd=Date.parse(addDays(scope.to,1)+'T00:00:00+08:00');
@@ -37,8 +39,8 @@ function nativeSegments(originals:WaitOriginal[],parts:UsageSession[],scope:Metr
       if(existing){if(existing.startedAt!==item.startedAt||existing.endedAt!==item.endedAt||existing.durationMs!==item.durationMs){existing.durationMs=null;existing.reason='同一轮次边界存在冲突';}}
       else turns.set(key,item);
     }
-    if(original.record.manifest.capture?.gaps.length||original.record.manifest.capture?.partialLine||original.record.manifest.capture?.compacted){
-      result.push({kind:'gap',startedAt:null,endedAt:null,durationMs:null,evidence:[waitEvidence(original,1,0,true)],reason:'原件记录采集缺口或压缩，未提供缺口起止时间'});
+    if(incomplete.has(original.record.id)||original.record.manifest.capture?.gaps.length||original.record.manifest.capture?.partialLine||original.record.manifest.capture?.compacted){
+      result.push({kind:'gap',startedAt:null,endedAt:null,durationMs:null,evidence:[waitEvidence(original,1,0,true)],reason:'原件有未识别记录、采集缺口或压缩，未提供缺口起止时间'});
     }
   }
   result.push(...turns.values());
@@ -53,12 +55,15 @@ export async function efficiencyTiming(db:Database,raw:RawStore,sessions:Efficie
   try{
     await client.query('BEGIN ISOLATION LEVEL REPEATABLE READ');
     const people=[...new Set(sessions.flatMap(s=>s.employees.map(e=>e.employeeId)))],sourceIds=new Set(views.keys()),sessionIds=new Set(sessions.map(s=>s.sessionId));
-    const dataset=people.length?await waitDataset(client,raw,full,people):[];
+    const incomplete=new Set<string>();
+    const dataset=people.length?await waitDataset(client,raw,full,people,(record,bytes)=>{
+      if(sourceIds.has(record.id)&&!primaryInputCoverage(bytes,record.source,readEvidence(bytes,record.source)).complete)incomplete.add(record.id);
+    }):[];
     const originals=dataset.filter(o=>!sessionIds.has(o.sessionId)||sourceIds.has(o.record.id));
     for(const [id,view]of views){const original=originals.find(o=>o.record.id===id);if(!original||original.record.hash!==view.input.hash||original.revision!==view.input.attributionRevision)throw new HttpError(409,'产效原件归属已更新，请重新读取');}
     const waiting=await materializeWaits(client,originals,{...scope,period:q.period},clock);
     for(const row of sessions){
-      const parts=groups.get(row.sessionId)!,segments=nativeSegments(originals.filter(o=>o.sessionId===row.sessionId),parts,scope);
+      const parts=groups.get(row.sessionId)!,segments=nativeSegments(originals.filter(o=>o.sessionId===row.sessionId),parts,scope,incomplete);
       const replies=waiting.intervals.filter(w=>w.sessionId===row.sessionId&&parts.some(p=>p.employeeId===w.employeeId&&p.project===w.project));
       const rangeStart=Date.parse(scope.from+'T00:00:00+08:00'),rangeEnd=Date.parse(addDays(scope.to,1)+'T00:00:00+08:00');
       for(const wait of replies)segments.push({kind:'reply',startedAt:wait.startedAt&&wait.durationMs!==null?new Date(Math.max(Date.parse(wait.startedAt),rangeStart)).toISOString():wait.startedAt,

@@ -41,10 +41,45 @@ test('session efficiency keeps missing analysis and zero or unknown token denomi
     const frozen='/api/session-efficiency?'+query+'&version='+report.version;
     assert.deepEqual((await api('/api/session-efficiency/export?'+query+'&version='+report.version)).json(),report);
     await upload(30);assert.equal((await api('/api/session-efficiency?'+query)).json().total,6);
+    for(let n=1;n<=15;n++)await upload(40+n);
+    const firstPage=(await api('/api/session-efficiency?'+query+'&sort=tokens&direction=asc')).json();
+    assert.equal(firstPage.total,21);assert.equal(firstPage.sessions.length,20);assert.equal(firstPage.nextOffset,20);
+    const secondPage=(await api('/api/session-efficiency?'+query+'&version='+firstPage.version+'&offset=20&sort=tokens&direction=asc')).json();
+    assert.equal(secondPage.sessions.length,1);assert.equal(secondPage.sessions[0].tokens,null,'unknown costs remain at the end across pages');
+    assert.equal((await api('/api/session-efficiency/export?'+query+'&version='+firstPage.version)).json().sessions.length,21);
     assert.deepEqual((await api(frozen)).json(),report);
     await app.close();app=await createApp({db,rawDirectory:sandbox.env.RAW_DIRECTORY!,reportClock:()=>now});
     assert.deepEqual((await api(frozen)).json(),report);
     assert.equal((await api('/api/session-efficiency?period=this-week&version='+report.version)).statusCode,409);
+  }finally{await app?.close();await db.end();await sandbox.close();}
+});
+
+test('session timing clips cross-week intervals and preserves an unrecognized source gap instead of inventing complete activity', {timeout:120000},async()=>{
+  const sandbox=await createSandbox(),db=connect(sandbox.env.DATABASE_URL!);let app:Awaited<ReturnType<typeof createApp>>|undefined;
+  try{
+    const person=await sandbox.provision('边界合成员工');
+    const day=new Date(Date.now()+8*3600000),daysUntilMonday=(8-day.getUTCDay())%7||7;
+    const monday=Date.UTC(day.getUTCFullYear(),day.getUTCMonth(),day.getUTCDate()+daysUntilMonday)-8*3600000;
+    const stamp=(seconds:number)=>new Date(monday+seconds*1000).toISOString();
+    app=await createApp({db,rawDirectory:sandbox.env.RAW_DIRECTORY!,reportClock:()=>new Date(monday+3600000)});
+    const api=(url:string,payload?:unknown,credential=person.readerCredential,method:'GET'|'POST'|'PUT'='GET')=>app!.inject({url,method,headers:{Authorization:`Bearer ${credential}`,...(Buffer.isBuffer(payload)?{'Content-Type':'application/octet-stream'}:{})},...(payload===undefined?{}:{payload:payload as object})});
+    const device=(await api('/api/devices/enroll',{installationId:randomUUID(),name:'跨日设备'},person.enrollmentCredential,'POST')).json(),id=randomUUID();
+    const rows=[{type:'session_meta',timestamp:stamp(-62),payload:{id}},
+      {type:'response_item',timestamp:stamp(-61),payload:{type:'message',role:'user',content:[{type:'input_text',text:'开始跨日检查'}]}},
+      {type:'event_msg',timestamp:stamp(-60),payload:{type:'task_started',turn_id:'one'}},
+      {type:'response_item',timestamp:stamp(0),payload:{type:'message',role:'assistant',content:[{type:'output_text',text:'检查完毕'}]}},
+      {type:'event_msg',timestamp:stamp(60),payload:{type:'task_complete',turn_id:'one'}},
+      {type:'response_item',timestamp:stamp(180),payload:{type:'message',role:'user',content:[{type:'input_text',text:'核对结果'}]}}];
+    async function upload(items:unknown[]){const bytes=Buffer.from(items.map(row=>JSON.stringify(row)).join('\n')+'\n');await api('/api/chunks/'+digest(bytes),bytes,device.deviceCredential,'PUT');
+      const result=await api('/api/snapshots',{protocolVersion:1,sourceSessionId:id,source:'codex-cli',sourceVersion:'0.160.0',sourceOs:process.platform,project:'/synthetic/cross-week',hash:digest(bytes),byteLength:bytes.length,qualifiedAt:stamp(-62),capability:'unverified'},device.deviceCredential,'POST');assert.equal(result.statusCode,200,result.body);return result.json().snapshotId;}
+    await upload(rows);const first=(await api('/api/session-efficiency?period=this-week')).json(),timing=first.sessions[0].timing;
+    assert.equal(timing.knownAgentMs,60000);assert.equal(timing.knownReplyMs,120000);assert.equal(timing.activeMs,180000);
+    assert.equal(timing.segments.find((s:any)=>s.kind==='agent').startedAt,stamp(0));
+    await upload([...rows,{type:'future_business_event',timestamp:stamp(181),payload:{kind:'unknown'}}]);
+    const second=(await api('/api/session-efficiency?period=this-week')).json(),changed=second.sessions[0].timing;
+    assert.equal(changed.knownAgentMs,60000);assert.equal(changed.activeMs,null);
+    assert.ok(changed.segments.some((s:any)=>s.kind==='gap'&&s.durationMs===null));
+    assert.deepEqual((await api('/api/session-efficiency/export?period=this-week&version='+first.version)).json(),first);
   }finally{await app?.close();await db.end();await sandbox.close();}
 });
 

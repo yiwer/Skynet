@@ -12,7 +12,7 @@ const time=(n:number|null)=>n===null?'未知':n<60000?`${number(n/1000)} 秒`:`$
 const sources:Source[]=['codex-cli','claude-code-cli','codex-desktop'];
 const names:Record<EfficiencySegment['kind'],string>={agent:'Agent 工作',reply:'等待回复',permission:'等待权限',gap:'缺口'};
 
-function Distribution({rows}: {rows:SessionEfficiencyPage['distributions']}){
+function Distribution({rows,sessions,onSelect}: {rows:SessionEfficiencyPage['distributions'];sessions:EfficiencySession[]|null;onSelect:(id:string)=>void}){
   const [chart,setChart]=useState(true),[tooltip,setTooltip]=useState('');
   const maximum=Math.max(1,...rows.flatMap(r=>r.maximum===null?[]:[r.maximum]));
   return <section className="eff-card" aria-label="任务类型分布" onKeyDown={e=>{if(e.key==='Escape')setTooltip('');}}>
@@ -21,7 +21,7 @@ function Distribution({rows}: {rows:SessionEfficiencyPage['distributions']}){
       {[0,.25,.5,.75,1].map(f=><g key={f}><line x1={90+f*550} x2={90+f*550} y1="8" y2={rows.length*54+8}/><text x={90+f*550} y={rows.length*54+32} textAnchor="middle">{number(f*maximum)}</text></g>)}
       {rows.map((row,i)=><g key={row.taskType}><text x="75" y={35+i*54} textAnchor="end">{taskTypeLabels[row.taskType]}</text><line x1="90" x2="640" y1={30+i*54} y2={30+i*54}/>
         {row.median!==null&&<line className="eff-median" x1={90+row.median/maximum*550} x2={90+row.median/maximum*550} y1={14+i*54} y2={46+i*54}/>}
-        {row.points.map(point=>{const label=`${taskTypeLabels[row.taskType]} · ${number(point.value)} · ${point.count} 个会话`;return <circle key={point.value} role="img" tabIndex={0} aria-label={label} cx={90+point.value/maximum*550} cy={30+i*54} r="5" onFocus={()=>setTooltip(label)} onBlur={()=>setTooltip('')} onMouseEnter={()=>setTooltip(label)} onMouseLeave={()=>setTooltip('')}/>;})}
+        {(sessions??[]).filter(s=>s.taskType===row.taskType&&s.taskType!=='unknown'&&s.efficiency.value!==null).map((session,j)=>{const label=`${taskTypeLabels[row.taskType]} · ${number(session.efficiency.value)} · ${number(session.efficiency.numerator)} / ${number(session.efficiency.denominator)} Token`,tip=`${session.employees.map(e=>e.employee).join('、')} · ${label}`;return <circle key={session.sessionId} role="button" tabIndex={0} aria-label={label} cx={90+session.efficiency.value!/maximum*550} cy={30+i*54+(j%3-1)*7} r="5" onClick={()=>onSelect(session.sessionId)} onKeyDown={e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();onSelect(session.sessionId);}}} onFocus={()=>setTooltip(tip)} onBlur={()=>setTooltip('')} onMouseEnter={()=>setTooltip(tip)} onMouseLeave={()=>setTooltip('')}/>;})}
         <text x="660" y={35+i*54}>{row.count?`n=${row.count}`:'未知'}{row.unknownCount>0&&row.count>0?` · 未知 ${row.unknownCount}`:''}</text>
       </g>)}
     </svg></div>:<div className="eff-table-scroll"><table aria-label="任务类型产效"><thead><tr><th>任务类型</th><th>已知会话</th><th>未知</th><th>中位数</th><th>范围</th></tr></thead><tbody>{rows.map(r=><tr key={r.taskType}><th>{taskTypeLabels[r.taskType]}</th><td>{r.count}</td><td>{r.unknownCount}</td><td>{number(r.median)}</td><td>{r.minimum===null?'未知':`${number(r.minimum)} — ${number(r.maximum)}`}</td></tr>)}</tbody></table></div>}
@@ -76,7 +76,7 @@ export function SessionEfficiency({request}:Props){
     </form>
     {error&&<div role="alert"><p>{error}</p><button onClick={()=>setRetry(v=>v+1)}>重试读取</button></div>}
     <div className="workspace-scroll eff-workspace"><details className="eff-definition"><summary>产效比 · 代码产出 · 等待占比</summary><p>{page?.definition}</p><p>等待占比 = 已记录等待 / 已记录活跃区间。边界缺失、未知权限等待和零区间不计算；任务类型为模型推断。</p>{page&&<p>版本 {page.version} · {page.algorithmVersion}</p>}</details>
-      {busy&&!page?<p role="status">正在读取会话产效…</p>:page?.total===0?<p className="eff-empty">暂无会话</p>:page&&<><Distribution rows={page.distributions}/>
+      {busy&&!page?<p role="status">正在读取会话产效…</p>:page?.total===0?<p className="eff-empty">暂无会话</p>:page&&<><Distribution rows={page.distributions} sessions={complete?.sessions??null} onSelect={setSelected}/>
         <section className="eff-review" aria-label="值得复盘的会话"><header><h2>值得复盘的会话 <span>{page.reviewCount}</span></h2><details><summary>入选条件</summary><p>Token 高于 P75（{number(page.tokenP75)}）且已验证结果为 0；或声称多于已验证；或返工 ≥ 2。</p></details></header>
           {!complete?<p role="status">正在读取固定版本…</p>:!reviews.length?<p>暂无符合条件的会话</p>:<ul>{reviews.map(row=><li key={row.sessionId}><button onClick={()=>setSelected(row.sessionId)}><strong>{row.employees.map(e=>e.employee).join('、')}</strong><span>{row.projects.join(' · ')||sourceLabel(row.source)}</span><small>{row.reviewReasons.join(' · ')}</small></button></li>)}</ul>}
         </section>
