@@ -157,7 +157,7 @@ export function ConversationReader({ snapshotId, initial, request, navigation, o
       <p className="sr-only">{page.totalMessages} 条消息 · {page.totalToolCalls} 次工具调用 · 来源时间按北京时间显示</p>
       <SourceStatus page={page}/>
       {waitError && <p role="status" className="error">等待记录：{waitError}</p>}
-      {waits && <details className="conversation-source-status"><summary>等待记录 · 版本 {waits.revision}<span>权限等待 · 未知</span></summary><p>{waits.definition}</p></details>}
+      {waits && <details className="conversation-wait-status"><summary>等待记录 · 版本 {waits.revision}<span>权限等待 · 未知</span></summary><p>{waits.definition}</p></details>}
       {page.traceCount > 0 && <details className="conversation-session-trace" open={traceOpen} onToggle={event => setTraceOpen(event.currentTarget.open)}><summary>Trace <span>{page.traceCount}</span></summary>
         <TracePanel key={page.tracePath} path={page.tracePath} open={traceOpen} request={request}/></details>}
       {page.messages.length === 0 && <p>暂无消息</p>}

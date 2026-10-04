@@ -139,5 +139,3 @@ export async function registerMcp(app: FastifyInstance, db: Database, archive: A
     return reply.header('Content-Disposition', `attachment; filename="${file.filename}"`).type(file.contentType).send(file.bytes);
   });
 }
-
-

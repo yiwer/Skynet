@@ -18,9 +18,12 @@ export function nativeTurnBoundaries(bytes: Buffer, source: Source): TurnBoundar
     if (!kind) continue;
     const turnId = typeof event.turn_id === 'string' && event.turn_id.length > 0 && event.turn_id.length <= 256 ? event.turn_id : null;
     const recorded = event.completed_at;
-    const completionTime = kind === 'completed' && typeof recorded === 'number' && Number.isFinite(recorded) && Math.abs(recorded * 1000) <= 8.64e15
-      ? new Date(recorded * 1000).toISOString() : kind === 'completed' ? time(recorded) : null;
-    boundaries.push({ line, kind, turnId, timestamp: completionTime ?? time(row.timestamp) });
+    const completionTime = typeof recorded === 'number' && Number.isSafeInteger(recorded) && Math.abs(recorded * 1000) <= 8.64e15
+      ? new Date(recorded * 1000).toISOString() : null;
+    // The native optional field is integer Unix seconds. Absence permits the
+    // rollout record timestamp; an invalid explicit value remains unknown.
+    const timestamp = kind === 'completed' && recorded != null ? completionTime : time(row.timestamp);
+    boundaries.push({ line, kind, turnId, timestamp });
   }
   return boundaries;
 }

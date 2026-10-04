@@ -107,6 +107,20 @@ test('waiting report, conversation labels, OAuth MCP and export read one frozen 
       assert.equal(await page.evaluate(() => document.documentElement.scrollHeight <= innerHeight && document.documentElement.scrollWidth <= innerWidth), true);
       const path = join(directory, `waits-conversation-${width}.png`); await page.screenshot({ path, animations: 'disabled' }); screenshots.push(path);
     }
+    const unknownId = randomUUID(), unknownRaw = Buffer.from([
+      { type: 'session_meta', payload: { id: unknownId } }, message('user', '请求', 0), message('assistant', '已完成本轮', 10),
+      { type: 'event_msg', timestamp: time(1000), payload: { type: 'task_complete', turn_id: 'missing-user-time' } },
+      { ...message('user', '缺来源时间的下一条消息', 601000), timestamp: 'unknown-source-time' },
+    ].map(row => JSON.stringify(row)).join('\n') + '\n');
+    assert.equal((await sandbox.api('/api/chunks/' + digest(unknownRaw), device.deviceCredential, { method: 'PUT', headers: { 'Content-Type': 'application/octet-stream' }, body: unknownRaw as any })).status, 201);
+    assert.equal((await sandbox.api('/api/snapshots', device.deviceCredential, json({ protocolVersion: 1, sourceSessionId: unknownId, source: 'codex-cli', sourceVersion: '0.160.0',
+      sourceOs: process.platform, project: '/synthetic/unknown-timestamp', hash: digest(unknownRaw), byteLength: unknownRaw.length, qualifiedAt: time(0), capability: 'unverified' }))).status, 200);
+    await page.goto(sandbox.origin + '/#waits'); await page.getByRole('button', { name: '接入至今', exact: true }).click();
+    await page.getByLabel('项目路径').fill('/synthetic/unknown-timestamp'); await page.getByRole('button', { name: '应用', exact: true }).click();
+    await expect(page.getByTestId('wait-reply-total')).toHaveText('未知');
+    await expect(page.locator('.wait-stats .usage-stat').nth(1).locator('dd')).toHaveText('未知');
+    await page.screenshot({ path: join(directory, 'waits-unknown-320.png'), animations: 'disabled' });
+    assert.deepEqual(await (await api('/api/waits?' + params(fixed))).json(), first, 'late source does not alter report-linked conversation labels');
     assert.deepEqual(errors, []);
     await writeFile(join(directory, 'browser-evidence.json'), JSON.stringify({ snapshotId, version: first.version, count: first.total, replyMs: first.summary.knownReplyWaitMs,
       permissionMs: first.summary.permissionWaitMs, screenshots, browserErrors: errors }, null, 2));

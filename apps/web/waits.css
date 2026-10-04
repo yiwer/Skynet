@@ -12,6 +12,10 @@
 .platform-main .conversation-wait .wait-long{margin-left:0}
 .platform-main .wait-evidence{display:flex;flex-wrap:wrap;gap:8px 14px;padding:10px 0;line-height:1.6}
 .platform-main .wait-evidence>span{flex-basis:100%;overflow-wrap:anywhere}
+.platform-main .conversation-wait-status{margin:0 0 16px;padding:8px 0;border-bottom:1px solid var(--color-rule-soft);font-size:12px;color:var(--color-muted)}
+.platform-main .conversation-wait-status>summary{display:flex;align-items:center;flex-wrap:wrap;gap:8px;cursor:pointer;list-style:revert}
+.platform-main .conversation-wait-status>summary::before{content:'▸';display:inline-block;transition:transform var(--dur-short) var(--ease-out)}
+.platform-main .conversation-wait-status[open]>summary::before{transform:rotate(90deg)}
 .platform-main .waiting-report .usage-filter-row input{width:180px;max-width:100%;margin:0;min-height:36px}
 @media(max-width:700px){.platform-main .wait-stats{grid-template-columns:1fr 1fr}.platform-main .wait-stats .usage-stat:first-child{grid-column:1/-1}.platform-main .waiting-report .usage-filter-row>label{min-width:0;flex:1 1 120px}.platform-main .waiting-report .usage-filter-row input{width:100%}}
 @media(prefers-reduced-motion:reduce){.platform-main .conversation-wait>summary::before{transition:none}}

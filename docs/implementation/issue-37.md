@@ -6,7 +6,7 @@
 
 | 客户端 | 本轮结束与下一条用户消息 | 权限等待 |
 | --- | --- | --- |
-| Codex CLI / Desktop | Codex `rust-v0.160.0` 的 `event_msg.task_complete`（`turn_complete` 别名），`turn_id` 与有效时间；优先 `completed_at` 秒，否则使用行时间。配对原件顺序下一条业务 user；`task_started`/`turn_started`、`turn_aborted` 保留活动/中断语义。结束不是永久关闭会话。 | 当前 rollout 不持久化请求/决定，返回 `null` / `unknown` |
+| Codex CLI / Desktop | Codex `rust-v0.160.0` 的 `event_msg.task_complete`（`turn_complete` 别名），`turn_id` 与有效时间；优先有效 `completed_at` 整数秒；字段缺失时使用行时间，显式无效值未知。配对原件顺序下一条业务 user；`task_started`/`turn_started`、`turn_aborted` 保留活动/中断语义。结束不是永久关闭会话。 | 当前 rollout 不持久化请求/决定，返回 `null` / `unknown` |
 | Claude Code CLI | 已归档 transcript 可定位 user/assistant，但没有可信且已持久化的最终 Stop 边界；可发现一个待确认间隔，耗时保持 `null`，不以 assistant 时间猜结束。 | 请求 hook 没有可验证的请求/决定配对、标识及决定时刻，返回 `null` / `unknown` |
 
 依据：[Codex 固定版本 protocol.rs](https://raw.githubusercontent.com/openai/codex/rust-v0.160.0/codex-rs/protocol/src/protocol.rs)、[rollout policy.rs](https://raw.githubusercontent.com/openai/codex/rust-v0.160.0/codex-rs/rollout/src/policy.rs)、[Claude hooks 官方文档](https://code.claude.com/docs/en/hooks)。Codex 的协议类型存在并不证明 rollout 记录该类型；`ExecApprovalRequest`、`RequestPermissions`、`ApplyPatchApprovalRequest` 在策略中不持久化。Claude Stop 可被阻止继续，回调时 transcript 也未必已落盘。没有创造 `permission_decision` fixture 或从工具执行结束猜用户批准时刻。
@@ -23,7 +23,7 @@
 - `wait_revisions` 冻结计算口径、范围、全部并行证据输入、原件 hash、归属修订及逻辑会话解释。迟到/补传或资格变更生成新版本，旧版本可在重启、翻周后继续读取。增量与强制原件全量重算产出相同版本。日期筛选不使用上传时间。
 - `GET /api/waits`、`POST /api/waits/recompute`、`GET /api/waits/export` 与 OAuth MCP `read_waits` 共用 `waitsService`。全部要求个人读取身份，设备凭据不能读取。支持 `snapshotId` 或报表 period/employeeId/source/project；每页25段，后续页必须传 `version`；导出是该固定版本的全部结果，不截断。重算不接受旧 version。
 - 对话读取可带 `snapshotId + lines`（最多25行）取得独立标签，不改变现有对话分页。报表→对话使用 `waitVersion`；服务通过 `version + contextSnapshotId + lines` 仅取固定报表版本中对应原件的标签。原件结束锚点与用户对话锚点分别提供，不把未渲染的生命周期事件假装成对话消息。
-- 单次计算限20,000快照、100,000业务事件、128 MiB原件；按员工或原件查询缩到相关员工及必要恢复谱系。页面/工具主体80 KiB，完整导出16 MiB。超过范围返回413，不悄悄截断总数。并发同范围计算返回409，可固定版本读取或重试。
+- 单次计算限20,000快照、100,000业务事件、128 MiB主原件扫描预算；按员工或原件查询缩到相关员工及必要恢复谱系。页面/工具主体80 KiB，完整导出16 MiB。超过范围返回413，不悄悄截断总数。并发同范围计算返回409，可固定版本读取或重试。
 
 ## Web 路径
 
@@ -53,3 +53,13 @@ node --import tsx --test --test-concurrency=1 tests/waits-public.test.ts tests/w
 | 布局与证据锚点 | 亮/暗1440、390、320截图与外层无滚动断言；等待来源展开与原件定位，浏览器无pageerror |
 
 有效RED/GREEN日志、截图、浏览器JSON及SHA-256索引保存在上述外部证据目录。最终集成验证记录在收口段补充。
+
+## 最终集成与边界回归
+
+已将集成 `ec9b2d3`（#34/#35/#36/#38）合入本票；合并只解决 app/MCP 参数及侧栏路由接线，保留等待、组装、处理、洞察全部入口。`09-integrated-public.txt` 的七项公开集成中六项首轮通过，既有来源状态浏览器校验发现两个折叠区复用同一定位类；拆出独立等待区域后，`11-final-ui-green.txt` 两项定向公开旅程通过，包含 #36 全部上下文、长消息、工具跨页、原生状态、投递状态和 OAuth MCP 行为。组装公开旅程和真实隔离 Claude 洞察在本轮共同接口集成上也通过。
+
+额外收口：完整续传到达后，当前逻辑会话覆盖可解除旧未完成前缀造成的未知，旧快照仍保留未知（`07-continuation-red/green.txt`）。有效完成事件配缺失用户时间时，页面不能把零个已确认间隔显示为零时长，`12-unknown-ui-red.txt` 复现后修正。重新核查官方 `TurnCompleteEvent` 的 `completed_at: Option<i64>` 为整数 Unix 秒；缺失可取 rollout 行时间，显式损坏值保持未知，`13-native-time-red.txt` 复现后修正，没有保留无法由该原生类型产生的浮点 fixture。上述边界与完整 OAuth/Web 旅程在 `15-final-boundaries-green.txt` **2/2 通过（31.40 秒）**；`14-final-build.txt` 的 TypeScript 与 Vite 构建通过。
+
+最终亮/暗 1440、390、320 px，以及320/390的等待/并行来源展开和320的未知状态，共10张稳定截图已检查。截图等待侧栏最终边界并使用 `animations: disabled`；最窄宽度下筛选、长等待与并行提示自然换行，根文档没有横纵滚动，浏览器无pageerror。早期 `waits-report-narrow.png` 是响应式过渡中间帧，保留作过程记录，不计最终视觉证据。测试与图像SHA-256清单见外部 `manifest.json`。
+
+本票未部署、推送或关闭远端票；由独立 merger 继续集成。AC-32 的千会话延迟由 #54 对集成版本继续验证，本票不以小型合成旅程声称达到该性能门槛。

@@ -61,8 +61,8 @@ export function WaitingReport({ request }: { request: Request }) {
     <div className="workspace-scroll">
       {busy && <p role="status">正在读取等待记录…</p>}{error && <div role="alert"><p>{error}</p><button onClick={() => setRetry(value => value + 1)}>重试</button></div>}
       {page && <><dl className="usage-stats wait-stats">
-        <div className="usage-stat"><dt>{page.summary.replyWaitMs === null ? '已确认等待回复' : '等待回复'}</dt><dd data-testid="wait-reply-total">{page.summary.replyWaitCount ? waitDuration(page.summary.knownReplyWaitMs) : page.replySupport === 'unknown' ? '未知' : '0 分 0 秒'}</dd><span>{page.summary.replyWaitCount} 段{page.summary.unknownReplyWaitCount > 0 && ` · 未知 ${page.summary.unknownReplyWaitCount} 段`}</span></div>
-        <div className="usage-stat"><dt>{page.summary.replyWaitMs === null ? '已确认长等待' : '长等待'}</dt><dd>{page.replySupport === 'unknown' && !page.summary.replyWaitCount ? '未知' : page.summary.longWaitCount}</dd><span>≥ 10 分钟</span></div>
+        <div className="usage-stat"><dt>{page.summary.replyWaitMs === null ? '已确认等待回复' : '等待回复'}</dt><dd data-testid="wait-reply-total">{page.summary.replyWaitCount ? waitDuration(page.summary.knownReplyWaitMs) : page.summary.replyWaitMs === null ? '未知' : '0 分 0 秒'}</dd><span>{page.summary.replyWaitCount} 段{page.summary.unknownReplyWaitCount > 0 && ` · 未知 ${page.summary.unknownReplyWaitCount} 段`}</span></div>
+        <div className="usage-stat"><dt>{page.summary.replyWaitMs === null ? '已确认长等待' : '长等待'}</dt><dd>{page.summary.replyWaitMs === null && !page.summary.replyWaitCount ? '未知' : page.summary.longWaitCount}</dd><span>≥ 10 分钟</span></div>
         <div className="usage-stat"><dt>权限等待</dt><dd data-testid="wait-permission-total">未知</dd></div>
       </dl>
       {page.daily.length > 0 && <details className="usage-data-status"><summary>按日查看</summary><div className="usage-table-scroll"><table><caption>按日等待</caption><thead><tr><th>日期</th><th>已确认等待回复</th><th>未知段数</th></tr></thead><tbody>{page.daily.map(day => <tr key={day.date}><th>{day.date}</th><td>{waitDuration(day.knownReplyWaitMs)}</td><td>{day.unknownReplyWaitCount}</td></tr>)}</tbody></table></div></details>}

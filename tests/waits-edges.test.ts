@@ -42,8 +42,11 @@ test('duplicate and overlapping native lifecycle events cannot invent waits; inc
     assert.equal((await read(aborted.snapshotId)).intervals.length, 0);
     const reversed = await upload([header, msg('user', 0), msg('assistant', 10), event('task_complete', 'reverse', 700000), msg('user', 600000)]);
     assert.equal((await read(reversed.snapshotId)).intervals[0].durationMs, null);
-    const exact = await upload([header, msg('user', 0), msg('assistant', 10), event('task_complete', 'exact', 999999, { completed_at: (base + 1000) / 1000 }), msg('user', 601000)]);
+    const completionSeconds = Math.floor((base + 1000) / 1000);
+    const exact = await upload([header, msg('user', 0), msg('assistant', 10), event('task_complete', 'exact', 999999, { completed_at: completionSeconds }), msg('user', completionSeconds * 1000 + 600000 - base)]);
     assert.equal((await read(exact.snapshotId)).intervals[0].durationMs, 600000, 'native completed_at determines the endpoint when present');
+    const malformed = await upload([header, msg('user', 0), msg('assistant', 10), event('task_complete', 'malformed', 1000, { completed_at: 'invalid-native-value' }), msg('user', 601000)]);
+    assert.equal((await read(malformed.snapshotId)).intervals[0].durationMs, null, 'an explicitly invalid completion time cannot silently fall back to a different endpoint');
     const claudeId = randomUUID();
     const claude = await upload([{ type: 'user', uuid: randomUUID(), sessionId: claudeId, timestamp: time(0), message: { role: 'user', content: '请求' } },
       { type: 'assistant', uuid: randomUUID(), sessionId: claudeId, timestamp: time(1000), message: { id: randomUUID(), role: 'assistant', content: [{ type: 'text', text: '没有持久化轮次结束' }] } },
