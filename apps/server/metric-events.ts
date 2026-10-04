@@ -6,6 +6,9 @@ import { digest } from './database.js';
 export type MetricEvent = { event_id: string; snapshot_id: string; employee_id: string; employee: string; device_id: string; source: Source;
   source_session_id: string; project: string; source_date: string; role: string; line: number; block: number; material_id: string | null;
   qualification_revision: string; proof_snapshot_id: string | null };
+type EventRow = [eventId: string, snapshotId: string, employeeId: string, employee: string, deviceId: string, source: Source,
+  sourceSessionId: string, project: string, sourceDate: string, role: string, line: number, block: number, materialId: string | null,
+  qualification: string, proof: string | null];
 type PackedEvent = [position: number, eventId: string, role: string, line: number, block: number, qualification: string, proof: string | null];
 type Group = Pick<MetricEvent, 'snapshot_id' | 'employee_id' | 'employee' | 'device_id' | 'source' | 'source_session_id' | 'project' | 'source_date' | 'material_id'> & { events: PackedEvent[] };
 const sameMetadata = (group: Group, event: MetricEvent) => group.snapshot_id === event.snapshot_id && group.employee_id === event.employee_id
@@ -18,17 +21,22 @@ const sameMetadata = (group: Group, event: MetricEvent) => group.snapshot_id ===
  * compact identity retains every field/occurrence without asking PostgreSQL
  * to sort the wide rows a second time by nine repeated metadata columns. */
 export async function readMetricEvents(client: pg.PoolClient, scope: MetricsScope, limit: number): Promise<{ events: MetricEvent[]; groups: MetricEvent[][]; identity: string } | undefined> {
-  const events = (await client.query(`SELECT o.event_id,o.snapshot_id,o.employee_id,e.name AS employee,o.device_id,o.source,
+  const rows = (await client.query<EventRow>({ rowMode: 'array', text: `SELECT o.event_id,o.snapshot_id,o.employee_id,e.name AS employee,o.device_id,o.source,
       o.source_session_id,o.project,o.source_date,o.role,o.line,o.block,o.material_id,o.qualification_revision,o.proof_snapshot_id
     FROM effective_event_origins o JOIN employees e ON e.id=o.employee_id
     WHERE o.context='after-enrollment' AND o.source_date BETWEEN $1 AND $2
       AND ($3::uuid IS NULL OR o.employee_id=$3) AND ($4::text IS NULL OR o.source=$4) AND ($5::text IS NULL OR o.project=$5)
     ORDER BY o.event_id LIMIT ($6::integer+1)`,
-  [scope.from, scope.to, scope.employeeId ?? null, scope.source ?? null, scope.project ?? null, limit])).rows as MetricEvent[];
-  if (events.length > limit) return undefined;
+  values: [scope.from, scope.to, scope.employeeId ?? null, scope.source ?? null, scope.project ?? null, limit] })).rows;
+  if (rows.length > limit) return undefined;
+  const events: MetricEvent[] = [];
   const groups: Group[] = [], eventGroups: MetricEvent[][] = [];
   const bySnapshot = new Map<string, { first: number; others?: Map<string, number> }>();
-  for (const [index, event] of events.entries()) {
+  for (const [index, row] of rows.entries()) {
+    const event: MetricEvent = { event_id: row[0], snapshot_id: row[1], employee_id: row[2], employee: row[3], device_id: row[4], source: row[5],
+      source_session_id: row[6], project: row[7], source_date: row[8], role: row[9], line: row[10], block: row[11], material_id: row[12],
+      qualification_revision: row[13], proof_snapshot_id: row[14] };
+    events.push(event);
     const bucket = bySnapshot.get(event.snapshot_id);
     let groupIndex: number | undefined, key: string | undefined;
     // Most ordinary carriers share one metadata tuple. Compare all fields
