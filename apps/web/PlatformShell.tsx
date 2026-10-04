@@ -42,7 +42,7 @@ type NavigationItem = { label: string; icon: IconName; view?: string; activeView
 const navigation: { label: string; items: NavigationItem[] }[] = [
   { label: '观察', items: [
     { label: '团队概览', icon: 'overview', view: 'coverage', activeViews: ['coverage', 'daily'] },
-    { label: '活动记录', icon: 'list' },
+    { label: '活动记录', icon: 'list', view: 'activity' },
     { label: '员工', icon: 'person', view: 'profile' },
     { label: '项目', icon: 'folder', view: 'work' },
     { label: '会话', icon: 'session', view: 'archive' },
