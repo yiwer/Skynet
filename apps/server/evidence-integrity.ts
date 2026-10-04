@@ -98,7 +98,10 @@ export async function verifySnapshotIntegrity(q:Query,raw:RawStore,id:string,mat
  * unchanged. No stored proof substitutes for callers' fresh raw verification. */
 export async function verifySnapshotsIntegrity(q:Query,raw:RawStore,snapshotIds:string[],unavailable?:(error:RawUnavailableError,snapshotIds:string[])=>void){
   if(!snapshotIds.length)return;
-  const rows=(await q.query('SELECT DISTINCT snapshot_id,event_id FROM snapshot_events WHERE snapshot_id=ANY($1::uuid[])',[snapshotIds])).rows;
+  // Select the missing-proof queue before batching original reads. Existing
+  // invalid proofs still reach the repair pass below; callers still verify raw.
+  const rows=(await q.query(`SELECT DISTINCT se.snapshot_id,se.event_id FROM snapshot_events se WHERE se.snapshot_id=ANY($1::uuid[])
+    AND NOT EXISTS(SELECT 1 FROM event_integrity i WHERE i.event_id=se.event_id AND i.version=$2)`,[snapshotIds,integrityVersion])).rows;
   const carriers=new Map<string,string[]>();for(const row of rows){let ids=carriers.get(row.event_id);if(!ids){ids=[];carriers.set(row.event_id,ids);}ids.push(row.snapshot_id);}
   const failed=new Set<string>();
   await verifyOriginIntegrity(q,raw,[...carriers.keys()],unavailable?(error,eventIds)=>{
