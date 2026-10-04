@@ -1,8 +1,9 @@
-import { useEffect,useMemo,useRef,useState,type KeyboardEvent } from 'react';
+import { useEffect,useMemo,useRef,useState } from 'react';
 import { activityLabels,activityTypes,type ActivityPage,type ActivityQuery,type ActivityEvidence } from '../../packages/contracts/activity.js';
 import { sourceLabel } from '../../packages/contracts/archive.js';
 import { beijingDate } from '../../packages/contracts/reports.js';
 import { addDays } from '../../packages/contracts/work-views.js';
+import {useUsageChartDetail} from './UsageChartDetail.js';
 import './activity.css';
 
 type Request=(path:string,signal?:AbortSignal,method?:'POST',body?:unknown)=>Promise<Response>;
@@ -11,28 +12,36 @@ const time=(value:string|null)=>value?new Date(value).toLocaleTimeString('zh-CN'
 const link=(evidence:ActivityEvidence)=>evidence.conversationPath??evidence.webPath;
 function fromHash(hash:string):ActivityQuery{const q=new URLSearchParams(hash.split('?')[1]);return {date:q.get('date')??beijingDate(new Date()),employeeId:q.get('employeeId')??undefined,source:q.get('source') as ActivityQuery['source']||undefined,project:q.get('project')??undefined,type:q.get('type') as ActivityQuery['type']||undefined,version:q.get('version')??undefined,offset:Number(q.get('offset')??0)};}
 function Rhythm({page}:{page:ActivityPage}){
-  const [table,setTable]=useState(false),[tooltip,setTooltip]=useState('');
+  const [table,setTable]=useState(false),detail=useUsageChartDetail('活动详情');
   const chart=useRef<HTMLDivElement>(null),[width,setWidth]=useState(800),[now,setNow]=useState(()=>new Date());
   useEffect(()=>{const timer=setInterval(()=>setNow(new Date()),30000);return()=>clearInterval(timer);},[]);
   useEffect(()=>{if(!chart.current)return;const observer=new ResizeObserver(entries=>setWidth(Math.max(180,entries[0]!.contentRect.width)));observer.observe(chart.current);return()=>observer.disconnect();},[table]);
   const left=width<400?84:128,plot=width-left-20,start=Date.parse(page.scope.date+'T00:00:00+08:00'),px=(value:string)=>left+Math.max(0,Math.min(1,(Date.parse(value)-start)/86400000))*plot;
   const height=page.lanes.length*48+40,nowX=beijingDate(now)===page.scope.date?px(now.toISOString()):null;
-  const focus=(label:string)=>({onFocus:()=>setTooltip(label),onMouseEnter:()=>setTooltip(label),onBlur:()=>setTooltip(''),onMouseLeave:()=>setTooltip(''),onKeyDown:(event:KeyboardEvent)=>{if(event.key==='Escape')setTooltip('');}});
-  return <section className="activity-rhythm" aria-label="对话节奏"><div className="activity-section-head"><h2>对话节奏</h2><div className="activity-view-switch" role="group" aria-label="节奏视图"><button aria-pressed={!table} onClick={()=>setTable(false)}>节奏图表</button><button aria-pressed={table} onClick={()=>setTable(true)}>节奏表格</button></div></div>
+  const cells=Math.max(1,Math.floor(plot/44)),cellWidth=plot/cells,cell=(value:string)=>Math.min(cells-1,Math.floor((px(value)-left)/cellWidth));
+  const targets=page.lanes.flatMap((lane,index)=>{
+    const groups=new Map<number,{id:string;label:string;evidence:ActivityEvidence}[]>();
+    const add=(id:string,label:string,evidence:ActivityEvidence,from:string,to=from)=>{for(let n=cell(from);n<=cell(to);n++){const items=groups.get(n)??[];items.push({id,label,evidence});groups.set(n,items);}};
+    for(const session of lane.sessions)add('session:'+session.id,`${lane.employee} · 会话 · ${sourceLabel(session.source)} · ${time(session.observedFrom)} — ${time(session.observedTo)}`,session.evidence,session.observedFrom,session.observedTo);
+    for(const segment of lane.segments)add('wait:'+segment.id,`${lane.employee} · 长等待 · ${time(segment.startedAt)} — ${time(segment.endedAt)}`,segment.evidence,segment.startedAt,segment.endedAt);
+    for(const point of lane.points)add('point:'+point.id,`${lane.employee} · ${activityLabels[point.type]} · ${time(point.timestamp)}`,point.evidence,point.timestamp!);
+    return [...groups].map(([column,items])=>({key:lane.employeeId+':'+column,left:left+column*cellWidth,top:index*48+2,label:`${lane.employee} · ${items.length} 条活动`,items}));
+  });
+  return <section className="activity-rhythm" aria-label="对话节奏"><div className="activity-section-head"><h2>对话节奏</h2><div className="activity-view-switch" role="group" aria-label="节奏视图"><button aria-pressed={!table} onClick={()=>{detail.close();setTable(false);}}>节奏图表</button><button aria-pressed={table} onClick={()=>{detail.close();setTable(true);}}>节奏表格</button></div></div>
     <div className="activity-legend"><span data-agent="codex-cli">Codex CLI</span><span data-agent="codex-desktop">Codex Desktop</span><span data-agent="claude-code-cli">Claude Code</span><span className="legend-dot">提问</span><span className="legend-rework">返工</span><span className="legend-wait">长等待</span></div>
     {table?<div className="activity-table-wrap"><table className="activity-lane-table" aria-label="对话节奏表格"><thead><tr><th>员工</th><th>类型</th><th>时间</th><th>来源</th></tr></thead><tbody>{page.lanes.flatMap(lane=>[
       ...lane.sessions.map(session=><tr key={session.id}><th>{lane.employee}</th><td>会话记录区间<span className="activity-secondary">{sourceLabel(session.source)} · {session.state==='in-progress'?'进行中':session.state==='waiting-input'?'等待输入':session.state==='interrupted'?'已中断':'状态未知'}</span></td><td>{time(session.observedFrom)} — {time(session.observedTo)}</td><td><a href={link(session.evidence)}>查看来源</a></td></tr>),
       ...lane.points.map(point=><tr key={point.id}><th>{lane.employee}</th><td>{activityLabels[point.type]}</td><td>{time(point.timestamp)}</td><td><a href={link(point.evidence)}>查看原句</a></td></tr>),
       ...lane.segments.map(segment=><tr key={segment.id}><th>{lane.employee}</th><td>长等待</td><td>{time(segment.startedAt)} — {time(segment.endedAt)}<span className="activity-secondary">当日 {Math.round(segment.durationInScopeMs/60000*10)/10} 分钟</span></td><td><a href={link(segment.evidence)}>查看用户回复</a></td></tr>),
-    ])}</tbody></table></div>:<div className="activity-chart" ref={chart}><svg viewBox={`0 0 ${width} ${Math.max(88,height)}`} role="img" aria-label="对话节奏">
+    ])}</tbody></table></div>:<div className="activity-chart" ref={chart} {...detail.boundary}><div className="activity-canvas"><svg viewBox={`0 0 ${width} ${Math.max(88,height)}`} role="img" aria-label="对话节奏">
       {(width<400?[0,6,12,18,24]:[0,4,8,12,16,20,24]).map(hour=><g key={hour}><line className="activity-grid" x1={left+hour/24*plot} x2={left+hour/24*plot} y1="0" y2={height-25}/><text className="activity-axis" x={left+hour/24*plot} y={height-6} textAnchor="middle">{String(hour).padStart(2,'0')}</text></g>)}
       {nowX!==null&&<g><line className="activity-now" x1={nowX} x2={nowX} y1="0" y2={height-25}/><title>现在 {time(now.toISOString())}</title></g>}
       {page.lanes.map((lane,index)=>{const y=index*48+24;return <g key={lane.employeeId}><foreignObject x="0" y={y-12} width={left-10} height="24"><div className="activity-person activity-person-label" title={lane.employee}>{lane.employee}</div></foreignObject>
-        {lane.sessions.map(session=>{const label=`${lane.employee} · ${sourceLabel(session.source)} · ${time(session.observedFrom)} — ${time(session.observedTo)}`;return <a key={session.id} href={link(session.evidence)} aria-label={label} {...focus(label)}><rect className="activity-session" data-agent={session.source} x={px(session.observedFrom)} y={y-7} width={Math.max(4,px(session.observedTo)-px(session.observedFrom))} height="14" rx="5"/></a>;})}
-        {lane.segments.map(segment=>{const label=`${lane.employee} · 长等待 · ${time(segment.startedAt)} — ${time(segment.endedAt)}`;return <a key={segment.id} href={link(segment.evidence)} aria-label={label} {...focus(label)}><rect className="activity-wait" x={px(segment.startedAt)} y={y-7} width={Math.max(3,px(segment.endedAt)-px(segment.startedAt))} height="14"/></a>;})}
-        {lane.points.map(point=>{const label=`${lane.employee} · ${activityLabels[point.type]} · ${time(point.timestamp)}`;return <a key={point.id} href={link(point.evidence)} aria-label={label} {...focus(label)}><circle className="activity-point-hit" cx={px(point.timestamp!)} cy={y} r="10"/><circle className="activity-point" data-rework={point.type==='rework'||undefined} cx={px(point.timestamp!)} cy={y} r="4"/></a>;})}
+        {lane.sessions.map(session=><rect key={session.id} className="activity-session" data-agent={session.source} x={px(session.observedFrom)} y={y-7} width={Math.max(4,px(session.observedTo)-px(session.observedFrom))} height="14" rx="5"/>)}
+        {lane.segments.map(segment=><rect key={segment.id} className="activity-wait" x={px(segment.startedAt)} y={y-7} width={Math.max(3,px(segment.endedAt)-px(segment.startedAt))} height="14"/>)}
+        {lane.points.map(point=><circle key={point.id} className="activity-point" data-rework={point.type==='rework'||undefined} cx={px(point.timestamp!)} cy={y} r="4"/>)}
       </g>;})}
-    </svg>{tooltip&&<div role="tooltip" className="activity-tooltip">{tooltip}</div>}</div>}
+    </svg>{targets.map(target=><button key={target.key} className="activity-chart-target" style={{left:target.left,top:target.top,width:cellWidth,height:44}} {...detail.bind(target.key,target.label,()=> <ul className="activity-detail-list">{target.items.map(item=><li key={item.id}><a href={link(item.evidence)} aria-label={item.label}>{item.label}</a></li>)}</ul>)}/>)}</div>{detail.element}</div>}
     {!page.lanes.length&&<p className="activity-empty">暂无对话节奏</p>}
   </section>;
 }
