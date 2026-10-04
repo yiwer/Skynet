@@ -33,6 +33,8 @@ Qoder 的 [Credits 文档](https://docs.qoder.cn/cli/sdk/cost-usage) 区分 Toke
 
 Qoder 模式的 `maxRequestBytes` 限制平台构造的完整分析请求：系统指令、引用规则、JSON Schema、带来源的用户输入、model 和 maxOutputTokens 合并序列化后的 UTF-8 字节。SDK 与提供商内部协议的额外字节不可观察，不属于这一上限；此值不能作为提供商计费依据。SDK 的 stderr 接口由平台接管并丢弃，宿主调试环境变量也不能把历史对话内容写入日志。
 
+生产 Worker 使用 `deploy/Dockerfile.qodercn` 构建固定版本镜像，并在既有生产 Compose 文件之后显式添加 `deploy/compose.qodercn.production.yml`。设置 `SKYNET_QODERCN_IMAGE` 为验证过的不可变镜像 ID，两个私有挂载文件供容器 uid 1000 只读。`analysis-work` 是另行确认归属后创建的外部卷，名称为 `${SKYNET_PROJECT}-analysis-work`，归属标签与当前部署根目录一致。启动仅指定 `up -d --no-deps analysis`，随后从公开分析状态确认配置和心跳；默认应用发布流程仍不自动启用或更新 Worker。升级 Worker 时必须显式选择与已发布应用匹配的镜像与配置。
+
 读取配置时检查专用 `pt-` PAT 格式、文件长度和内容指纹。执行时 `readCredential` 再核对原指纹，变更的凭据不能静默附着到旧配置版本。公开配置不返回文件路径、PAT 或指纹，只保留配置 hash；Qwen PAYG 的既有专用 key 规则保持原样。Qoder 配置不能混入 fixtureOrigin 或 CNY Token 费率，其他模式不能携带 Qoder SDK/请求额度字段。
 
 ## 持久请求预留

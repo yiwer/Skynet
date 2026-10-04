@@ -2,4 +2,4 @@
 services:
   analysis:
     build:
-      dockerfile: Dockerfile.qodercn
+      dockerfile: deploy/Dockerfile.qodercn
