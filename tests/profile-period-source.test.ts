@@ -8,7 +8,7 @@ import {assessmentFixture} from './assessment-fixture.js';
 import {monday,addDays} from '../packages/contracts/work-views.js';
 import {beijingDate} from '../packages/contracts/reports.js';
 
-test('a profile does not freeze a readable team baseline after its original disappears during final composition',{timeout:180000},async()=>{
+for(const kind of ['business','zero-events'] as const)test(`a profile does not freeze a readable ${kind} team source after its original disappears during final composition`,{timeout:180000},async()=>{
   const f=await assessmentFixture(),held=await f.testDatabase.connect();let locked=false,restore:{path:string;bytes:Buffer}|undefined;
   let pending:Promise<Response>|undefined;
   try{
@@ -19,7 +19,8 @@ test('a profile does not freeze a readable team baseline after its original disa
       for(const row of input.rows.slice(2) as {timestamp?:string}[])if(row.timestamp)row.timestamp=new Date(Date.parse(row.timestamp)+shift).toISOString();
       const saved=await f.upload(person,input.rows,input.sessionId);await f.analyze(person,saved.snapshotId);return saved;
     }
-    await recorded(owner,week);const baseline=await recorded(peer,addDays(week,-14));
+    await recorded(owner,week);
+    const empty=f.rows({prompts:0}),baseline=kind==='business'?await recorded(peer,addDays(week,-14)):await f.upload(peer,empty.rows,empty.sessionId);
     const path='/api/capability-profiles/'+owner.employeeId+'?period=this-week';
     async function get(query:string){const response=await f.api(owner,query);assert.equal(response.status,200,await response.clone().text());return response.json();}
     const before=await get(path);assert.equal(before.kpis.sessions,1);assert.equal(before.assessment.sample.prompts,3);
@@ -38,7 +39,9 @@ test('a profile does not freeze a readable team baseline after its original disa
     await held.query('COMMIT');locked=false;
     const response=await pending;pending=undefined;
     assert.ok([200,409].includes(response.status),await response.clone().text());
-    const fresh=await get(path);assert.notEqual(fresh.assessment.inputs.baselineVersion,before.assessment.inputs.baselineVersion);
+    const fresh=await get(path);assert.notEqual(fresh.version,before.version);
+    assert.equal(fresh.coaching.waiting.teamUnavailableSourceCount,1);
+    if(kind==='business')assert.notEqual(fresh.assessment.inputs.baselineVersion,before.assessment.inputs.baselineVersion);
     if(response.status===200)assert.deepEqual(await response.json(),fresh,'a successful result must reflect the changed baseline source observation');
     assert.deepEqual(await get('/api/capability-profiles/'+owner.employeeId+'?version='+before.version),before);
     await writeFile(restore.path,restore.bytes);const recovered=await get(path);

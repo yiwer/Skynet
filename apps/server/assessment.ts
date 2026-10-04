@@ -91,19 +91,22 @@ export function assessmentService(db: Database, usage: ReturnType<typeof usageOu
     if(scope.full)return read(null);
     // Do not borrow the service-wide preparing Promise: another request may
     // already have performed raw reads before this observer began.
-    // Sequence preparation against standalone readers, but never share the
-    // computed bundle: every request captures its own actual source reads.
-    const pending=lastPreparation.catch(()=>undefined).then(()=>raw.observeReads(()=>reportingInputAttempt(db,clock,async()=>({periods:await assessmentPeriods(db,usage,waits,insights,clock,scope.preset,scope.period)}))));
-    lastPreparation=pending.then(()=>undefined,()=>undefined);const captured=await pending;
-    try{
-      if(captured.overflow||!captured.value.periods){captured.close();return read(null);}
+    const captured=await raw.observeReads(async()=>{
+      // Sequence preparation against standalone readers, but never share the
+      // computed bundle: every request captures its own actual source reads.
+      const pending=lastPreparation.catch(()=>undefined).then(()=>reportingInputAttempt(db,clock,async()=>({periods:await assessmentPeriods(db,usage,waits,insights,clock,scope.preset,scope.period)})));
+      lastPreparation=pending.then(()=>undefined,()=>undefined);const prepared=await pending;
+      if(!prepared.periods)return read(null);
       const saved=new Map<AssessmentPeriod,CapabilityAssessment>();
-      for(const [period,inputs]of captured.value.periods){
+      for(const [period,inputs]of prepared.periods){
         const employee=inputs.people.find(person=>person.id===employeeId);if(!employee)throw new HttpError(404,'员工不存在');
-        saved.set(period,await store({...inputs,frontierVersion:captured.value.frontierVersion},employee,scope.preset,period));
+        saved.set(period,await store({...inputs,frontierVersion:prepared.frontierVersion},employee,scope.preset,period));
       }
-      const result=await read({selected:page(saved.get(scope.period)!,0,Number.MAX_SAFE_INTEGER),weeks:{previous:saved.get('last-week')!,current:saved.get('this-week')!}});
-      if(!await captured.verify())throw new ReportingSourceChanged();return result;
+      return read({selected:page(saved.get(scope.period)!,0,Number.MAX_SAFE_INTEGER),weeks:{previous:saved.get('last-week')!,current:saved.get('this-week')!}});
+    });
+    try{
+      if(captured.overflow){captured.close();return read(null);}
+      if(!await captured.verify())throw new ReportingSourceChanged();return captured.value;
     }finally{captured.close();}
   }
   return { withProfile, read, batch, model, baseline, history: (employeeId: string, input: unknown) => assessmentHistory(db, employeeId, input), recompute: (employeeId: string, input: unknown) => read(employeeId, input, true),

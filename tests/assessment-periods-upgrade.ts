@@ -25,10 +25,10 @@ try{
     const result=await f.upload(person,input.rows,input.sessionId);await f.analyze(person,result.snapshotId);return result;
   }
   const current=await recorded(owner,week,2400);await recorded(owner,addDays(week,-7),600);const baseline=await recorded(peer,addDays(week,-14),8000);
+  old=await previousApp({db:f.testDatabase,rawDirectory:join(f.directory,'raw'),reportClock:()=>f.now});
   // Keep unrelated derived work refreshes from publishing between the two
   // binaries. Values are still read and compared through the complete API.
   await schedule.query('SELECT pg_advisory_lock(7402128),pg_advisory_lock(7402131),pg_advisory_lock(7402129)');held=true;
-  old=await previousApp({db:f.testDatabase,rawDirectory:join(f.directory,'raw'),reportClock:()=>f.now});
   async function before(path:string){const response=await old!.inject({url:path,headers:{Authorization:'Bearer '+owner.readerCredential}});assert.equal(response.statusCode,200,response.body);return response.json();}
   async function after(path:string,body?:object){const response=await f.api(owner,path,body);assert.equal(response.status,200,await response.clone().text());return response.json();}
   const path='/api/capability-profiles/'+owner.employeeId,fixed:{query:string;value:any}[]=[];
@@ -44,6 +44,7 @@ try{
         assert.deepEqual(await after(assessmentPath),await before(assessmentPath));
       }
       fixed.push({query,value});(evidence.comparisons as object[]).push({stage,period,preset,version:value.version,hash:digest(JSON.stringify(value))});
+      await writeFile(process.env.SKYNET_PERIODS_EVIDENCE!,JSON.stringify(evidence,null,2));
     }
   }
   await compare('stable',true);
@@ -54,8 +55,20 @@ try{
   restore={path:join(f.directory,'raw',peer.deviceId,digest(baseline.bytes)),bytes:baseline.bytes};await writeFile(restore.path,'synthetic unavailable baseline\n');await compare('outage');
   await writeFile(restore.path,restore.bytes);await compare('recovered');
   await recorded(owner,addDays(week,1),1000);await compare('late');
+  // This-week extends beyond the as-of date. Both an appended carrier and an
+  // independent future session must preserve the old range-external context.
+  f.now.setTime(Date.parse(addDays(week,2)+'T18:00:00+08:00'));
+  const future=f.rows({id:current.sessionId,prompts:1,tokens:3400,verified:0,claimed:0});
+  const futureShift=Date.parse(addDays(week,4)+'T12:00:00+08:00')-f.base.getTime();
+  for(const row of future.rows.slice(2) as {timestamp?:string;payload?:{turn_id?:string}}[]){
+    if(row.timestamp)row.timestamp=new Date(Date.parse(row.timestamp)+futureShift).toISOString();
+    if(row.payload?.turn_id)row.payload.turn_id=current.sessionId+'/future';
+  }
+  const extended=await f.upload(owner,[...current.rows,...future.rows.slice(2)],current.sessionId);await f.analyze(owner,extended.snapshotId);
+  await recorded(peer,addDays(week,4),1600);await compare('future-week-context');
+  await schedule.query('SELECT pg_advisory_unlock(7402128),pg_advisory_unlock(7402131),pg_advisory_unlock(7402129)');held=false;
   await old.close();old=undefined;await f.restart();
   for(const {query,value}of fixed)assert.deepEqual(await after(path+'/export?'+query+'&version='+value.version),value);
   evidence.status='passed';
 }catch(error){evidence.status='failed';evidence.error=String(error);throw error;}
-finally{if(restore)await writeFile(restore.path,restore.bytes);await old?.close();if(held)await schedule.query('SELECT pg_advisory_unlock(7402128),pg_advisory_unlock(7402131),pg_advisory_unlock(7402129)');schedule.release();await f.close();evidence.finishedAt=new Date().toISOString();await writeFile(process.env.SKYNET_PERIODS_EVIDENCE,JSON.stringify(evidence,null,2));}
+finally{if(restore)await writeFile(restore.path,restore.bytes);if(held)await schedule.query('SELECT pg_advisory_unlock(7402128),pg_advisory_unlock(7402131),pg_advisory_unlock(7402129)');schedule.release();await old?.close();await f.close();evidence.finishedAt=new Date().toISOString();await writeFile(process.env.SKYNET_PERIODS_EVIDENCE,JSON.stringify(evidence,null,2));}
