@@ -8,6 +8,45 @@ import {Client} from '@modelcontextprotocol/sdk/client/index.js';
 import {StreamableHTTPClientTransport} from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import {insightPagingFixture,pageRows} from './insights-paging-fixture.js';
 
+test('same-version insight and analysis refreshes preserve loaded pages and a last-page correction draft', {timeout:120000},async()=>{
+  const f=await insightPagingFixture();let browser:Browser|undefined;
+  try{
+    const before=await(await f.api(f.owner,f.path)).json();
+    browser=await chromium.launch();const page=await browser.newPage({ignoreHTTPSErrors:true,viewport:{width:1280,height:900}});
+    await page.goto(f.origin+'/#'+f.record.snapshotId);await page.getByLabel('个人读取凭据').fill(f.owner.readerCredential);await page.getByRole('button',{name:'进入存档',exact:true}).click();
+    const panel=page.getByRole('region',{name:'会话洞察',exact:true}),analysis=page.getByRole('region',{name:'会话分析',exact:true});
+    await expect(analysis).toContainText('分析已完成');await expect(panel.locator('.insight-status')).toContainText('已完成');
+    await panel.getByText('更正推断',{exact:true}).click();
+    const more=panel.getByRole('button',{name:'更多可更正提示词',exact:true}),target=panel.getByLabel('更正字段');
+    while(await more.count()){const count=await target.locator('optgroup').count();await more.click();await expect.poll(()=>target.locator('optgroup').count()).toBeGreaterThan(count);}
+    await target.selectOption({label:'提示词 20 · 返工'});const selected=await target.inputValue();
+    await panel.getByLabel('返工判定',{exact:true}).selectOption('true');await panel.getByLabel('更正原因').fill('保留末页提示词草稿');
+    for(const trigger of [panel.getByRole('button',{name:'刷新会话洞察',exact:true}),analysis.getByRole('button',{name:'刷新',exact:true})]){
+      const refreshed=page.waitForResponse(response=>new URL(response.url()).pathname===f.path&&!new URL(response.url()).search);
+      await trigger.click();const response=await refreshed;assert.equal(response.status(),200);assert.equal((await response.json()).version,before.version);await response.finished();
+      await page.evaluate(()=>new Promise<void>(resolve=>requestAnimationFrame(()=>requestAnimationFrame(()=>resolve()))));
+      await expect(target).toHaveValue(selected);await expect(target.locator('optgroup')).toHaveCount(20);
+      await expect(panel.getByLabel('返工判定',{exact:true})).toHaveValue('true');await expect(panel.getByLabel('更正原因')).toHaveValue('保留末页提示词草稿');
+      await expect(more).toHaveCount(0);await expect(panel.getByRole('button',{name:'保存更正',exact:true})).toBeEnabled();
+    }
+    // A different immutable version must still require review, while its own
+    // pages can be loaded to locate the same last-page original event.
+    assert.equal((await f.api(f.owner,`/api/snapshots/${f.record.snapshotId}/inference-corrections`,{requestId:randomUUID(),expectedVersion:before.version,kind:'task-type',value:'investigation',reason:'另一次已发布更正'})).status,201);
+    await panel.getByRole('button',{name:'刷新会话洞察',exact:true}).click();await expect(panel.getByRole('alert')).toContainText('洞察已更新，草稿已保留');
+    await expect(target).toHaveValue(selected);await expect(target.locator('optgroup')).toHaveCount(20);await expect(panel.getByLabel('更正原因')).toHaveValue('保留末页提示词草稿');
+    await expect(panel.getByRole('button',{name:'保存更正',exact:true})).toBeDisabled();await expect(panel.getByRole('button',{name:'核对新版后继续',exact:true})).toBeDisabled();
+    while(await more.count()){
+      const loaded=page.waitForResponse(response=>{const url=new URL(response.url());return url.pathname===f.path&&url.searchParams.get('section')==='prompts';});
+      await more.click();const response=await loaded,value=await response.json();await response.finished();
+      if(value.pages.prompts.nextOffset===null)await expect(more).toHaveCount(0);else await expect(more).toBeEnabled();
+    }
+    await expect(panel.getByRole('button',{name:'核对新版后继续',exact:true})).toBeEnabled();await expect(target).toHaveValue(selected);
+    await panel.getByRole('button',{name:'核对新版后继续',exact:true}).click();await expect(panel.getByLabel('返工判定',{exact:true})).toHaveValue('true');
+    await panel.getByRole('button',{name:'保存更正',exact:true}).click();await expect(panel.locator('.insight-counts>div').filter({has:page.getByText('返工',{exact:true})}).locator('dd')).toHaveText('1');
+    const current=await(await f.api(f.owner,f.path)).json();assert.equal(current.metrics.rework,1);assert.notEqual(current.version,before.version);assert.equal(current.inferences.taskType.value,'investigation');
+  }finally{await browser?.close();await f.close();}
+});
+
 test('OAuth MCP reconstructs the same bounded fixed insight sections as HTTP', {timeout:120000},async()=>{
   const f=await insightPagingFixture();let client:Client|undefined;
   try{

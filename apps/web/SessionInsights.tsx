@@ -16,7 +16,11 @@ export function SessionInsights({snapshotId,request,analysisRefresh=0}:{snapshot
   const fixedVersion=new URLSearchParams(hash.split('?')[1]??'').get('insightVersion');
   const selection=snapshotId+':'+(fixedVersion??'current'),loadedSelection=useRef(selection);
   useEffect(()=>{const abort=new AbortController();paging.current={generation:paging.current.generation+1,abort,running:new Set()};setBusy({});let timer:ReturnType<typeof setTimeout>|undefined;if(loadedSelection.current!==selection){setData(null);loadedSelection.current=selection;}setError('');
-    const read=async()=>{try{const value=await(await request(`/api/snapshots/${snapshotId}/insights${fixedVersion?'?version='+encodeURIComponent(fixedVersion):''}`,abort.signal)).json();if(abort.signal.aborted)return;setData(value);if(value.state==='pending'&&!fixedVersion)timer=setTimeout(read,1500);}catch(failure){if(!abort.signal.aborted)setError((failure as Error).message);}};
+    const read=async()=>{try{const value:Insights=await(await request(`/api/snapshots/${snapshotId}/insights${fixedVersion?'?version='+encodeURIComponent(fixedVersion):''}`,abort.signal)).json();if(abort.signal.aborted)return;
+      // The first page cannot replace already loaded sections of the same
+      // immutable view: correction drafts may reference an item on its last page.
+      setData(previous=>previous?.snapshotId===value.snapshotId&&previous.version===value.version&&previous.readingVersion===value.readingVersion?previous:value);
+      if(value.state==='pending'&&!fixedVersion)timer=setTimeout(read,1500);}catch(failure){if(!abort.signal.aborted)setError((failure as Error).message);}};
     void read();return()=>{abort.abort();clearTimeout(timer);};},[snapshotId,refresh,analysisRefresh,fixedVersion]);
   async function more(section:InsightSection){
     const view=data,context=paging.current,offset=view?.pages[section].nextOffset;
