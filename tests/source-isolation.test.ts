@@ -13,11 +13,11 @@ test('current insights isolate missing or corrupt original bytes while retaining
     const get=async(path:string)=>{const response=await f.api(good,path);assert.equal(response.status,200,await response.clone().text());return response.json();};
     const path='/api/snapshots/'+record.snapshotId+'/insights',usage='/api/usage-output/export?period=since-enrollment&employeeId='+good.employeeId;
     const before=await get(path),beforeUsage=await get(usage);assert.equal(before.metrics.verified,1);assert.equal(beforeUsage.totals.inputTokens,1000);
-    for(const suffix of ['','/raw','/readable','/recovery'])assert.equal((await f.api(good,'/api/snapshots/'+record.snapshotId+suffix)).status,200);
+    for(const suffix of ['','/raw','/readable','/recovery','/conversation','/conversation/trace'])assert.equal((await f.api(good,'/api/snapshots/'+record.snapshotId+suffix)).status,200);
     restore={path:join(f.directory,'raw',bad.deviceId,createHash('sha256').update(record.bytes).digest('hex')),bytes:record.bytes};
     for(const fault of ['hash-mismatch','missing'] as const){
       if(fault==='missing')await unlink(restore.path);else await writeFile(restore.path,'synthetic corruption only\n');
-      for(const suffix of ['','/raw','/readable','/recovery']){const response=await f.api(good,'/api/snapshots/'+record.snapshotId+suffix);assert.equal(response.status,503);assert.deepEqual(await response.json(),{error:'原件不可读取',code:'source_unavailable',reason:fault});}
+      for(const suffix of ['','/raw','/readable','/recovery','/conversation','/conversation/trace']){const response=await f.api(good,'/api/snapshots/'+record.snapshotId+suffix);assert.equal(response.status,503,suffix);assert.deepEqual(await response.json(),{error:'原件不可读取',code:'source_unavailable',reason:fault});}
       const broken=await get(path);assert.equal(broken.state,'unavailable');assert.equal(broken.inferences,null);assert.equal(broken.metrics.verified,null);assert.equal(broken.facts.tests.value,null);assert.equal(broken.sourceAvailability.reason,fault);assert.equal(broken.messageFactsVersion,undefined);assert.notEqual(broken.version,before.version);
       assert.deepEqual(await get(path+'?version='+before.version),before);
       const scoped=await get(usage);assert.equal(scoped.totals.inputTokens,1000);assert.equal(scoped.outputs.verified.value,1);assert.equal(scoped.sourceInputsComplete,true);assert.equal(scoped.sessions.length,2);assert.equal(scoped.sessions.find((row:any)=>row.employeeId===bad.employeeId).selected,false);assert.equal(scoped.sessions.find((row:any)=>row.employeeId===bad.employeeId).outputs.verified.value,null);
