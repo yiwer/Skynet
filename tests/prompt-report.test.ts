@@ -24,6 +24,7 @@ test('prompt report retains actual lengths without model inference and freezes i
     assert.deepEqual(report.kpis.rework,{numerator:0,denominator:0,unknown:2,value:null});
     assert.equal(report.lengths[0].count,3,'native Unicode lengths are available before analysis');
     assert.equal(report.employees[0].employee,'提示词合成员工');
+    assert.deepEqual((await api(path)).json(),report,'unchanged live input preserves the same report version');
     assert.equal((await api(path,undefined,device.deviceCredential)).statusCode,401);
     assert.deepEqual((await api(`/api/prompt-report/export?period=since-enrollment&version=${report.version}`)).json(),report);
     await upload(['修复接口','不对🛰','保留兼容并执行测试','增加一项验收']);
@@ -34,14 +35,19 @@ test('prompt report retains actual lengths without model inference and freezes i
   }finally{await app?.close();await db.end();await sandbox.close();}
 });
 
-test('a compacted rewrite cannot establish a new first prompt or a complete length distribution',{timeout:120000},async()=>{
+for(const scenario of [{label:'compacted rewrite',change:'rewrite',compacted:true},{label:'truncated prefix',change:'truncate',compacted:false}] as const)test('a '+scenario.label+' cannot establish a new first prompt or a complete length distribution',{timeout:120000},async()=>{
   const sandbox=await createSandbox(),db=connect(sandbox.env.DATABASE_URL!);let app:Awaited<ReturnType<typeof createApp>>|undefined;
   try{const owner=await sandbox.provision('压缩提示词'),at=new Date(Date.now()+60000).toISOString();app=await createApp({db,rawDirectory:sandbox.env.RAW_DIRECTORY!,reportClock:()=>new Date(Date.now()+86400000)});
     const api=(url:string,payload?:object|Buffer,credential=owner.readerCredential,method:'GET'|'POST'|'PUT'='GET')=>app!.inject({url,method,headers:{Authorization:`Bearer ${credential}`,...(Buffer.isBuffer(payload)?{'Content-Type':'application/octet-stream'}:{})},...(payload===undefined?{}:{payload})});
     const device=(await api('/api/devices/enroll',{installationId:randomUUID(),name:'compacted'},owner.enrollmentCredential,'POST')).json();
+    const sessionId=randomUUID(),generation=digest(Buffer.from('compacted-prompts'));
     const bytes=Buffer.from(JSON.stringify({timestamp:at,type:'response_item',payload:{type:'message',role:'user',content:[{type:'input_text',text:'继续剩余任务'}]}})+'\n');
-    await api('/api/chunks/'+digest(bytes),bytes,device.deviceCredential,'PUT');const response=await api('/api/snapshots',{protocolVersion:1,sourceSessionId:randomUUID(),source:'codex-cli',sourceVersion:'0.160.0',sourceOs:process.platform,project:'/synthetic/compacted',hash:digest(bytes),byteLength:bytes.length,qualifiedAt:at,capability:'unverified',capture:{generation:digest(Buffer.from('compacted-prompts')),revision:2,change:'rewrite',materials:[],lineage:[],gaps:[],compacted:true,partialLine:false}},device.deviceCredential,'POST');assert.equal(response.statusCode,200,response.body);
+    await api('/api/chunks/'+digest(bytes),bytes,device.deviceCredential,'PUT');const response=await api('/api/snapshots',{protocolVersion:1,sourceSessionId:sessionId,source:'codex-cli',sourceVersion:'0.160.0',sourceOs:process.platform,project:'/synthetic/compacted',hash:digest(bytes),byteLength:bytes.length,qualifiedAt:at,capability:'unverified',capture:{generation,revision:2,change:scenario.change,materials:[],lineage:[],gaps:[],compacted:scenario.compacted,partialLine:false}},device.deviceCredential,'POST');assert.equal(response.statusCode,200,response.body);
     const report=(await api('/api/prompt-report?period=since-enrollment')).json();assert.equal(report.kpis.prompts,1);assert.equal(report.kpis.rework.unknown,1,'compaction cannot invent a first prompt exclusion');assert.equal(report.sourceInputsComplete,false);assert.equal(report.kpis.medianLength.value,null);assert.equal(report.kpis.medianLength.knownMedian,6);
+    const appended=Buffer.concat([bytes,Buffer.from(JSON.stringify({timestamp:at,type:'response_item',payload:{type:'message',role:'user',content:[{type:'input_text',text:'继续补齐'}]}})+'\n')]);
+    await api('/api/chunks/'+digest(appended),appended,device.deviceCredential,'PUT');const next=await api('/api/snapshots',{protocolVersion:1,sourceSessionId:sessionId,source:'codex-cli',sourceVersion:'0.160.0',sourceOs:process.platform,project:'/synthetic/compacted',hash:digest(appended),byteLength:appended.length,qualifiedAt:at,capability:'unverified',capture:{generation,revision:3,change:'append',previousSnapshotId:response.json().snapshotId,materials:[],lineage:[],gaps:[],compacted:false,partialLine:false}},device.deviceCredential,'POST');assert.equal(next.statusCode,200,next.body);
+    const after=(await api('/api/prompt-report?period=since-enrollment')).json();assert.equal(after.kpis.prompts,2);assert.equal(after.kpis.rework.unknown,2,'an append cannot recover the lost initial history');assert.equal(after.sourceInputsComplete,false);assert.equal(after.kpis.medianLength.value,null);
+    const view=(await api('/api/snapshots/'+next.json().snapshotId+'/insights')).json();assert.equal(view.messageHistoryComplete,false,'the same history boundary is exposed to other report consumers');
   }finally{await app?.close();await db.end();await sandbox.close();}
 });
 
@@ -60,6 +66,7 @@ test('prompt report preserves original owners across recovery, same-byte retries
     const continued=Buffer.concat([initial,Buffer.from(line(['继续']))]);await upload(dbb,continued,{snapshotId:original,hash:digest(initial),byteLength:initial.length});await upload(dbb,continued,{snapshotId:original,hash:digest(initial),byteLength:initial.length});
     const response=await api('/api/prompt-report?period=since-enrollment');assert.equal(response.statusCode,200,response.body);const report=response.json();assert.equal(report.kpis.prompts,2);assert.equal(report.kpis.sessions,1);assert.equal(report.kpis.medianLength.value,5.5);assert.equal(report.kpis.rework.unknown,1);assert.deepEqual(report.employees.map((row:any)=>[row.employee,row.prompts]),[['甲原提示词',1],['乙续提示词',1]]);
     const scoped=(await api('/api/prompt-report?period=since-enrollment&employeeId='+b.employeeId)).json();assert.equal(scoped.kpis.prompts,1);assert.equal(scoped.kpis.medianLength.value,2);assert.equal(scoped.kpis.rework.unknown,1,'the new owner\'s first contribution is still a follow-up');
+    assert.deepEqual((await api('/api/prompt-report?period=since-enrollment&employeeId='+b.employeeId)).json(),scoped,'filtered live versions remain stable');
     assert.deepEqual((await api('/api/prompt-report/export?period=since-enrollment&version='+before.version)).json(),before);
     const full=(await api('/api/prompt-report/recompute',{period:'since-enrollment'},a.readerCredential,'POST')).json();assert.deepEqual(full,report);
   }finally{await app?.close();await db.end();await sandbox.close();}

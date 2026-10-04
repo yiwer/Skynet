@@ -18,6 +18,7 @@ import { analysisTransaction, sweepQueue } from '../analysis/queue.js';
 import { projectSessionInsights } from './session-insights.js';
 import {recordedMessages} from './message-facts.js';
 import type {MessageFacts} from '../../packages/contracts/message-facts.js';
+import {messageHistoryProofs} from './message-history.js';
 
 type Record = { id: string; device_id: string; source: Source; hash: string; manifest: Manifest };
 type Facts = { input: SessionInsights['input']; facts: SessionInsights['facts']; sourceState: NonNullable<SessionInsights['sourceState']>; messageFacts:MessageFacts };
@@ -49,6 +50,7 @@ async function readInsightBatchOnce(db: Database, raw: RawStore, requested: stri
   try {
     await client.query('BEGIN ISOLATION LEVEL REPEATABLE READ');
     const revisions = await attributionRevisions(client,ids);
+    const historyProofs=await messageHistoryProofs(client,ids);
     const jobs = (await client.query(`SELECT j.id,j.snapshot_id AS "snapshotId",j.state,j.config,j.input-'events' AS input,j.result,j.target_generation AS generation,
       t.applicable_job_id,t.desired_snapshot_id,t.config_hash,t.generation AS desired_generation,t.parser_version,t.attribution_revision
       FROM (SELECT DISTINCT ON(snapshot_id) * FROM analysis_jobs WHERE snapshot_id=ANY($1::uuid[]) ORDER BY snapshot_id,created_at DESC,id DESC) j
@@ -60,8 +62,8 @@ async function readInsightBatchOnce(db: Database, raw: RawStore, requested: stri
         && String(job.attribution_revision) === String(job.input.attributionRevision ?? '0') && String(job.attribution_revision) === revisions.get(job.snapshotId);
       runs.set(job.snapshotId, job as AnalysisRun);
     }
-    const keys = new Map(records.map(record => [record.id, digest(JSON.stringify(['insight-input-2/messages-2', outputFactsVersion, inputIntegrityVersion, 'native-turn-state-1',
-      record.id, record.hash, readEvidence(Buffer.alloc(0), record.source).parserVersion, revisions.get(record.id)]))]));
+    const keys = new Map(records.map(record => [record.id, digest(JSON.stringify(['insight-input-2/messages-3', outputFactsVersion, inputIntegrityVersion, 'native-turn-state-1',
+      record.id, record.hash, readEvidence(Buffer.alloc(0), record.source).parserVersion, revisions.get(record.id),historyProofs.get(record.id)===true]))]));
     const cached = new Map<string, Facts>(full ? [] : (await client.query('SELECT version,payload FROM insight_fact_revisions WHERE version=ANY($1::text[])', [[...keys.values()]])).rows.map(row => [row.version, row.payload]));
     const missingIds = records.filter(record => !cached.has(keys.get(record.id)!)).map(record => record.id);
     const originRows = missingIds.length ? (await client.query(`SELECT se.snapshot_id AS carrier,se.line,se.block,o.event_id AS "eventId",o.snapshot_id AS "snapshotId",o.line AS "originLine",o.block AS "originBlock",
@@ -92,12 +94,12 @@ async function readInsightBatchOnce(db: Database, raw: RawStore, requested: stri
               eventCount: parsed.events.length, events: attributed.events, coverage: { unrecognizedLines: primaryInputCoverage(bytes,record.source,parsed).unrecognizedLines, partialLine: parsed.partialLine,
                 excludedMaterials: record.manifest.capture?.materials.length ?? 0, captureGaps: record.manifest.capture?.gaps ?? [], scope: '当前不可变主原件的全部已解析事件' } };
             facts.facts = recordedOutputFacts(bytes, prepared);
-            facts.messageFacts=recordedMessages(prepared,record.manifest.sourceSessionId,!record.manifest.capture?.compacted&&record.manifest.capture?.change!=='rewrite');
+            facts.messageFacts=recordedMessages(prepared,record.manifest.sourceSessionId,historyProofs.get(record.id)===true);
           }
         }
         inserted.push({ version: key, snapshotId: record.id, payload: facts });
       }
-      views.push(projectSessionInsights(record.id, facts.input, runs.get(record.id), facts.facts, facts.sourceState,false,key));
+      views.push(projectSessionInsights(record.id, facts.input, runs.get(record.id), facts.facts, facts.sourceState,false,key,facts.messageFacts.complete));
     }
     for (let offset = 0; offset < inserted.length; offset += 100) await client.query(`INSERT INTO insight_fact_revisions(version,snapshot_id,payload)
       SELECT x.version,x."snapshotId",x.payload FROM jsonb_to_recordset($1::jsonb) AS x(version text,"snapshotId" uuid,payload jsonb) ON CONFLICT DO NOTHING`, [JSON.stringify(inserted.slice(offset,offset+100))]);
