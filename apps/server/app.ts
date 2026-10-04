@@ -291,7 +291,7 @@ export async function createApp(options: { db: Database; rawDirectory: string; w
   });
   const assessments = assessmentService(db, usage, insights, waits, options.reportClock);
   const reviewNotes = reviewNotesService(db);
-  app.get('/api/employees/:id/review-notes', { onRequest: readerGuard }, request => reviewNotes.read(z.uuid().parse((request.params as { id: string }).id)));
+  app.get('/api/employees/:id/review-notes', { onRequest: readerGuard }, request => reviewNotes.read(z.uuid().parse((request.params as { id: string }).id), request.query));
   app.post('/api/employees/:id/review-notes', { onRequest: readerGuard }, async (request, reply) => reply.code(201).send(
     await reviewNotes.append(z.uuid().parse((request.params as { id: string }).id), request.headers.authorization, request.body)));
   app.get('/api/assessment-models/:version', { onRequest: readerGuard }, request => assessments.model(hashSchema.parse((request.params as { version: string }).version)));

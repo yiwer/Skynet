@@ -55,3 +55,34 @@ test('concurrent review notes are retained and a retried submission cannot dupli
     assert.deepEqual((await api(path)).json(), page);
   } finally { await app?.close(); await db.end(); await sandbox.close(); }
 });
+
+test('review notes paginate a stable list while newer notes are appended and reject invalid cursors', { timeout: 120_000 }, async () => {
+  const sandbox = await createSandbox(), db = connect(sandbox.env.DATABASE_URL!);
+  let app: Awaited<ReturnType<typeof createApp>> | undefined;
+  try {
+    const subject = await sandbox.provision('分页复核对象'), other = await sandbox.provision('另一分页对象');
+    app = await createApp({ db, rawDirectory: sandbox.env.RAW_DIRECTORY! });
+    const api = (url: string, body?: object) => app!.inject({ url, method: body ? 'POST' : 'GET', headers: { Authorization: `Bearer ${subject.readerCredential}` }, ...(body ? { payload: body } : {}) });
+    const path = `/api/employees/${subject.employeeId}/review-notes`, version = (await api(`/api/assessments/${subject.employeeId}`)).json().version;
+    const ids: string[] = [];
+    for (let n = 0; n < 23; n++) {
+      const response = await api(path, { requestId: randomUUID(), assessmentVersion: version, text: `${n}：` + '复核上下文'.repeat(390) });
+      assert.equal(response.statusCode, 201, response.body); ids.push(response.json().id);
+    }
+    const firstResponse = await api(path), first = firstResponse.json();
+    assert.equal(first.notes.length, 10); assert.equal(first.count, 23); assert.ok(first.nextCursor);
+    assert.ok(Buffer.byteLength(firstResponse.body) < 80 * 1024);
+    for (const text of ['翻页期间新追加一', '翻页期间新追加二']) assert.equal((await api(path, { requestId: randomUUID(), assessmentVersion: version, text })).statusCode, 201);
+    await app.close(); app = await createApp({ db, rawDirectory: sandbox.env.RAW_DIRECTORY! });
+    const seen = [...first.notes.map((note: any) => note.id)]; let cursor = first.nextCursor;
+    while (cursor) {
+      const response = await api(path + '?cursor=' + cursor), page = response.json();
+      assert.equal(response.statusCode, 200, response.body); assert.equal(page.count, 23); assert.ok(page.notes.length <= 10);
+      seen.push(...page.notes.map((note: any) => note.id)); cursor = page.nextCursor;
+    }
+    assert.deepEqual(seen, [...ids].reverse()); assert.equal(new Set(seen).size, 23);
+    assert.equal((await api(path)).json().count, 25);
+    assert.equal((await api(path + '?cursor=invalid')).statusCode, 400);
+    assert.equal((await api(`/api/employees/${other.employeeId}/review-notes?cursor=` + first.nextCursor)).statusCode, 400);
+  } finally { await app?.close(); await db.end(); await sandbox.close(); }
+});
