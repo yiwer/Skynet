@@ -1,4 +1,4 @@
-import {useEffect,useState,type CSSProperties} from 'react';
+import {useEffect,useLayoutEffect,useState,useRef,type CSSProperties} from 'react';
 import type {TeamReport,TeamReportQuery} from '../../packages/contracts/team-report.js';
 import type {OutputAmount} from '../../packages/contracts/usage-output.js';
 import {sourceLabel} from '../../packages/contracts/archive.js';
@@ -15,7 +15,36 @@ const percent=(value:number|null)=>value===null?'未知':`${Number((value*100).t
 const duration=(value:number|null)=>value===null?'未知':value<60000?`${Number((value/1000).toFixed(1))} 秒`:`${Number((value/60000).toFixed(1))} 分`;
 const coverageLabel={'gap-observed':'采集缺口','observations-only':'已有采集观测',unknown:'覆盖未知'};
 function Amount({value}:{value:OutputAmount}){return <><b>{value.value===null&&!value.known?'未知':number(value.known)}</b>{value.unknownSessions>0&&<small>{value.known?'已知部分 + ':''}{value.unknownSessions} 个会话未知</small>}</>;}
-function Spark({values,label}:{values:{date:string;value:number|null}[];label:string}){const [open,setOpen]=useState(false),max=Math.max(1,...values.map(day=>day.value??0));const paths:string[][]=[];let part:string[]=[];values.forEach((day,index)=>{if(day.value===null){if(part.length)paths.push(part);part=[];}else part.push(`${2+index/Math.max(1,values.length-1)*176},${35-day.value/max*30}`);});if(part.length)paths.push(part);return <div className="team-spark" onKeyDown={event=>{if(event.key==='Escape')setOpen(false);}}><svg viewBox="0 0 180 40" aria-hidden="true">{paths.map((points,index)=><polyline key={index} points={points.join(' ')}/>)}{values.map((day,index)=>day.value!==null&&<circle key={day.date} cx={2+index/Math.max(1,values.length-1)*176} cy={35-day.value/max*30} r="2"/>)}</svg><button aria-label={label+'详情'} onFocus={()=>setOpen(true)} onBlur={()=>setOpen(false)} onClick={()=>setOpen(!open)} onMouseEnter={()=>setOpen(true)} onMouseLeave={()=>setOpen(false)}>详情</button>{open&&<div role="tooltip" className="team-trend-tooltip">{values.map(day=><span key={day.date}>{day.date}：{day.value??'未知'}</span>)}</div>}</div>;}
+function Spark({values,label}:{values:{date:string;value:number|null}[];label:string}){
+  const [open,setOpen]=useState(false),clicked=useRef(false),anchor=useRef<HTMLDivElement>(null),tooltip=useRef<HTMLDivElement>(null);
+  const close=()=>{clicked.current=false;setOpen(false);},max=Math.max(1,...values.map(day=>day.value??0));
+  useLayoutEffect(()=>{
+    if(!open)return;
+    const place=()=>{
+      const target=anchor.current,tip=tooltip.current;if(!target||!tip)return;
+      let top=0,bottom=innerHeight,left=0,right=innerWidth;
+      for(let parent=target.parentElement;parent;parent=parent.parentElement){
+        const css=getComputedStyle(parent),bounds=parent.getBoundingClientRect();
+        if(/(auto|scroll|hidden|clip)/.test(css.overflowY)){top=Math.max(top,bounds.top+parent.clientTop);bottom=Math.min(bottom,bounds.top+parent.clientTop+parent.clientHeight);}
+        if(/(auto|scroll|hidden|clip)/.test(css.overflowX)){left=Math.max(left,bounds.left+parent.clientLeft);right=Math.min(right,bounds.left+parent.clientLeft+parent.clientWidth);}
+      }
+      const bounds=target.getBoundingClientRect(),below=Math.max(0,bottom-bounds.bottom),above=Math.max(0,bounds.top-top),up=below<180&&above>below;
+      tip.style.width='max-content';tip.style.maxWidth=Math.max(0,Math.floor(right-left))+'px';tip.style.right='auto';
+      tip.style.left=Math.max(left,Math.min(bounds.left,right-tip.getBoundingClientRect().width))-bounds.left+'px';
+      tip.style.maxHeight=Math.floor(Math.min(180,up?above:below))+'px';
+      tip.style.top=up?'auto':'100%';tip.style.bottom=up?'100%':'auto';
+    };
+    place();window.addEventListener('resize',place);window.addEventListener('scroll',place,true);
+    return()=>{window.removeEventListener('resize',place);window.removeEventListener('scroll',place,true);};
+  },[open]);
+  const paths:string[][]=[];let part:string[]=[];
+  values.forEach((day,index)=>{if(day.value===null){if(part.length)paths.push(part);part=[];}else part.push(`${2+index/Math.max(1,values.length-1)*176},${35-day.value/max*30}`);});if(part.length)paths.push(part);
+  return <div ref={anchor} className="team-spark" onPointerLeave={event=>{if(event.pointerType==='mouse')close();}} onKeyDown={event=>{if(event.key==='Escape')close();}}>
+    <svg viewBox="0 0 180 40" aria-hidden="true">{paths.map((points,index)=><polyline key={index} points={points.join(' ')}/>)}{values.map((day,index)=>day.value!==null&&<circle key={day.date} cx={2+index/Math.max(1,values.length-1)*176} cy={35-day.value/max*30} r="2"/>)}</svg>
+    <button aria-label={label+'详情'} aria-expanded={open} onFocus={()=>setOpen(true)} onBlur={close} onClick={()=>{clicked.current=!clicked.current;setOpen(clicked.current);}} onPointerEnter={event=>{if(event.pointerType==='mouse')setOpen(true);}}>详情</button>
+    {open&&<div ref={tooltip} role="tooltip" className="team-trend-tooltip">{values.map(day=><span key={day.date}>{day.date}：{day.value??'未知'}</span>)}</div>}
+  </div>;
+}
 export function TeamKpis({report,weekly=false}:{report:TeamReport;weekly?:boolean}){const [table,setTable]=useState(false);return <section className="team-usage-summary" aria-label={weekly?'使用画像':'期间使用概况'}><div className="team-section-heading"><h2>{weekly?'使用画像':'使用概况'}</h2><div className="team-chart-toggle"><button aria-label="每日趋势切换为图表" aria-pressed={!table} onClick={()=>setTable(false)}>图表</button><button aria-label="每日趋势切换为表格" aria-pressed={table} onClick={()=>setTable(true)}>表格</button></div></div><div className={'team-usage-kpis'+(weekly?' is-weekly':'')}>
       {!weekly&&<article aria-label="活跃员工"><span>活跃员工</span><strong>{report.activeEmployees.active}<small> / {report.activeEmployees.total}</small></strong><p>{report.totals.sessions} 个会话</p></article>}
       <article><span>Token 输入</span><strong>{report.totals.inputTokens===null&&!report.totals.knownInputTokens?'未知':compact(report.totals.knownInputTokens)}</strong><p>{report.totals.unknownInputSessions>0?`已知部分 + ${report.totals.unknownInputSessions} 个会话未知`:`${report.totals.sessions} 个会话`}</p>{!table&&<Spark label="每日 Token 输入" values={report.daily.map(day=>({date:day.date,value:day.inputTokens}))}/>}</article>

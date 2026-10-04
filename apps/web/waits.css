@@ -51,3 +51,10 @@
 .waiting-report a{display:inline-flex;align-items:center;min-height:44px;min-width:44px}
 .platform-main .waiting-report .wait-heat-grid{grid-template-columns:36px repeat(24,minmax(44px,1fr));min-width:1188px}
 .platform-main .waiting-report .wait-heat-cell{height:44px;min-height:44px}
+
+.platform-main button.wait-person-plot{display:block;width:100%;border:0;padding:0;background:transparent;text-align:left}
+
+.platform-main .wait-chart-status{position:sticky;bottom:0;z-index:2}
+
+.platform-main .wait-person-plots{position:relative}
+.platform-main .usage-chart-tooltip.wait-person-status{position:absolute;left:0;right:0;z-index:2;margin:0;overflow:auto}
