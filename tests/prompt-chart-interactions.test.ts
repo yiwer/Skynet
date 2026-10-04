@@ -61,3 +61,21 @@ test('prompt element heat details retain known zero and unknown denominators thr
     assert.deepEqual(errors,[]);
   }finally{await fixture.close();}
 });
+
+
+test('prompt task mix toggles complete composition details without changing known or unknown totals',{timeout:120000},async()=>{
+  const fixture=await promptPage(true);const {page,panel,directory,errors}=fixture;
+  try{
+    const chart=panel.getByRole('region',{name:'任务类型构成',exact:true}),tip=chart.getByRole('tooltip'),known=chart.getByRole('button',{name:'提示词交互合成员工 · 实现与修复 · 3 / 3 条',exact:true});
+    await known.tap();await expect(tip).toHaveText('提示词交互合成员工 · 实现与修复 · 3 / 3 条');await expect(tip).toBeInViewport({ratio:1});
+    await known.tap();await expect(tip).toHaveCount(0);
+    await known.tap();await page.keyboard.press('Escape');await expect(tip).toHaveCount(0);
+    await page.keyboard.press('Enter');await expect(tip).toContainText('3 / 3 条');await page.keyboard.press('Space');await expect(tip).toHaveCount(0);
+    const unknown=chart.getByRole('button',{name:'未分析员工 · 未知 · 2 / 2 条',exact:true});
+    await unknown.tap();await expect(tip).toHaveText('未分析员工 · 未知 · 2 / 2 条');await expect(tip).toBeInViewport({ratio:1});
+    await page.screenshot({path:join(directory,'task-unknown.png'),animations:'disabled'});
+    await chart.getByRole('button',{name:'任务类型构成切换为表格',exact:true}).tap();
+    assert.deepEqual(await chart.getByRole('row').filter({has:page.getByRole('rowheader',{name:'未分析员工',exact:true})}).getByRole('cell').allTextContents(),['0','0','0','0','2','2']);
+    assert.deepEqual(errors,[]);
+  }finally{await fixture.close();}
+});
