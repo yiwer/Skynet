@@ -55,6 +55,7 @@ function App() {
   const [nextSessionCursor, setNextSessionCursor] = useState<string | null>(null);
   const [sessionRetry, setSessionRetry] = useState(0);
   const [detail, setDetail] = useState<Detail | null>(null);
+  const [sessionTitle,setSessionTitle]=useState<{snapshotId:string;text:string}>();
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailError, setDetailError] = useState('');
   const [detailRetry, setDetailRetry] = useState(0);
@@ -71,7 +72,7 @@ function App() {
     setSearchOpen(false);
     setBusy(false);
     setToken(''); setName(''); setEmployeeId(''); setCanManageIdentities(false); setView('archive');
-    setSessions([]); setSessionCursor(null); setNextSessionCursor(null); setDetail(null); setError(message);
+    setSessions([]); setSessionCursor(null); setNextSessionCursor(null); setDetail(null); setSessionTitle(undefined);setError(message);
   }
 
   useEffect(() => {
@@ -149,7 +150,7 @@ function App() {
     :view==='delivery'?<DeviceDelivery token={token} onUnauthorized={()=>logout('身份已停用或凭据失效，请重新登录。')}/>
     :view==='recovery'?<RecoveryFlow key={conversationHash} sessions={sessions} hasMore={!!nextSessionCursor} onLoadMore={()=>{setSessionCursor(nextSessionCursor);setSessionRetry(value=>value+1);}} request={(path,signal)=>request(path,token,signal)}/>
     :view==='identities'&&canManageIdentities?<IdentityManagement token={token} currentEmployeeId={employeeId} onDelivery={()=>navigate('delivery')} onUnauthorized={()=>logout('身份已停用或凭据失效，请重新登录。')}/>
-    :selected?<>{detailLoading?<p role="status">正在读取会话…</p>:detailError?<><p className="error" role="alert">{detailError}</p><button onClick={()=>setDetailRetry(value=>value+1)}>重试读取会话</button></>:detail&&<SessionDetail detail={detail} reading={reading} conversationHash={conversationHash} refresh={refresh} offset={offset} evidenceLocation={evidenceLocation} setOffset={setOffset} request={(path,signal,method,body)=>request(path,token,signal,method,body)} download={download} exporting={exporting} exportStatus={exportStatus} exportError={exportError}/>}</>
+    :selected?<>{detailLoading?<p role="status">正在读取会话…</p>:detailError?<><p className="error" role="alert">{detailError}</p><button onClick={()=>setDetailRetry(value=>value+1)}>重试读取会话</button></>:detail&&<SessionDetail detail={detail} reading={reading} conversationHash={conversationHash} refresh={refresh} offset={offset} evidenceLocation={evidenceLocation} setOffset={setOffset} title={sessionTitle?.snapshotId===detail.snapshotId?sessionTitle.text:undefined} onTitle={text=>setSessionTitle({snapshotId:detail.snapshotId,text})} request={(path,signal,method,body)=>request(path,token,signal,method,body)} download={download} exporting={exporting} exportStatus={exportStatus} exportError={exportError}/>}</>
     :<SessionIndex sessions={sessions} busy={busy} recovery={false} hasMore={!!nextSessionCursor} onLoadMore={()=>{setSessionCursor(nextSessionCursor);setSessionRetry(value=>value+1);}} onRefresh={()=>{setSessionCursor(null);setRefresh(value=>value+1);}} onSearch={openSearch}/>}
     <dialog className="archive-search-dialog" ref={searchDialog} onCancel={()=>setSearchOpen(false)} onClose={event=>{if(!event.currentTarget.open)setSearchOpen(false);}} onClick={event=>{if(event.target===event.currentTarget)setSearchOpen(false);}} aria-label="搜索存档"><div><div className="search-dialog-heading"><h2>搜索存档</h2><button aria-label="关闭搜索" onClick={()=>setSearchOpen(false)}>关闭</button></div>{searchOpen&&<ArchiveSearch key={token} request={(path,signal)=>request(path,token,signal)}/>}</div></dialog>
     </>}{error&&<p className="error" role="alert">{error}</p>}
