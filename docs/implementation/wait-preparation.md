@@ -49,3 +49,9 @@ node --import tsx tests/wait-preparation-performance.ts
 ```
 
 性能脚本显式运行，不进入默认 `*.test.ts` 扫描。3,000 / 1,000 ms 正式性能目标没有放宽，没有部署或开启生产工作进程。
+
+## 集成收口
+
+实现 `5d2de09` 合实际集成 `acbc019` 后，作者树 `623dfbf` 的 `07-integrated-build.txt` 构建通过，`08-integrated-public.txt` **2/2** 通过（35.60 秒）：新迁移/批次边界以及等待报告、对话标签、原文跳转、OAuth MCP、导出的同版本完整旅程。浏览器截图覆盖宽屏与 390/320 px、双主题，目视宽屏 light 和 320 dark 均保持区域内部滚动。
+
+`09-integrated-performance.*` 再次以原 1,000 ms 断言通过：首次 1,043.52 ms，后续 626.90 / 541.16 / 529.67 ms；后续仍 fresh 读取 108 次、6,340,788 bytes。该合并后小样本仍不代表千会话 AC-32。最后仅补本文档，完整提交与证据 SHA-256 见外部 `manifest.json`。
