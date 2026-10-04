@@ -4,6 +4,7 @@ import { RawStore } from './raw-store.js';
 import { HttpError } from './identities.js';
 import { manifestSchema, type Manifest } from '../../packages/contracts/archive.js';
 import { assignOrigins } from './provenance.js';
+import { recordAssembly, observeAssemblyTransport } from './assembly.js';
 
 export function archiveWriter(db: Database, raw: RawStore) {
   return async (owner: { id: string; enrolled_at: Date | null }, input: Manifest, uploadId?: string) => {
@@ -35,6 +36,8 @@ export function archiveWriter(db: Database, raw: RawStore) {
       if (!record.provenance) await assignOrigins(transaction, raw, { id: record.id, device_id: owner.id, manifest, hash: manifest.hash });
       if (uploadId) await transaction.query(`INSERT INTO snapshot_uploads(device_id,upload_id,manifest_hash,snapshot_id)
         VALUES($1,$2,$3,$4) ON CONFLICT DO NOTHING`, [owner.id, uploadId, manifestHash, record.id]);
+      if (!record.provenance) await recordAssembly(transaction, raw, record.id);
+      await observeAssemblyTransport(transaction, owner.id, manifest.hash, 'commit', !!record.provenance, record.id);
       await transaction.query('COMMIT');
       return { snapshotId: record.id, state: 'committed', hash: manifest.hash, byteLength: manifest.byteLength,
         committedAt: record.committed_at, backup: 'single-copy', ...(uploadId ? { uploadId } : {}) };

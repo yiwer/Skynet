@@ -19,10 +19,14 @@ import { conversationInputSchema, conversationTraceInputSchema } from '../../pac
 import { metricsQuerySchema } from '../../packages/contracts/metrics.js';
 import type { conversationQuery } from './conversation.js';
 import type { metricsService } from './metrics.js';
+import type { assemblyService, processingService } from './assembly.js';
+import { assemblyQuery, assemblyReadQuery, processingQuery } from '../../packages/contracts/assembly.js';
+import type { sessionInsightsService } from './session-insights.js';
+import { sessionInsightsQuery } from '../../packages/contracts/session-insights.js';
 import { waitsQuerySchema } from '../../packages/contracts/waits.js';
 import type { waitsService } from './waits.js';
 
-export async function registerMcp(app: FastifyInstance, db: Database, archive: ArchiveQuery, publicOrigin: string, analysis: AnalysisService, reports: ReportService, coverage: CoverageService, workStatistics: WorkStatisticsService, workViews: WorkViewService,operations:ServerOperationsService, conversation: ReturnType<typeof conversationQuery>, metrics: ReturnType<typeof metricsService>, waits: ReturnType<typeof waitsService>) {
+export async function registerMcp(app: FastifyInstance, db: Database, archive: ArchiveQuery, publicOrigin: string, analysis: AnalysisService, reports: ReportService, coverage: CoverageService, workStatistics: WorkStatisticsService, workViews: WorkViewService,operations:ServerOperationsService, conversation: ReturnType<typeof conversationQuery>, metrics: ReturnType<typeof metricsService>, assembly: ReturnType<typeof assemblyService>, processing: ReturnType<typeof processingService>, insights:ReturnType<typeof sessionInsightsService>, waits:ReturnType<typeof waitsService>) {
   const { guard } = await registerMcpAuth(app, db, publicOrigin);
   const offset = z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).default(0);
   const snapshotId = z.uuid().describe('Immutable snapshot ID from list_sessions, never a mutable session ID');
@@ -48,6 +52,12 @@ export async function registerMcp(app: FastifyInstance, db: Database, archive: A
       input => result(() => { const { snapshotId: id, ...query } = input; return conversation.trace(id, query); }));
     mcp.registerTool('get_metric_catalog', { description: '读取 Web、MCP、导出共用的确定性指标定义、来源和未知值口径。',
       annotations, inputSchema: {} }, () => result(async () => metrics.readMetricCatalog()));
+    mcp.registerTool('read_assembly', { description: '读取与 Web 一致的组装、去重、来源与谱系审计。后续页携带同一 version 和 nextOffset；传输请求数按来源原件统计，未知为 null。', annotations,
+      inputSchema: assemblyReadQuery.extend({ snapshotId }) }, input => result(() => { const { snapshotId: id, ...query } = input; return assembly.read(id, query); }));
+    mcp.registerTool('list_assembly', { description: '按状态、Agent、员工及服务器提交日期过滤组装审计。即使 rows 为空仍沿 nextOffset 继续。', annotations,
+      inputSchema: assemblyQuery }, input => result(() => assembly.list(input)));
+    mcp.registerTool('read_processing', { description: '读取数据处理阶段计数、采集至可读 ACK 的单调耗时 P95、待处理原因、Token 覆盖与指标目录。版本化结果与 Web、导出一致。', annotations,
+      inputSchema: processingQuery }, input => result(() => processing(input)));
     mcp.registerTool('get_report_summary', { description: '读取来源日期归期、去重且版本化的基础用量。Token 未知单列；会话可下钻原件。后续页传入同一 version 和 nextOffset，不混用新版本。',
       annotations, inputSchema: metricsQuerySchema }, input => result(() => metrics.readMetrics(input)));
     mcp.registerTool('read_waits', { description: '读取与 Web、导出共用的固定等待记录：原生本轮结束至下一条真实用户，末尾空闲排除，满600秒为长等待；权限未知单列。同员工其他逻辑会话活动含其他项目与Agent。后续页固定version；contextSnapshotId与lines可读取该版本的对话行标签。',
@@ -87,6 +97,7 @@ export async function registerMcp(app: FastifyInstance, db: Database, archive: A
     input => result(() => archive.materialPage(input.snapshotId, input.materialId, input.offset, 2048)));
     mcp.registerTool('read_analysis', { description: '分页读取同一快照的持久分析任务、结果与精确原件引用。合成 fixture 明确标记；自述、推断、记录和材料不足分开，未知用量不等于零。',
       annotations, inputSchema: { snapshotId, offset: offset.refine(value => value <= 100000) } }, input => result(() => analysis.list(input.snapshotId, input.offset)));
+    mcp.registerTool('read_session_insights',{description:'读取与会话页面相同版本的任务类型、提示词四要素、返工、追问、已验证/仅声称结果、写法建议与原件代码/测试/提交计数。未完成为 null，每项附原文和分析版本。',annotations,inputSchema:{snapshotId,...sessionInsightsQuery.shape}},input=>result(()=>insights.read(input.snapshotId,{analysisId:input.analysisId,version:input.version})));
     mcp.registerTool('list_daily_reports', { description: '分页列出北京时间日报入队状态及当前不可变版本。每天09:00入队前一自然日，入队不保证完成。',
       annotations, inputSchema: { offset } }, input => result(() => reports.list(input.offset)));
     mcp.registerTool('read_daily_report', { description: '读取同一日报版本，按项目和跨会话主题组织本来源日期已确认活动；历史引用仅作背景，未知统计不等于零。翻页时固定 revision。',
@@ -128,3 +139,5 @@ export async function registerMcp(app: FastifyInstance, db: Database, archive: A
     return reply.header('Content-Disposition', `attachment; filename="${file.filename}"`).type(file.contentType).send(file.bytes);
   });
 }
+
+

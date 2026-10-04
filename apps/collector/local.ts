@@ -7,7 +7,7 @@ import { atomicJson } from '../../packages/filesystem.js';
 import { claudeIdentity } from '../../packages/native/claude.js';
 import { readCollectorSettings } from './settings.js';
 import { captureSchema } from '../../packages/contracts/materials.js';
-import { DeliveryQueue } from './delivery.js';
+import { DeliveryQueue, beginNativePickup } from './delivery.js';
 import { reportDeliveryHealth } from './health.js';
 import { enroll, setupLock } from './enrollment.js';
 import { protectState } from './install-state.js';
@@ -133,6 +133,7 @@ async function collectSources(state: string, settings: Settings, monitor: Captur
     } catch (error) { errors.push((error as Error).message); monitor.fail(error, event.session_id); }
   }
   for (const source of options.capture === false ? [] : tracked) {
+    const pickup = beginNativePickup();
     monitor.observe();
     try {
       const pending = delivery.latest(settings.source, source.sessionId);
@@ -210,7 +211,7 @@ async function collectSources(state: string, settings: Settings, monitor: Captur
       const manifest = manifestSchema.parse({ protocolVersion: 1, sourceSessionId: source.sessionId, source: settings.source,
         sourceVersion, sourceOs: settings.sourceOs, project: source.project,
         hash: artifactHash, byteLength: bytes.length, qualifiedAt: source.qualifiedAt, capability: 'unverified', capture, restoredFrom });
-      await delivery.enqueue(manifest, fingerprint, [bytes, ...discovered.artifacts.flatMap(item => item.bytes ? [item.bytes] : [])]);
+      await delivery.enqueue(manifest, fingerprint, [bytes, ...discovered.artifacts.flatMap(item => item.bytes ? [item.bytes] : [])], pickup);
       monitor.recover(source.sessionId);
     } catch (error) { errors.push((error as Error).message); monitor.fail(error, source.sessionId); }
   }
