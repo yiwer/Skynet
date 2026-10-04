@@ -29,6 +29,7 @@
 .platform-main .inference-corrections select,.platform-main .inference-corrections textarea{min-width:0;max-width:100%;width:100%;margin:0;font-size:12px}
 .platform-main .inference-corrections select,.platform-main .inference-corrections button{min-height:44px}
 .inference-corrections textarea{resize:vertical;min-height:80px}
+.inference-conflict{padding:8px 12px;border-left:2px solid var(--color-focus);background:var(--color-paper-2);border-radius:var(--radius-xs)}
 .inference-edit-elements{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
 .inference-audit-author{color:var(--color-muted);font-size:11px}
 .inference-audit-links{display:flex;gap:14px;flex-wrap:wrap}
