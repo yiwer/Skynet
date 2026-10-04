@@ -40,6 +40,7 @@ import { migrateDeliveryReceipts, saveDeliveryReceipt } from './delivery-receipt
 import { migrateAssembly, assemblyService, processingService, recordAssemblyRecipe } from './assembly.js';
 import { migrateWaits, waitsService } from './waits.js';
 import { migrateWaitReports, waitReportService } from './wait-report.js';
+import { migrateActivity,activityService } from './activity.js';
 
 export async function createApp(options: { db: Database; rawDirectory: string; webDirectory?: string; publicOrigin?: string; reportClock?: () => Date }) {
   const { db } = options;
@@ -59,6 +60,7 @@ export async function createApp(options: { db: Database; rawDirectory: string; w
   await migrateAssembly(db);
   await migrateWaits(db);
   await migrateWaitReports(db);
+  await migrateActivity(db);
   const raw = new RawStore(options.rawDirectory);
   await backfillOrigins(db, raw);
   await reconcileOriginIntegrity(db,raw);
@@ -266,6 +268,10 @@ export async function createApp(options: { db: Database; rawDirectory: string; w
   });
   const analysis = analysisService(db, archive);
   const insights = sessionInsightsService(db, archive, analysis, raw);
+  const activity = activityService(db,raw,insights,options.reportClock);
+  app.get('/api/activity',{onRequest:readerGuard},request=>activity.read(request.query));
+  app.post('/api/activity/recompute',{onRequest:readerGuard},request=>activity.recompute(request.body));
+  app.get('/api/activity/export',{onRequest:readerGuard},async(request,reply)=>{const data=await activity.export(request.query);return reply.header('Content-Disposition',`attachment; filename="skynet-activity-${data.version}.json"`).type('application/json').send(data);});
   const usage = usageOutputService(db, metrics, insights);
   const prompts=promptReportService(db,usage,insights);
   app.get('/api/prompt-report',{onRequest:readerGuard},request=>prompts.read(request.query));
@@ -409,7 +415,7 @@ export async function createApp(options: { db: Database; rawDirectory: string; w
     const file = await archive.exported((request.params as { id: string }).id, format);
     return reply.header('Content-Disposition', `attachment; filename="${file.filename}"`).type(file.contentType).send(file.bytes);
   });
-  if (options.publicOrigin) await registerMcp(app, db, archive, options.publicOrigin, analysis, reports, coverage, workStatistics, workViews,operations,conversation,metrics,assembly,processing,insights,waits,usage,waitReport,prompts);
+  if (options.publicOrigin) await registerMcp(app, db, archive, options.publicOrigin, analysis, reports, coverage, workStatistics, workViews,operations,conversation,metrics,assembly,processing,insights,waits,usage,waitReport,prompts,activity);
   if (options.webDirectory) {
     await app.register(fastifyStatic, { root: resolve(options.webDirectory), wildcard: false });
   }
