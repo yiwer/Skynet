@@ -95,9 +95,9 @@ export function capabilityProfileService(db: Database, assessments: ReturnType<t
       if (stored) return stored.payload;
     }
     const scope = { period: q.period ?? requested?.selection?.period ?? 'since-enrollment' as const, preset: q.preset ?? requested?.preset ?? '默认' as const };
-    const content = await consistentReportingInputs(db, clock, async () => {
+    const content = await consistentReportingInputs(db, clock, () => assessments.withProfile(employeeId,{...scope,full},async bundle => {
       const head = full ? await assessments.recompute(employeeId, scope) : null;
-      const assessment = await assessments.export(employeeId, { ...scope, ...(head ? { version: head.version } : {}) });
+      const assessment = bundle?.selected??await assessments.export(employeeId, { ...scope, ...(head ? { version: head.version } : {}) });
       if (requested && assessment.version !== requested.version) throw new HttpError(409, '此历史评估尚无完整画像；仍可读取固定评估');
       const report = await usage.complete({ period: scope.period, version: assessment.inputs.usageVersion });
       const mine = report.employees.find(person => person.employeeId === employeeId);
@@ -125,13 +125,13 @@ export function capabilityProfileService(db: Database, assessments: ReturnType<t
         for (const event of events.slice(0, remaining)) seenActivity.add(event.id);
         if (recentActivity.events.length >= 20) { recentActivity.hasEarlier = events.length > remaining || index + 1 < dates.length; break; }
       }
-      return { algorithmVersion: 'capability-profile-3', employeeId, employee: assessment.employee, range: assessment.range, assessment, coaching:await coaching.read(assessment,report),
+      return { algorithmVersion: 'capability-profile-3', employeeId, employee: assessment.employee, range: assessment.range, assessment, coaching:await coaching.read(assessment,report,bundle?.weeks),
         header: await header(employeeId), kpis: { ...totals, activeDays: activeDates.length }, usage: { version: report.version, metricVersion: report.metricVersion, daily, agents,
           sourceInputsComplete: mine?.sourceInputsComplete ?? true, unknownReasons: mine?.unknownReasons ?? [], unscopedSources: mine?.unscopedSources ?? 0 },
         sessions, taskDistribution: [...taskCounts].sort(([a], [b]) => a.localeCompare(b)).map(([taskType, sessions]) => ({ taskType, sessions })), recentActivity,
         work: await workContent(employeeId, assessment.range.from, assessment.range.to, activeDates),
         references: { efficiency: { version: efficiencyReport.version, metricVersion: efficiencyReport.metricVersion, path: '#efficiency?' + new URLSearchParams({ period: scope.period, employeeId, version: efficiencyReport.version }) } } };
-    }, async client => ({
+    }), async client => ({
       delivery: (await client.query('SELECT device_id,upload_id,snapshot_id,receipt_hash,received_at FROM delivery_receipts ORDER BY device_id,upload_id')).rows,
       devices: (await client.query('SELECT id,name,active FROM devices WHERE employee_id=$1 ORDER BY id', [employeeId])).rows,
       // Source corrections invalidate the composition; derived preparation is
