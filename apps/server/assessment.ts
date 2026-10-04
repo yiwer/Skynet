@@ -3,6 +3,7 @@ import { HttpError } from './identities.js';
 import { assessmentQuery, type CapabilityAssessment } from '../../packages/contracts/assessment.js';
 import { assessmentModel, assessmentModelVersion } from './assessment-model.js';
 import { assessmentInputs } from './assessment-inputs.js';
+import { consistentReportingInputs } from './reporting-frontier.js';
 import type { usageOutputService } from './usage-output.js';
 import type { sessionInsightsService } from './session-insights.js';
 import type { waitsService } from './waits.js';
@@ -30,12 +31,13 @@ export function assessmentService(db: Database, usage: ReturnType<typeof usageOu
       const row = (await db.query('SELECT payload FROM assessment_revisions WHERE version=$1 AND employee_id=$2', [q.version, employeeId])).rows[0];
       if (!row) throw new HttpError(404, '评估版本不存在'); return row.payload;
     }
-    const inputSet = await assessmentInputs(db, usage, insights, waits, clock, full), employee = inputSet.people.find(person => person.id === employeeId);
+    const inputSet = await consistentReportingInputs(db, clock, () => assessmentInputs(db, usage, insights, waits, clock, full));
+    const employee = inputSet.people.find(person => person.id === employeeId);
     if (!employee) throw new HttpError(404, '员工不存在');
     const { baselineVersion } = inputSet;
     await db.query('INSERT INTO assessment_baselines(version,payload) VALUES($1,$2) ON CONFLICT DO NOTHING', [baselineVersion, inputSet.baseline]);
     const content = { employeeId, employee: employee.name, period: '接入至今' as const, preset: '默认' as const, modelVersion: assessmentModelVersion,
-      inputs: { metricsVersion: inputSet.report.metricVersion, usageVersion: inputSet.report.version, analysisVersions: employee.analysisVersions, insightVersions: employee.insightVersions, baselineVersion, waitsVersion: inputSet.waitsVersion, coverageVersion: employee.coverageVersion },
+      inputs: { metricsVersion: inputSet.report.metricVersion, usageVersion: inputSet.report.version, analysisVersions: employee.analysisVersions, insightVersions: employee.insightVersions, baselineVersion, waitsVersion: inputSet.waitsVersion, coverageVersion: employee.coverageVersion, frontierVersion: inputSet.frontierVersion },
       range: employee.range, dims: employee.dims, ...employee.verdict,
       sample: employee.sample, coverageIssues: employee.issues, representatives: employee.representatives };
     const version = digest(JSON.stringify(content));

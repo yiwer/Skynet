@@ -11,7 +11,7 @@ type Prompt = SessionInferences['prompts'][number];
 type Reply = SessionInferences['replies'][number];
 export type AssessmentSession = {
   sessionId: string; employeeId: string; snapshotId: string; webPath: string; versions: { snapshotId: string; version: string }[];
-  analysisVersions: string[]; task: string; done: boolean; turnKnown: boolean; inferenceComplete: boolean;
+  analysisVersions: string[]; task: string; done: boolean; turnKnown: boolean; historyKnown: boolean; inferenceComplete: boolean;
   userTurns: number; tokens: number | null; verified: number | null; claimed: number | null; tests: number | null;
   prompts: Prompt[]; replies: Reply[]; rework: number | null; evidence: InsightCitation[];
 };
@@ -36,13 +36,14 @@ export function assessmentSessions(rows: UsageSession[], views: SessionInsights[
     }
     const promptList = [...prompts.values()], nonFirst = promptList.filter(p => !p.first), userTurns = group.reduce((n, row) => n + row.userTurns, 0);
     const complete = leaves.length > 0 && leaves.every(v => v.state === 'complete') && promptList.length === userTurns;
+    const historyKnown = leaves.length > 0 && leaves.every(v => v.messageHistoryComplete === true);
     const tasks = new Set(leaves.map(view => view.state === 'complete' ? view.inferences?.taskType.value ?? 'unknown' : 'unknown'));
     return { sessionId: first.sessionId, employeeId: first.employeeId, snapshotId: leaves.at(-1)?.snapshotId ?? first.snapshotId, webPath: group.at(-1)!.webPath, versions,
       analysisVersions: [...new Set(inputs.flatMap(view => view.analysisVersion ? [view.analysisVersion.id] : []))],
       task: tasks.size === 1 ? [...tasks][0]! : 'unknown', done: leaves.length > 0 && leaves.every(v => v.sourceState?.turn.state === 'waiting-input'),
-      turnKnown: leaves.length > 0 && leaves.every(v => v.sourceState && v.sourceState.turn.state !== 'unknown'), inferenceComplete: complete, userTurns,
+      turnKnown: leaves.length > 0 && leaves.every(v => v.sourceState && v.sourceState.turn.state !== 'unknown'), historyKnown, inferenceComplete: complete, userTurns,
       tokens: sumKnown(group.map(row => row.inputTokens)), verified: sumKnown(group.map(row => row.outputs.verified.value)), claimed: sumKnown(group.map(row => row.outputs.claimed.value)), tests: sumKnown(group.map(row => row.outputs.tests.value)),
-      prompts: promptList, replies: [...replies.values()], rework: complete && nonFirst.every(p => p.complete && p.rework !== null) ? nonFirst.filter(p => p.rework).length : null,
+      prompts: promptList, replies: [...replies.values()], rework: historyKnown && complete && nonFirst.every(p => p.complete && p.rework !== null) ? nonFirst.filter(p => p.rework).length : null,
       evidence: inputs.flatMap(v => [...v.inferences?.outcomes.flatMap(o => o.citations) ?? [], ...v.facts.tests.evidence]) };
   });
 }
@@ -70,15 +71,16 @@ function evidence(metric: MetricScore, citations: (InsightCitation | { snapshotI
 export function fillAssessmentFactors(dims: CapabilityAssessment['dims'], sessions: AssessmentSession[], baseline: Baseline, waits: WaitsPage, employeeId: string) {
   const metric = (key: string) => Object.values(dims).flatMap(dim => dim.metrics).find(item => item.key === key)!;
   if (!sessions.length) return { promptTip: null, representatives: { best: null, rework: null } };
-  const prompts = sessions.flatMap(s => s.prompts), first = prompts.filter(p => p.first), nonFirst = prompts.filter(p => !p.first), complete = sessions.every(s => s.inferenceComplete);
+  const prompts = sessions.flatMap(s => s.prompts), ordered = sessions.filter(s => s.historyKnown).flatMap(s => s.prompts);
+  const first = ordered.filter(p => p.first), nonFirst = ordered.filter(p => !p.first), complete = sessions.every(s => s.inferenceComplete);
   const promptN = sessions.reduce((n, s) => n + s.userTurns, 0), verified = sumKnown(sessions.map(s => s.verified)), claimed = sumKnown(sessions.map(s => s.claimed));
-  const firstComplete = complete && first.every(p => p.complete && Object.values(p.elements).every(value => value !== null));
-  scoreMetric(metric('elem'), firstComplete ? mean(first.map(p => Object.values(p.elements).filter(Boolean).length / 4)) ?? 0 : null, first.length, '首条提示词推断不完整');
+  const firstComplete = complete && sessions.every(s => s.historyKnown) && first.every(p => p.complete && Object.values(p.elements).every(value => value !== null));
+  scoreMetric(metric('elem'), firstComplete ? mean(first.map(p => Object.values(p.elements).filter(Boolean).length / 4)) ?? 0 : null, first.length, sessions.every(s => s.historyKnown) ? '首条提示词推断不完整' : '原始提示词起点未知');
   const replies = sessions.flatMap(s => s.replies), clarifyKnown = complete && replies.every(r => r.complete && r.clarification !== null);
   scoreMetric(metric('clarify'), clarifyKnown ? promptN ? replies.filter(r => r.clarification).length / promptN : 0 : null, promptN, '追问推断不完整');
   const rework = sumKnown(sessions.map(s => s.rework));
-  scoreMetric(metric('rework'), rework === null ? null : nonFirst.length ? rework / nonFirst.length : 0, nonFirst.length, '返工推断不完整');
-  scoreMetric(metric('clean'), rework === null ? null : sessions.filter(s => s.rework === 0).length / sessions.length, sessions.length, '返工推断不完整');
+  scoreMetric(metric('rework'), rework === null ? null : nonFirst.length ? rework / nonFirst.length : 0, nonFirst.length, '非首条边界或返工推断不完整');
+  scoreMetric(metric('clean'), rework === null ? null : sessions.filter(s => s.rework === 0).length / sessions.length, sessions.length, '非首条边界或返工推断不完整');
   scoreMetric(metric('turnsPerVer'), verified === null ? null : promptN / Math.max(.5, verified), promptN, '已验证结果未知');
   const outcomes = verified !== null && claimed !== null ? verified + claimed : null;
   scoreMetric(metric('verShare'), outcomes === null ? null : outcomes ? verified! / outcomes : 0, outcomes ?? 0, '结果核验状态未知');

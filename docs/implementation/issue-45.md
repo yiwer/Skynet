@@ -17,6 +17,8 @@
 
 `assessment-factors.ts` 把逻辑会话的项目切片按员工合并，提示词和回复按原始 eventId 去重。引用必须能唯一落在同一员工、接入后、所选来源日期中。复制历史、重复上传、恢复链和旧载体不产生新提示词、会话或产出。任务基线把同一逻辑会话的员工贡献合并，避免接续链重复成为多个团队样本。
 
+首条/非首条边界还需当前原生叶子的 `messageHistoryComplete === true`。该共享确定性事实来自 #42 的服务器核验历史链；截断、改写、压缩及其后续追加不能凭模型的 `first` 标志重建已丢失的起点。边界未知时，首条要素覆盖、返工率、无返工会话占比均未知，首条/非首条样本只统计起点可信的会话；实际观察到的会话和提示词仍保留。旧固定洞察缺少字段时也不推为已知；固定旧评估保持原样可读。
+
 完整实现 13 项指标、6 个维度及 PRD 固定锚点。单项原值未知和样本不足分别表示，不用零填补；维度取可计分项平均，再按默认权重 20/20/20/20/15/5 加权，缺失维度权重比例重分配。综合指数先取整再按 72/60 分档；低可信度等级待定。会话/提示词数量决定基础可信度，真实采集缺口降一级；未知 Token 本身不冒充采集缺口。误差为估计值 `round(26 / sqrt(N))`，无会话时指数与误差为空。
 
 已结束样本需要所有当前原生叶子的最后一轮均为 `waiting-input`。它只说明当前处于轮次之间，不声称会话永久结束；后续 `task_started` 即移出已结束样本。缺少原生轮次边界时产出指标为未知，已知仍在进行中的样本不足则保持样本不足。已验证结果均值基线下限为 0.5；无有效同类产效比或中位数为零时不计该项。Token 为零不能作为产效比除数。
@@ -31,9 +33,11 @@
 
 每份结果绑定模型、基础指标、用量、等待、分析、洞察、基线、采集覆盖及员工接入后的北京时间范围。生成时间以 UTC 存储，在页面明确按北京时间显示。迟到原件、原生状态变化、重新分析或团队基线变化生成新版本；相同输入复用原生成时间。固定旧结果和基线在新输入到达、显式全量重算、服务重启后仍可读取，异步旧分析不能覆盖新评估。
 
+跨服务组合使用 `reporting-frontier.ts` 的 `consistentReportingInputs(db, clock, read)`。在完整组合读取前后，分别以可重复读事务取得原件集合与 SHA-256、清单和谱系、批量归属修订、最新分析及适用目标、实际输入完整性、员工/设备/接入日期、真实缺口和北京时间日期的语义指纹。两端相同才绑定 `inputs.frontierVersion` 并保存组合评估；变化则从头读取全部输入，最多三次，仍在变化返回 409。它不以相近墙钟、原件数量或组件生成时间替代输入一致性；包含尚无业务事件的原件，也不把心跳时间或派生缓存写入当作输入变化。旧结果可不含该字段，固定版本读取仍原样返回。组件自身的有效固定版本可以独立保存，但未通过核验的组合结果不会发布。
+
 ## TDD 与公开验证
 
-测试 seam 沿用 PRD 的 2026-09-28 用户确认：合成设备公开上传 → Reporting/Evidence、公开 Analysis 请求/外部执行边界、HTTP/OAuth MCP/Web。没有通过数据库查询断言评分；数据库只用于隔离工作器配置，模型响应由测试外部执行器确定。
+测试 seam 沿用 PRD 的 2026-09-28 用户确认：合成设备公开上传 → Reporting/Evidence、公开 Analysis 请求/外部执行边界、HTTP/OAuth MCP/Web。没有通过数据库查询断言评分；数据库用于隔离工作器配置，以及在跨服务并发测试中安排真实数据库发布边界的交错。产品正确性全部通过 HTTP 与固定导出断言，模型响应由测试外部执行器确定。
 
 RED 依次验证缺少评估入口、只有空分数、缺少 MCP/画像、未知 Token 被误当采集缺口、原生结束边界未知被误记为样本不足、无会话仍显示空维度、纯 Token 日期被误算为活跃日、固定输入分页尚不存在。GREEN 覆盖：
 
@@ -42,16 +46,18 @@ RED 依次验证缺少评估入口、只有空分数、缺少 MCP/画像、未�
 - 2 条首提示词不足与第 3 条达标；零结果的 0.5 轮次除数；采集缺口高可信度降为中；未知来源与真实零值不同。
 - 恢复后只有新 `task_started`、没有新增业务消息也会更新当前叶子；结束后增量与全量相同，历史前缀不增加提示词或会话数。
 - 35 项输入引用跨页无遗漏/重复；后续页要求固定版本；HTTP/MCP/完整导出一致；旧评估和旧基线冻结。
+- 真实公开上传发生在用量读取与等待读取之间，以及原件数量不变但分析在读取期间完成，两种交错均先在旧实现失败，再经完整输入核验通过；固定等待引用必须属于同份用量输入，新分析必须进入该份评估，随后全量重算和历史读取相同。
+- 截断原件先通过公开上传复现首条被错误计分，再核对首条/返工/无返工为未知；继续追加仍不恢复已丢失的起点，已知样本数、历史版本和全量重算保持正确。
 - 真实 HTTPS OAuth/PKCE、浏览器登录、明暗主题 1440/390/320、低于 60 分维度默认展开、对话证据跳转、参数与基线下载、无会话空状态。外层文档不滚动，内容区内部滚动。
 
-测试入口：`tests/assessment-public.test.ts`、`tests/assessment-model-public.test.ts`、`tests/assessment-journey.test.ts`；合成 fixture 在 `tests/assessment-fixture.ts`。可复现命令：
+测试入口：`tests/assessment-public.test.ts`、`tests/assessment-model-public.test.ts`、`tests/assessment-journey.test.ts`、`tests/assessment-concurrency.test.ts`、`tests/assessment-history.test.ts`；合成 fixture 在 `tests/assessment-fixture.ts`。可复现命令：
 
 ```powershell
 $env:SKYNET_TEST_POSTGRES_BIN='C:/Users/yiwer/AppData/Local/Temp/ticket28-pg-0eb735e987dc48d186870e8a96801e01/bin'
 $env:SKYNET_OPENSSL='D:/DevEnv/Git/usr/bin/openssl.exe'
 $env:SKYNET_ASSESSMENT_EVIDENCE_DIR='E:/GenCode/Skynet-evidence/v2-2026-10-04/45-assessment'
 npm run build
-node --import tsx --test --test-concurrency=1 tests/assessment-public.test.ts tests/assessment-model-public.test.ts tests/assessment-journey.test.ts
+node --import tsx --test --test-concurrency=1 tests/assessment-public.test.ts tests/assessment-model-public.test.ts tests/assessment-journey.test.ts tests/assessment-concurrency.test.ts tests/assessment-history.test.ts
 ```
 
 原生 fixture 的 wire 名称和持久化范围核对官方 [Codex 0.157.1 protocol.rs](https://raw.githubusercontent.com/openai/codex/rust-v0.157.1/codex-rs/protocol/src/protocol.rs) 与 [rollout policy.rs](https://raw.githubusercontent.com/openai/codex/rust-v0.157.1/codex-rs/rollout/src/policy.rs)，未发明不存在的权限原始事件。0.160.0 Token 与元数据支持沿用 #40 的已验证实现。
@@ -59,3 +65,5 @@ node --import tsx --test --test-concurrency=1 tests/assessment-public.test.ts te
 外部证据目录为 `E:/GenCode/Skynet-evidence/v2-2026-10-04/45-assessment/`，保存构建/公开测试日志、明暗截图、320px 规则展开截图和版本清单。性能 AC-32 不由本票签收，统一由 #54 完成。
 
 在包含 #40 的集成 `91544e8` 上完成：构建通过、六项公开行为 **6/6 通过（101.21 秒）**，类型检查与 `git diff --check` 通过。目视核对 1440 浅色、320 深色及 320 深色规则展开截图，未见外层溢出、遮挡或换行截断。记录仅说明上述合成公开行为，本票未部署、推送或关闭远端 issue。
+
+独立审查随后发现初始候选 `73da7f0` 的跨服务输入交错缺口；该候选未据此视为完成。补充真实并发 RED 后修复语义输入核验，并接入 #42 独立验证的历史边界事实。最终包含集成 `3c51f7e`（#39、#42），评估相关公开回归 **9/9 通过（148.83 秒）**；新增两类并发与截断/追加回归，原有六项继续通过。最后一次集成只带入提示词图表触达范围、文档和对应测试，没有改变已验证的评估代码。最终证据见 `final-repaired-public.txt`、`final-repaired-build.txt` 与 `final-repaired/`，旧 RED 与独立审查记录保留。
