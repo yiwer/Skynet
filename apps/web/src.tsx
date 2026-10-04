@@ -23,7 +23,7 @@ import { DataProcessing } from './Assembly.js';
 import { WaitingReport } from './WaitingReport.js';
 import { CapabilityPeople } from './CapabilityPeople.js';
 import { SessionEfficiency } from './SessionEfficiency.js';
-import { CapabilityAssessment } from './CapabilityAssessment.js';
+import { CapabilityProfile } from './CapabilityProfile.js';
 import {PromptReportPage} from './PromptReport.js';
 import { ActivityRecords } from './ActivityRecords.js';
 import './product-polish.css';
@@ -85,8 +85,8 @@ function App() {
     if (response.status === 401 && token && access === token) logout('凭据无效或已停用，请重新登录。');
     if (!response.ok) {
       const body = await response.json().catch(() => null);
-      throw new Error(response.status === 401 ? '凭据无效或已停用，请重新登录。'
-        : typeof body?.error === 'string' ? body.error : '暂时无法读取，请稍后重试。');
+      throw Object.assign(new Error(response.status === 401 ? '凭据无效或已停用，请重新登录。'
+        : typeof body?.error === 'string' ? body.error : '暂时无法读取，请稍后重试。'), { status: response.status });
     }
     return response;
   }
@@ -135,7 +135,7 @@ function App() {
   return <PlatformShell authenticated={!!token} name={name} canManageIdentities={canManageIdentities} view={view} onNavigate={navigate} onLogout={()=>logout()} onSearch={openSearch}>
     {!token?<section className="login"><h1>登录 Skynet</h1><form onSubmit={login}><label htmlFor="credential">个人读取凭据</label><input id="credential" type="password" value={credential} onChange={event=>setCredential(event.target.value)} autoComplete="off" required/><button className="primary" disabled={busy||!credential}>{busy?'正在验证…':'进入存档'}</button></form></section>:<>
     {view==='metrics'?<UsageMetrics key={token} request={(path,signal,method,body)=>request(path,token,signal,method,body)}/>
-    :view==='people'?<CapabilityPeople request={(path,signal)=>request(path,token,signal)}/>:view==='profile'?<CapabilityAssessment currentEmployeeId={employeeId} request={(path,signal)=>request(path,token,signal)} appendNote={(path,body)=>request(path,token,undefined,'POST',body)}/>
+    :view==='people'?<CapabilityPeople request={(path,signal)=>request(path,token,signal)}/>:view==='profile'?<CapabilityProfile currentEmployeeId={employeeId} request={(path,signal)=>request(path,token,signal)} appendNote={(path,body)=>request(path,token,undefined,'POST',body)}/>
     :view==='activity'?<ActivityRecords key={token} hash={conversationHash} request={(path,signal,method,body)=>request(path,token,signal,method,body)}/>
     :view==='waits'?<WaitingReport key={token} request={(path,signal,method,body)=>request(path,token,signal,method,body)}/>
     :view==='efficiency'?<SessionEfficiency key={token} request={(path,signal,method,body)=>request(path,token,signal,method,body)}/>

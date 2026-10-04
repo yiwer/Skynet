@@ -1,3 +1,4 @@
+import {ProfileSourceReturn,carryProfileSourceReturn} from './profile-source-navigation.js';
 import { useEffect, useState } from 'react';
 import { analysisLabels, assessmentLabels } from '../../packages/contracts/analysis.js';
 import { beijingDate, previousDate, type DailyReport, type DailyItem } from '../../packages/contracts/reports.js';
@@ -55,10 +56,10 @@ export function DailyReports({ request, currentEmployeeId, onEvidence }: {
   const calendarDate = /^\d{4}-\d{2}-\d{2}$/.test(date) && Number.isFinite(new Date(date).getTime()) ? date : beijingDate();
   const weekStart = monday(calendarDate), days = Array.from({ length: 7 }, (_, index) => addDays(weekStart, index));
   const hasStatistics = !!report?.statistics && report.statistics.records > 0;
-  return <section className="work-report daily-report workspace-page" aria-label="日工作">
+  return <section className="work-report daily-report workspace-page" aria-label="日工作"><ProfileSourceReturn/>
     {employees.length > 1 && <nav className="report-people" aria-label="切换员工">{employees.map(employee => <button key={employee.id} aria-pressed={employee.id === employeeId} onClick={() => { setEmployeeId(employee.id); setRevision(''); }}><span className="report-avatar" aria-hidden="true">{Array.from(employee.name)[0]}</span>{employee.name}</button>)}</nav>}
     <header className="report-page-heading"><div><p className="report-crumbs"><a href="#coverage">团队概览</a><span>/</span>日报</p><h1><span className="report-avatar report-avatar-large" aria-hidden="true">{Array.from(employeeName)[0]}</span>{employeeName}</h1></div><div className="report-actions"><button disabled={busy} onClick={() => {reader.retry();setRefresh(value => value + 1);}}>刷新日报</button><button disabled={busy} onClick={generate}>生成日报</button></div></header>
-    <div className="report-control-row"><nav className="report-mode" aria-label="查看方式"><a href={`#daily?${new URLSearchParams({ employeeId, date })}`} aria-current="page">日报</a><a href={`#work?${new URLSearchParams({ kind: 'weekly', subject: employeeId, from: weekStart, to: addDays(weekStart, 6) })}`}>周视图</a></nav><label className="report-date-control">来源日期<input type="date" value={date} max={beijingDate()} onChange={event => { if (event.target.value) { setDate(event.target.value); setRevision(''); } }} /></label>
+    <div className="report-control-row"><nav className="report-mode" aria-label="查看方式"><a href={carryProfileSourceReturn(`#daily?${new URLSearchParams({ employeeId, date })}`)} aria-current="page">日报</a><a href={carryProfileSourceReturn(`#work?${new URLSearchParams({ kind: 'weekly', subject: employeeId, from: weekStart, to: addDays(weekStart, 6) })}`)}>周视图</a></nav><label className="report-date-control">来源日期<input type="date" value={date} max={beijingDate()} onChange={event => { if (event.target.value) { setDate(event.target.value); setRevision(''); } }} /></label>
       <div className="report-day-strip" role="group" aria-label="选择日期">{days.map(day => <button key={day} disabled={day > beijingDate()} aria-pressed={day === date} aria-label={`选择 ${day}`} onClick={() => { setDate(day); setRevision(''); }}><span>周{['日', '一', '二', '三', '四', '五', '六'][new Date(`${day}T00:00:00Z`).getUTCDay()]}</span><b>{Number(day.slice(8))}</b></button>)}</div>
     </div>
     <div className="workspace-scroll report-scroll">

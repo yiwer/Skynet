@@ -46,6 +46,7 @@ import { migrateReviewNotes, reviewNotesService } from './review-notes.js';
 import { migrateCapabilityPeople, capabilityPeopleService } from './capability-people.js';
 import { migrateWaitReports, waitReportService } from './wait-report.js';
 import { migrateActivity,activityService } from './activity.js';
+import { migrateCapabilityProfiles, capabilityProfileService } from './capability-profile.js';
 import {migrateInferenceCorrections,inferenceCorrectionsService} from './inference-corrections.js';
 
 export async function createApp(options: { db: Database; rawDirectory: string; webDirectory?: string; publicOrigin?: string; reportClock?: () => Date }) {
@@ -73,6 +74,7 @@ export async function createApp(options: { db: Database; rawDirectory: string; w
   await migrateCapabilityPeople(db);
   await migrateWaitReports(db);
   await migrateActivity(db);
+  await migrateCapabilityProfiles(db);
   const raw = new RawStore(options.rawDirectory);
   await backfillOrigins(db, raw);
   await reconcileOriginIntegrity(db,raw);
@@ -342,6 +344,14 @@ export async function createApp(options: { db: Database; rawDirectory: string; w
   app.get('/api/snapshots/:id/insights', { onRequest: readerGuard }, async request => insights.read(z.uuid().parse((request.params as {id:string}).id), sessionInsightsQuery.parse(request.query)));
   const reports = reportService(db, analysis,workStatistics, options.reportClock);
   const workViews = workViewService(db, reports, options.reportClock);
+  const profiles = capabilityProfileService(db, assessments, usage, efficiency, activity, reports, workViews, options.reportClock);
+  app.get('/api/capability-profiles/:id', { onRequest: readerGuard }, request => profiles.read(z.uuid().parse((request.params as { id: string }).id), request.query));
+  app.post('/api/capability-profiles/:id/recompute', { onRequest: readerGuard }, request => profiles.recompute(z.uuid().parse((request.params as { id: string }).id), request.body));
+  app.get('/api/capability-profiles/:id/export', { onRequest: readerGuard }, async (request, reply) => {
+    const value = await profiles.export(z.uuid().parse((request.params as { id: string }).id), request.query);
+    return reply.header('Content-Disposition', `attachment; filename="profile-${value.version}.json"`).send(value);
+  });
+
   const reportQuery = z.object({ offset: z.coerce.number().int().min(0).max(100000).default(0),
     revision: z.coerce.number().int().min(1).optional() }).strict();
   app.get('/api/daily-reports', { onRequest: readerGuard }, async request => reports.list(reportQuery.parse(request.query).offset));
@@ -469,7 +479,7 @@ export async function createApp(options: { db: Database; rawDirectory: string; w
     const file = await archive.exported((request.params as { id: string }).id, format);
     return reply.header('Content-Disposition', `attachment; filename="${file.filename}"`).type(file.contentType).send(file.bytes);
   });
-  if (options.publicOrigin) await registerMcp(app, db, archive, options.publicOrigin, analysis, reports, coverage, workStatistics, workViews,operations,conversation,metrics,assembly,processing,insights,waits,usage,waitReport,prompts,activity,efficiency,assessments,team,people);
+  if (options.publicOrigin) await registerMcp(app, db, archive, options.publicOrigin, analysis, reports, coverage, workStatistics, workViews,operations,conversation,metrics,assembly,processing,insights,waits,usage,waitReport,prompts,activity,efficiency,assessments,team,people,profiles);
   if (options.webDirectory) {
     await app.register(fastifyStatic, { root: resolve(options.webDirectory), wildcard: false });
   }
