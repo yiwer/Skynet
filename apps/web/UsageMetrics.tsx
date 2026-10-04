@@ -8,6 +8,7 @@ import './usage-metrics.css';
 type Props = { request: (path: string, signal?: AbortSignal, method?: 'POST', body?: unknown) => Promise<Response> };
 const params = (query: Partial<MetricsQuery>) => new URLSearchParams(Object.entries(query)
   .filter(([, value]) => value !== undefined).map(([key, value]) => [key, String(value)]));
+const selectionKey = (query: MetricsQuery) => { const value = params(query); value.sort(); return value.toString(); };
 const number = (value: number) => value.toLocaleString('zh-CN');
 const compact = (value: number) => value >= 1e6 ? `${Number((value / 1e6).toFixed(2))}M` : value >= 1000 ? `${Number((value / 1000).toFixed(1))}k` : number(value);
 const tokenUnknown = (row: MetricTotals, kind: 'Input' | 'Output') => row[kind === 'Input' ? 'inputTokens' : 'outputTokens'] === null;
@@ -62,7 +63,13 @@ export function UsageMetrics({ request }: Props) {
     return () => abort.abort();
   }, [page?.version, chartRetry]);
   useEffect(() => { if (complete) setProjects(previous => [...new Set([...previous, ...complete.sessions.map(session => session.project).filter(Boolean)])].sort((a, b) => a.localeCompare(b, 'zh-CN'))); }, [complete?.version]);
-  useEffect(()=>{const change=()=>{if(['#metrics','#usage'].includes(location.hash.split('?')[0]!)){const next=hashMetrics();setDraft(next);setQuery(next);}};window.addEventListener('hashchange',change);return()=>window.removeEventListener('hashchange',change);},[]);
+  useEffect(()=>{const change=()=>{if(['#metrics','#usage'].includes(location.hash.split('?')[0]!)){
+    const next=hashMetrics(), key=selectionKey(next);
+    // Navigation can mount this page before its hashchange event arrives.
+    // Keep an equal selection so that event does not abort and restart its read.
+    setDraft(previous=>selectionKey(previous)===key?previous:next);
+    setQuery(previous=>selectionKey(previous)===key?previous:next);
+  }};window.addEventListener('hashchange',change);return()=>window.removeEventListener('hashchange',change);},[]);
   function selectScope(next: MetricsQuery) {
     next={...next,week:undefined};
     setDraft(next);
