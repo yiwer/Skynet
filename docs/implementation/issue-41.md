@@ -33,3 +33,6 @@ node --import tsx --test tests/session-efficiency.test.ts tests/session-efficien
 外部证据：`E:/GenCode/Skynet-evidence/v2-2026-10-04/41-efficiency/`。有效 RED / GREEN 包括 `03` → `05` 公开缺失接口、`07` → `09` 复盘条件、`11` → `13` 原生时间、`18` → `20` 相同内容稳定版本、`22` → `23` 未知缺口、`24` → `26` 散点交互、`27` → `28` 长会话分页、`32` → `35` 截断首条边界；部分前置执行失败属于 fixture / 构建准备，不作为产品 RED。
 
 已合入独立验收的 #42 集成提交 `3c51f7e`。最终集成构建 `36-integrated-build.txt` 通过；六项公开回归 `37-integrated-public.txt` 为 6/6，通过耗时 70.06 秒。`public-final/` 保存该次 16 张截图及固定报告。该验证不替代 #54 的千会话性能与完整发布验收。
+
+
+独立复核补充：截断后追加完整原生轮次曾错误返回总活动时长 168,000ms；公开复现 `independent-truncate-timing.txt` 为 RED。现保留已知 Agent 60,000ms / 回复 108,000ms，同时记录“历史起点无法证明”的无时间缺口，总活动时长为未知。正式两条计时用例 `40-truncate-timing-green.txt` 为 2/2（29.48 秒），包含未截断与截断后追加、固定历史完整导出。合 #45 后构建 `38-assessment-merge-build.txt` 和 HTTP/MCP/Web/实际下载旅程 `39-assessment-merge-public.txt` 1/1（21.52 秒）通过。

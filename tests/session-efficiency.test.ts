@@ -162,7 +162,7 @@ test('review selection uses scoped strict P75, evidenced claims and original non
   }finally{await app?.close();await db.end();await sandbox.close();}
 });
 
-test('session segments use native turn boundaries and fixed waits without filling tail idle or an unfinished turn', {timeout:120000},async()=>{
+for(const truncated of [false,true])test('session segments use native turn boundaries and fixed waits without filling tail idle or an unfinished turn'+(truncated?' after truncate and append':''), {timeout:120000},async()=>{
   const sandbox=await createSandbox(),db=connect(sandbox.env.DATABASE_URL!);let app:Awaited<ReturnType<typeof createApp>>|undefined;
   try{
     const person=await sandbox.provision('分段合成员工'),base=Date.now()+60000,stamp=(seconds:number)=>new Date(base+seconds*1000).toISOString();
@@ -174,10 +174,11 @@ test('session segments use native turn boundaries and fixed waits without fillin
     const rows=[{type:'session_meta',timestamp:stamp(0),payload:{id}},message('user','开始检查',0),boundary('task_started','one',1),message('assistant','第一轮检查',10),boundary('task_complete','one',21),
       message('user','继续检查',81),boundary('task_started','two',82),message('assistant','第二轮检查',90),boundary('task_complete','two',102),
       message('user','核对最终结果',150),boundary('task_started','three',152),message('assistant','正在核对',160)];
+    let previousId:string|undefined;
     async function upload(items:unknown[]){const bytes=Buffer.from(items.map(row=>JSON.stringify(row)).join('\n')+'\n');await api('/api/chunks/'+digest(bytes),bytes,device.deviceCredential,'PUT');
-      const result=await api('/api/snapshots',{protocolVersion:1,sourceSessionId:id,source:'codex-cli',sourceVersion:'0.160.0',sourceOs:process.platform,project:'/synthetic/efficiency-timing',hash:digest(bytes),byteLength:bytes.length,qualifiedAt:stamp(0),capability:'unverified'},device.deviceCredential,'POST');assert.equal(result.statusCode,200,result.body);return result.json().snapshotId;}
+      const result=await api('/api/snapshots',{protocolVersion:1,sourceSessionId:id,source:'codex-cli',sourceVersion:'0.160.0',sourceOs:process.platform,project:'/synthetic/efficiency-timing',hash:digest(bytes),byteLength:bytes.length,qualifiedAt:stamp(0),capability:'unverified',...(truncated?{capture:{generation:digest('timing-truncated'),revision:previousId?3:2,change:previousId?'append':'truncate',...(previousId?{previousSnapshotId:previousId}:{}),materials:[],lineage:[],gaps:[],compacted:false,partialLine:false}}:{})},device.deviceCredential,'POST');assert.equal(result.statusCode,200,result.body);return previousId=result.json().snapshotId;}
     const original=await upload(rows),response=await api('/api/session-efficiency?period=since-enrollment');assert.equal(response.statusCode,200,response.body);
-    const first=response.json(),timing=first.sessions[0].timing;
+    const first=(await api('/api/session-efficiency/export?period=since-enrollment&version='+response.json().version)).json(),timing=first.sessions[0].timing;
     assert.equal(timing.knownAgentMs,40000);assert.equal(timing.knownReplyMs,108000);assert.equal(timing.activeMs,null);assert.equal(timing.permissionMs,null);
     assert.deepEqual(timing.waitFraction,{numerator:null,denominator:null,value:null});
     assert.deepEqual(timing.segments.filter((segment:any)=>segment.kind==='agent').map((segment:any)=>segment.durationMs),[20000,20000,null]);
@@ -186,9 +187,10 @@ test('session segments use native turn boundaries and fixed waits without fillin
     assert.ok(first.sessions[0].webPath.includes('waitVersion='+timing.waitVersion));
     const waits=(await api('/api/waits?period=since-enrollment&version='+timing.waitVersion)).json();assert.equal(waits.summary.knownReplyWaitMs,108000);
     await upload([...rows,boundary('task_complete','three',172)]);
-    const second=(await api('/api/session-efficiency?period=since-enrollment')).json(),newTiming=second.sessions[0].timing;
-    assert.equal(newTiming.knownAgentMs,60000);assert.equal(newTiming.activeMs,168000);assert.equal(newTiming.knownReplyMs,108000);
-    assert.deepEqual(newTiming.waitFraction,{numerator:null,denominator:168000,value:null},'missing native permissions never become zero waiting');
+    const secondHead=(await api('/api/session-efficiency?period=since-enrollment')).json(),second=(await api('/api/session-efficiency/export?period=since-enrollment&version='+secondHead.version)).json(),newTiming=second.sessions[0].timing;
+    assert.equal(newTiming.knownAgentMs,60000);assert.equal(newTiming.activeMs,truncated?null:168000);assert.equal(newTiming.knownReplyMs,108000);
+    assert.deepEqual(newTiming.waitFraction,{numerator:null,denominator:truncated?null:168000,value:null},'missing native permissions never become zero waiting');
+    if(truncated)assert.ok(newTiming.segments.some((segment:any)=>segment.kind==='gap'&&segment.durationMs===null&&/历史起点/.test(segment.reason)));
     assert.equal(newTiming.segments.filter((segment:any)=>segment.kind==='agent').length,3,'append snapshots do not duplicate native turns');
     assert.ok(newTiming.segments.every((segment:any)=>segment.endedAt===null||Date.parse(segment.endedAt)<=base+172000),'no interval extends to report time');
     assert.deepEqual((await api('/api/session-efficiency/export?period=since-enrollment&version='+first.version)).json(),first);
