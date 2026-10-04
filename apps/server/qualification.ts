@@ -33,6 +33,29 @@ export async function attributionRevision(q:Query,snapshotId:string) {
   return String((await q.query(`SELECT ${attributionRevisionSql('$1')} AS revision`,[snapshotId])).rows[0].revision);
 }
 
+/** Resolve a report's carriers together. Correlating the scalar expression per
+ * snapshot can scan all integrity rows once for every newly uploaded snapshot
+ * before PostgreSQL has table statistics. Keep the same three maxima and both
+ * base/effective event mappings, with one set-based join for the selected scope. */
+export async function attributionRevisions(q:Query,snapshotIds:string[]):Promise<Map<string,string>> {
+  if(!snapshotIds.length)return new Map();
+  const rows=(await q.query(`WITH carriers AS MATERIALIZED (
+    SELECT snapshot_id,event_id FROM snapshot_events WHERE snapshot_id=ANY($1::uuid[])
+    UNION SELECT snapshot_id,event_id FROM effective_snapshot_events WHERE snapshot_id=ANY($1::uuid[])
+  ), qualifications AS (
+    SELECT se.snapshot_id,MAX(c.revision) AS revision FROM carriers se JOIN event_qualifications c ON c.event_id=se.event_id GROUP BY se.snapshot_id
+  ), integrity AS (
+    SELECT se.snapshot_id,MAX(i.revision) AS revision FROM carriers se JOIN event_integrity i ON i.event_id=se.event_id
+    WHERE i.version='original-utf8-1' GROUP BY se.snapshot_id
+  ), overrides AS (
+    SELECT snapshot_id,MAX(revision) AS revision FROM event_origin_overrides
+    WHERE snapshot_id=ANY($1::uuid[]) AND version='original-utf8-1' GROUP BY snapshot_id
+  ) SELECT s.snapshot_id,(COALESCE(c.revision,0)+COALESCE(i.revision,0)+COALESCE(v.revision,0))::text AS revision
+    FROM unnest($1::uuid[]) AS s(snapshot_id)
+    LEFT JOIN qualifications c USING(snapshot_id) LEFT JOIN integrity i USING(snapshot_id) LEFT JOIN overrides v USING(snapshot_id)`,[snapshotIds])).rows;
+  return new Map(rows.map(row=>[row.snapshot_id as string,row.revision as string]));
+}
+
 /** A copied or restored prefix cannot establish original-device qualification.
  * Called only after the server has verified exact material/native lineage and
  * created this primary's immutable event mapping in the archive transaction. */
