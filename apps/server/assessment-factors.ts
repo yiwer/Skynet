@@ -61,6 +61,11 @@ export function assessmentBaseline(sessions: AssessmentSession[]) {
   return { definition: assessmentModel.baseline, tasks, samples };
 }
 type Baseline = ReturnType<typeof assessmentBaseline>;
+export function selectRepresentativeSessions(sessions:AssessmentSession[]){
+  const best=sessions.filter(s=>s.done&&s.verified!==null&&s.verified>0&&s.rework===0).sort((a,b)=>b.verified!-a.verified!||(a.tokens??Infinity)-(b.tokens??Infinity)||a.sessionId.localeCompare(b.sessionId))[0];
+  const rework=sessions.filter(s=>s.rework!==null&&s.claimed!==null&&s.verified!==null&&(s.rework>0||s.claimed>s.verified)).sort((a,b)=>(b.rework!+b.claimed!-b.verified!)-(a.rework!+a.claimed!-a.verified!)||a.sessionId.localeCompare(b.sessionId))[0];
+  return {best,rework};
+}
 function evidence(metric: MetricScore, citations: (InsightCitation | { snapshotId: string; webPath: string; quote?: string })[]) {
   const unique = [...new Map(citations.map(c => [c.webPath, { snapshotId: c.snapshotId, webPath: c.webPath, ...('quote' in c ? { quote: c.quote } : {}) }])).values()];
   metric.evidence = unique.slice(0, 3); metric.evidenceCount = unique.length;
@@ -97,8 +102,7 @@ export function fillAssessmentFactors(dims: CapabilityAssessment['dims'], sessio
   for (const key of ['verShare','testShare','outIdx','effIdx']) evidence(metric(key), sessions.flatMap(s => s.evidence));
   evidence(metric('longShare'), available.flatMap(w => [w.start, w.end].filter((e): e is NonNullable<typeof e> => !!e)));
   const promptTip = firstComplete && first.length ? Object.entries(assessmentModel.promptTips).map(([key, text]) => ({ text, rate: first.filter(p => p.elements[key as keyof Prompt['elements']]).length / first.length })).sort((a, b) => a.rate - b.rate)[0]!.text : null;
-  const best = ended.filter(s => s.verified !== null && s.verified > 0 && s.rework === 0).sort((a, b) => b.verified! - a.verified! || (a.tokens ?? Infinity) - (b.tokens ?? Infinity) || a.sessionId.localeCompare(b.sessionId))[0];
-  const worst = sessions.filter(s => s.rework !== null && s.claimed !== null && s.verified !== null && (s.rework > 0 || s.claimed > s.verified)).sort((a, b) => (b.rework! + b.claimed! - b.verified!) - (a.rework! + a.claimed! - a.verified!) || a.sessionId.localeCompare(b.sessionId))[0];
+  const {best,rework:worst}=selectRepresentativeSessions(sessions);
   const reference = (s: AssessmentSession | undefined) => s ? { snapshotId: s.snapshotId, webPath: s.webPath } : null;
   return { promptTip, representatives: { best: reference(best), rework: reference(worst) } };
 }

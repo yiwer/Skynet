@@ -67,7 +67,7 @@ export async function registerMcp(app: FastifyInstance, db: Database, archive: A
         return { isError: true, content: [{ type: 'text' as const, text: error instanceof HttpError ? error.message : '查询暂时不可用，请重试；上传不受影响' }] };
       }
     }
-    mcp.registerTool('get_capability_profile', { description: '读取员工画像的固定评估、使用数据、工作来源、会话和最近活动。pages 提供各部分的总量和 nextOffset；后续页携带同一 version 与 section。', annotations, inputSchema: profileQuery.safeExtend({ employeeId: z.uuid() }) }, input => { const { employeeId, ...query } = input; return result(() => profiles.read(employeeId, query)); });
+    mcp.registerTool('get_capability_profile', { description: '读取员工画像的固定评估、协作方式、代表原句、同模型基线的上周与本周趋势，以及使用数据、工作来源、会话和最近活动。pages 提供各部分的总量和 nextOffset；后续页携带同一 version 与 section。correctionIds 最多列出 16 项，correctionCount 为总量，完整更正可沿固定 insight 版本查询。', annotations, inputSchema: profileQuery.safeExtend({ employeeId: z.uuid() }) }, input => { const { employeeId, ...query } = input; return result(() => profiles.read(employeeId, query)); });
     mcp.registerTool('list_capability',{description:'按等级分组读取员工使用能力，组内固定姓名顺序。每卡含固定个人评估版本、样本和覆盖。后续页传同一version和nextOffset，不支持按分数排序。',annotations,inputSchema:peopleQuery},input=>result(()=>people.read(input)));
     mcp.registerTool('read_conversation', { description: '按原件顺序分页读取对话，默认隐藏工具及系统、开发者与纯环境上下文；includeTools / includeContext 可分别展开。固定快照和解析版本，长消息沿 nextCursor 继续。默认 conversation-3；readingVersion 可固定 conversation-2。来源状态仅表示已记录的本轮与投递观察，不表示会话永久结束。anchor 使用原件 line/block/textOffset 并展开该记录；工具结果存在不表示助手结论已核验。',
       annotations, inputSchema: conversationInputSchema.safeExtend({ snapshotId }) },

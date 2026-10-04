@@ -47,6 +47,7 @@ import { migrateCapabilityPeople, capabilityPeopleService } from './capability-p
 import { migrateWaitReports, waitReportService } from './wait-report.js';
 import { migrateActivity,activityService } from './activity.js';
 import { migrateCapabilityProfiles, capabilityProfileService } from './capability-profile.js';
+import {profileCoachingService} from './profile-coaching.js';
 import {migrateInferenceCorrections,inferenceCorrectionsService} from './inference-corrections.js';
 
 export async function createApp(options: { db: Database; rawDirectory: string; webDirectory?: string; publicOrigin?: string; reportClock?: () => Date }) {
@@ -344,7 +345,7 @@ export async function createApp(options: { db: Database; rawDirectory: string; w
   app.get('/api/snapshots/:id/insights', { onRequest: readerGuard }, async request => insights.read(z.uuid().parse((request.params as {id:string}).id), sessionInsightsQuery.parse(request.query)));
   const reports = reportService(db, analysis,workStatistics, options.reportClock);
   const workViews = workViewService(db, reports, options.reportClock);
-  const profiles = capabilityProfileService(db, assessments, usage, efficiency, activity, reports, workViews, options.reportClock);
+  const profiles = capabilityProfileService(db, assessments, usage, efficiency, activity, reports, workViews, profileCoachingService(insights,waits,assessments), options.reportClock);
   app.get('/api/capability-profiles/:id', { onRequest: readerGuard }, request => profiles.read(z.uuid().parse((request.params as { id: string }).id), request.query));
   app.post('/api/capability-profiles/:id/recompute', { onRequest: readerGuard }, request => profiles.recompute(z.uuid().parse((request.params as { id: string }).id), request.body));
   app.get('/api/capability-profiles/:id/export', { onRequest: readerGuard }, async (request, reply) => {
