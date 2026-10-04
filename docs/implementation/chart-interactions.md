@@ -58,6 +58,16 @@ Escape, Enter, Space, full intersection visibility and disjoint trigger/details
 rectangles at 320/390px in both themes. The independent original fixture is also
 replayed unchanged except for its output directory.
 
+Independent review of `c50b954` passed the original 18 chart states, then
+reproduced two publicly provisioned employees with the same name and identical
+wait statistics both becoming expanded when only the second was tapped. The
+new anchored status selected the first matching plot. Selection and activation
+now use `employeeId`; visible text remains the same shared formatting of each
+employee's statistics. The formal public case preserves both equal names and
+equal values, selects each person, and checks the unique expanded plot, adjacent
+status geometry, two taps and keyboard dismissal. No naming restriction or
+display-label disambiguation was added.
+
 Every width/theme appearance case now starts with an actual tap and asserts an
 IntersectionObserver ratio of 1 before keyboard focus and color checks; checking
 only the document rectangle would miss the internal reading-area clip.
@@ -106,4 +116,6 @@ independent narrow-screen fixes; the final author receipt identifies the current
 replay passed 1/1 (19.358 seconds) after the non-overlapping box fix. This limited
 chart slice does not complete AC31 or AC32. The final build and all five formal
 chart tests passed, 5/5 with no skips (73.564 seconds), on the integration base
-`1d2d926` plus this chart slice.
+`1d2d926` plus this chart slice. The final identity fix passed a new build and
+the three affected box-plot cases, 3/3 with no skips (44.480 seconds); it did not
+rerun or claim a new pass for unchanged team/heat cases.

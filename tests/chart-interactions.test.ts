@@ -167,6 +167,28 @@ test('narrow box details remain visible without intercepting the second tap',{ti
   }finally{await browser?.close();await f.close();}
 });
 
+test('same-name employees with identical waits keep separate plot selection and anchors',{timeout:120000},async()=>{
+  const f=await assessmentFixture();let browser:Browser|undefined;
+  const directory=process.env.SKYNET_CHART_INTERACTIONS_EVIDENCE??join(f.directory,'chart-interactions');await mkdir(directory,{recursive:true});
+  try{
+    const one=await f.owner('同名员工'),two=await f.owner('同名员工');assert.notEqual(one.employeeId,two.employeeId);
+    for(const owner of [one,two]){const input=f.rows({prompts:5,verified:0,claimed:0});await f.upload(owner,input.rows,input.sessionId);}
+    const response=await f.api(one,'/api/wait-report?period=since-enrollment');assert.equal(response.status,200);const report=await response.json();
+    assert.deepEqual(report.people.map((person:any)=>[person.employee,person.count,person.medianMs]),[['同名员工',4,1000],['同名员工',4,1000]]);
+    browser=await chromium.launch();const page=await browser.newPage({ignoreHTTPSErrors:true,hasTouch:true,viewport:{width:320,height:900},reducedMotion:'reduce'});
+    await page.goto(f.origin+'/#waits?period=since-enrollment&version='+report.waitVersion);await page.getByLabel('个人读取凭据').fill(one.readerCredential);await page.getByRole('button',{name:'进入存档',exact:true}).click();
+    const people=page.getByRole('region',{name:'按人等待分布',exact:true}),plots=people.getByRole('button',{name:/同名员工 · 4 段已知/}),tip=people.getByRole('status');await expect(plots).toHaveCount(2);
+    for(const index of [1,0]){
+      const plot=plots.nth(index);await plot.tap();await expect(tip).toBeInViewport({ratio:1});
+      assert.deepEqual(await plots.evaluateAll(items=>items.map(item=>item.getAttribute('aria-expanded'))),index===1?['false','true']:['true','false']);
+      const button=await plot.boundingBox(),detail=await tip.boundingBox();assert.ok(button&&detail);
+      assert.ok(Math.abs(detail.y+detail.height-button.y)<.1||Math.abs(detail.y-button.y-button.height)<.1,'details anchor to the selected employee');
+      await writeFile(join(directory,`same-name-${index}.json`),JSON.stringify({button,detail},null,2));await page.screenshot({path:join(directory,`same-name-${index}.png`),animations:'disabled'});
+      await plot.tap();await expect(tip).toHaveCount(0);await page.keyboard.press('Enter');await expect(tip).toBeInViewport({ratio:1});await page.keyboard.press('Escape');await expect(tip).toHaveCount(0);
+    }
+  }finally{await browser?.close();await f.close();}
+});
+
 test('team and waiting charts retain legible text and marks, focus and local scrolling with reduced motion',{timeout:180000},async()=>{
   const {f,owner,report}=await waitingFixture();let browser:Browser|undefined;
   const directory=process.env.SKYNET_CHART_INTERACTIONS_EVIDENCE??join(f.directory,'chart-interactions');await mkdir(directory,{recursive:true});
