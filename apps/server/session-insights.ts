@@ -89,14 +89,14 @@ export function sessionInsightsService(db: Database, archive: ArchiveQuery, anal
   return { read, readMany: (snapshotIds:string[], options:{full?:boolean}={}) => readInsightBatch(db,raw,snapshotIds,options.full), readVersions,readMessageFacts };
 }
 
-export function projectSessionInsights(snapshotId:string,input:SessionInsights['input'],run:AnalysisRun|undefined,facts:SessionInsights['facts'],sourceState:SessionInsights['sourceState'],historical=false,messageFactsVersion?:string):SessionInsights {
+export function projectSessionInsights(snapshotId:string,input:SessionInsights['input'],run:AnalysisRun|undefined,facts:SessionInsights['facts'],sourceState:SessionInsights['sourceState'],historical=false,messageFactsVersion?:string,messageHistoryComplete?:boolean):SessionInsights {
   const usable=run?.state==='succeeded'&&(historical||run.applicable)&&run.result?.insights;
   const state = !run ? 'unavailable' : run.state === 'failed' ? 'failed' : run.state === 'superseded'||run.state==='succeeded'&&!run.applicable&&!historical ? 'stale' : run.state === 'succeeded' ? !usable?'legacy':usable.complete&&run.result?.processing?.complete?'complete':'partial' : 'pending';
   const analysisVersion = run ? {id:run.id,generation:run.generation,prompt:run.config.promptVersion,configuration:run.config.configurationHash,applicable:run.applicable}:null;
   const complete=!!usable&&usable.complete&&run?.result?.processing?.complete===true;
   const identity = [snapshotId,input.hash,input.parserVersion,input.attributionRevision,analysisVersion ? [analysisVersion.id,analysisVersion.generation,analysisVersion.prompt,analysisVersion.configuration,analysisVersion.applicable] : null,
     state,outputFactsVersion,inputIntegrityVersion,sourceState ? [sourceState.version,sourceState.turn.state,sourceState.turn.turnId??null,sourceState.turn.line??null,sourceState.turn.timestamp??null] : null,'session-insights-read-3',messageFactsVersion??null];
-  return { version:digest(JSON.stringify(identity)),factsVersion:outputFactsVersion,snapshotId,input,state,analysisVersion,sourceState,...(messageFactsVersion?{messageFactsVersion}:{}),
+  return { version:digest(JSON.stringify(identity)),factsVersion:outputFactsVersion,snapshotId,input,state,analysisVersion,sourceState,...(messageFactsVersion?{messageFactsVersion,messageHistoryComplete}:{}),
     inferences:usable||null,metrics:{verified:complete?usable!.outcomes.filter(v=>v.status==='verified').length:null,claimed:complete?usable!.outcomes.filter(v=>v.status==='claimed').length:null,
       rework:complete&&usable!.prompts.filter(p=>!p.first).every(p=>p.rework!==null)?usable!.prompts.filter(p=>!p.first&&p.rework).length:null,
       clarifications:complete&&usable!.replies.every(r=>r.clarification!==null)?usable!.replies.filter(r=>r.clarification).length:null},facts };

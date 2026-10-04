@@ -30,6 +30,7 @@ export const sessionInsightsQuery = z.object({ analysisId: z.uuid().optional(),v
 export type SessionInsights = {
   version: string; factsVersion:string; snapshotId: string; state: 'unavailable'|'pending'|'failed'|'legacy'|'stale'|'partial'|'complete';
   messageFactsVersion?:string;
+  messageHistoryComplete?:boolean;
   analysisVersion: { id: string; generation: number; prompt: string; configuration: string; applicable: boolean } | null;
   input: { hash: string; parserVersion: string; attributionRevision: string };
   metrics: { verified: number|null; claimed: number|null; rework: number|null; clarifications: number|null };
