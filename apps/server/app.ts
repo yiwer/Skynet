@@ -35,6 +35,7 @@ import { metricsQuerySchema } from '../../packages/contracts/metrics.js';
 import { migrateSessionInsights,sessionInsightsService } from './session-insights.js';
 import { sessionInsightsQuery } from '../../packages/contracts/session-insights.js';
 import { migrateUsageOutput, usageOutputService } from './usage-output.js';
+import {migrateSessionEfficiency,sessionEfficiencyService} from './session-efficiency.js';
 import {migratePromptReports,promptReportService} from './prompt-report.js';
 import { migrateDeliveryReceipts, saveDeliveryReceipt } from './delivery-receipts.js';
 import { migrateAssembly, assemblyService, processingService, recordAssemblyRecipe } from './assembly.js';
@@ -56,6 +57,7 @@ export async function createApp(options: { db: Database; rawDirectory: string; w
   await migrateWorkViews(db);
   await migrateMetrics(db);
   await migrateUsageOutput(db);
+  await migrateSessionEfficiency(db);
   await migratePromptReports(db);
   await migrateDeliveryReceipts(db);
   await migrateAssembly(db);
@@ -275,6 +277,13 @@ export async function createApp(options: { db: Database; rawDirectory: string; w
   app.post('/api/activity/recompute',{onRequest:readerGuard},request=>activity.recompute(request.body));
   app.get('/api/activity/export',{onRequest:readerGuard},async(request,reply)=>{const data=await activity.export(request.query);return reply.header('Content-Disposition',`attachment; filename="skynet-activity-${data.version}.json"`).type('application/json').send(data);});
   const usage = usageOutputService(db, metrics, insights);
+  const efficiency=sessionEfficiencyService(db,usage,insights,raw,options.reportClock);
+  app.get('/api/session-efficiency',{onRequest:readerGuard},request=>efficiency.read(request.query));
+  app.post('/api/session-efficiency/recompute',{onRequest:readerGuard},request=>efficiency.recompute(request.body));
+  app.get('/api/session-efficiency/export',{onRequest:readerGuard},async(request,reply)=>{
+    const value=await efficiency.export(request.query);
+    return reply.header('Content-Disposition',`attachment; filename="skynet-session-efficiency-${value.version}.json"`).type('application/json').send(value);
+  });
   const prompts=promptReportService(db,usage,insights);
   app.get('/api/prompt-report',{onRequest:readerGuard},request=>prompts.read(request.query));
   app.post('/api/prompt-report/recompute',{onRequest:readerGuard},request=>prompts.recompute(request.body));
@@ -427,7 +436,7 @@ export async function createApp(options: { db: Database; rawDirectory: string; w
     const file = await archive.exported((request.params as { id: string }).id, format);
     return reply.header('Content-Disposition', `attachment; filename="${file.filename}"`).type(file.contentType).send(file.bytes);
   });
-  if (options.publicOrigin) await registerMcp(app, db, archive, options.publicOrigin, analysis, reports, coverage, workStatistics, workViews,operations,conversation,metrics,assembly,processing,insights,waits,usage,waitReport,prompts,activity,assessments);
+  if (options.publicOrigin) await registerMcp(app, db, archive, options.publicOrigin, analysis, reports, coverage, workStatistics, workViews,operations,conversation,metrics,assembly,processing,insights,waits,usage,waitReport,prompts,activity,efficiency,assessments);
   if (options.webDirectory) {
     await app.register(fastifyStatic, { root: resolve(options.webDirectory), wildcard: false });
   }
