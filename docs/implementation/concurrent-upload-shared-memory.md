@@ -1,0 +1,13 @@
+# Concurrent uploads and PostgreSQL shared memory
+
+Application baseline `726e32e` was exercised through the public chunk/snapshot API with a Linux Node 24 application, PostgreSQL 17 and a Linux raw volume. The workload uses 1,000 synthetic sessions, ten employees, four weeks and twenty turns per session. No production data or provider calls are involved.
+
+Four concurrent uploads completed. Increasing only concurrency to sixteen reproduced HTTP 500 twice: 986 and 997 completed respectively. The PostgreSQL error was `53100`; the second run retained the specific failure to resize POSIX shared-memory segments by 1–4 MiB with `No space left on device`. Reducing the dataset to 600 sessions completed. The failure occurs before report assertions or analysis and must not be hidden with upload retries.
+
+The diagnostic kept the application image, PostgreSQL image, workload and sixteen workers unchanged and increased only the database container's shared-memory mount from Docker's default 64 MiB to 256 MiB. All 1,000 uploads completed, with no server errors. PostgreSQL's main memory, query parallelism and upload semantics were unchanged. This identifies a shared-memory-capacity failure in the reproduced workload. The earlier CI run `37226046501` has no server error class, so its HTTP 500 remains unclassified until the next instrumented CI run; local reproduction cannot retroactively identify that error.
+
+The production Compose database and Docker test fixture now explicitly allocate a **256 MiB maximum shared-memory mount**. This is a capacity limit, not a reservation of 256 MiB of resident memory. The resource does not contain persisted database files. Existing persistent database and raw volumes remain unchanged. Applying this database service configuration recreates its container and briefly restarts PostgreSQL; deployment must first complete the existing consistent backup, then verify the same database volume, historical fixed reports and raw hashes after reconnection. An unchanged database-container ID is no longer the correct success condition for this one configuration migration.
+
+The test fixture's failed upload assertions also retain bounded, safe error-code classes. They do not emit credentials, original contents or server error messages, and do not add retries or change success criteria.
+
+External evidence under `Skynet-evidence/v2-2026-10-04/54-upload-linux-*` retains both original failures, the reduced workload and the shared-memory comparison. `54-upload-ci-feedback-loop.md` records the earlier native/Docker attempts. Follow-up validation must rerun the public workload and original capacity test against the accepted configuration. This change is a reliability fix; it is not AC32/P95 acceptance.

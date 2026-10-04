@@ -37,6 +37,7 @@ export async function createSandbox(options:{stoppedNativeSnapshot?:{directory:s
     } else {
       if(options.stoppedNativeSnapshot)throw new Error('A native fixture snapshot requires SKYNET_TEST_POSTGRES_BIN');
       await ownedCommand('docker', ['run', '--detach', '--name', name,'--label',`org.skynet.test-owner=${owner}`, '--publish', '127.0.0.1::5432',
+      '--shm-size','256m',
       '--env','POSTGRES_PASSWORD','--env', `POSTGRES_DB=${database}`, 'postgres:17-alpine'],{...process.env,POSTGRES_PASSWORD:password},'',{timeoutMs:60000});
       const { stdout } = await execute('docker', ['port', name, '5432/tcp']);
       const port = stdout.trim().split(':').at(-1);
