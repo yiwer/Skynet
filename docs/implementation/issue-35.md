@@ -51,3 +51,9 @@ node node_modules/tsx/dist/cli.mjs --test tests/assembly.test.ts tests/assembly-
 阶段证据位于 `E:/GenCode/Skynet-evidence/v2-2026-10-04/35-assembly/`：`01-audit-red.txt` 缺审计路由，`03-pipeline-red.txt` 缺处理路由，`06-public-red.txt` 缺 MCP tool，`09-parts-red.txt` 揭示两块基准增量后仍误计两块。`11-combined-green.txt` 记录 5/5 公开回归通过，包含连续十次无效 ACK 只一个快照、真实重试次数 9→10、多块原件与增量、独立同文活动、续聊、compact、子材料和跨进程补传。
 
 `public/verified.json` 保留合成审计与处理版本；`public/processing-{320,1280,1920}-{light,dark}.png` 六张稳定截图验证两种主题及各宽度。测试等待最终布局且关闭运动后截屏，断言根文档无横向或纵向滚动；旧过渡中间帧不作为验收依据。本票的定向运行时计时不替代 #54 的千会话 AC-32 负载验收。
+
+### 最终集成验证
+
+2026-10-04 合并集成 `2ca6b8f`（包含 #38），解决 MCP 参数与侧栏的同位置接线冲突，保留组装、处理与洞察全部读接口。`13-integrated-build.txt` 记录 `tsc + vite build` 通过；`14-final-public.txt` 记录 7/7 通过，耗时 47.76 秒：本票三项服务测试、一项 HTTPS OAuth MCP/导出/Web 测试、完整离线投递注入、V2 对话/指标跨端验证、真实隔离 Claude 洞察与界面回归。`12-backlog-red.txt` 为新增队列积压入口的失败证据，最终同一离线测试确认 429 期间可见一份待传队列与服务器观测时间。
+
+已核对正确 UTF-8 的 GitHub #35 全文及 PRD-v2 相关用户故事。测试使用 Node 24.21.0、PostgreSQL 18.6、已核实 OpenSSL 与隔离 Claude Code 2.1.281；没有部署、生产写入或关闭远端票。
