@@ -1,10 +1,9 @@
-import { open, readdir, realpath, unlink, mkdir } from 'node:fs/promises';
-import { join, relative, isAbsolute, sep } from 'node:path';
+import { readdir, unlink } from 'node:fs/promises';
+import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { setTimeout } from 'node:timers/promises';
 import { collectOnce } from './local.js';
 import { atomicJson } from '../../packages/filesystem.js';
-import { hostEventSchema } from '../../packages/contracts/archive.js';
 import { identitySchema, installationSchema, jsonFile, optionalJson } from './install-state.js';
 import { askRuntime, ownRuntime, releaseRuntime } from './runtime-control.js';
 import { autostartStatus } from './autostart.js';
@@ -12,38 +11,9 @@ import { CaptureMonitor } from './capture-health.js';
 import { reportDeliveryHealth } from './health.js';
 import { registeredEntries } from './entries.js';
 import { payloadRoot } from './release.js';
+import { codexRouting } from './codex-routing.js';
 export { ensureRunning } from './supervisor.js';
 
-async function routeCodex(state: string, installation: ReturnType<typeof installationSchema.parse>) {
-  if (!installation.clients.some(client => client.source !== 'claude-code-cli' && client.configured)) return [];
-  const spool = join(state, 'inbox', 'codex', 'spool'); await mkdir(spool, { recursive: true, mode: 0o700 });
-  const errors: string[] = [];
-  for (const file of await readdir(spool)) {
-    if (!file.endsWith('.json')) continue;
-    try {
-      const queued = await jsonFile(join(spool, file)); const event = hostEventSchema.parse(queued.event);
-      const root = installation.clients.find(client => client.source === 'codex-cli')!.nativeRoot;
-      const actual = await realpath(event.transcript_path); const remainder = relative(await realpath(root), actual);
-      if (!remainder || remainder === '..' || remainder.startsWith(`..${sep}`) || isAbsolute(remainder) || !actual.endsWith('.jsonl')) throw new Error('Codex activity points outside its native root');
-      // Only inspect a bounded metadata prefix after resolving the trusted root.
-      const handle = await open(actual, 'r'); const buffer = Buffer.alloc(1024 * 1024); let count: number;
-      try { count = (await handle.read(buffer, 0, buffer.length, 0)).bytesRead; } finally { await handle.close(); }
-      const end = buffer.indexOf(10, 0); if (end < 0 || end >= count!) throw new Error('Native metadata is incomplete or exceeds the routing limit');
-      const metadata = JSON.parse(buffer.subarray(0, end).toString('utf8'));
-      if (metadata.type !== 'session_meta' || metadata.payload?.id !== event.session_id) throw new Error('Native session identity mismatch');
-      // The default shared-daemon TUI records source=vscode in Codex 0.160.0;
-      // its codex-tui originator distinguishes it from extension/Desktop work.
-      // Only accept measured pairs rather than guessing from source alone.
-      const source = (metadata.payload.source === 'exec' && metadata.payload.originator === 'codex_exec')
-        || (['cli', 'vscode'].includes(metadata.payload.source) && metadata.payload.originator === 'codex-tui') ? 'codex-cli' : null;
-      if (!source) throw new Error('Codex origin is not yet verified; activity is queued without guessing CLI or Desktop');
-      if (!installation.clients.some(client => client.source === source && client.configured)) throw new Error('The observed Codex source has not been configured');
-      const destination = join(state, 'sources', source, 'spool', file);
-      await atomicJson(destination, queued); await unlink(join(spool, file));
-    } catch (error) { errors.push((error as Error).message); }
-  }
-  return errors;
-}
 export async function runInstalled(state: string) {
   if (!process.send || !process.connected) throw new Error('Installed workers must be started by the owning supervisor; use skynet start');
   const active = installationSchema.parse(await jsonFile(join(state, 'installation.json')));
@@ -69,17 +39,20 @@ export async function runInstalled(state: string) {
     catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ESRCH') { await releaseRuntime(lease); throw error; } }
   }
   await atomicJson(lockPath, { version: 2, pid: process.pid, instance, supervisorInstance });
-  await atomicJson(join(state, 'runtime.json'), { pid: process.pid, instance, startedAt, checkedAt: null, errors: [] });
+  await atomicJson(join(state, 'runtime.json'), { pid: process.pid, instance, startedAt, checkedAt: null,
+    errors: [], errorsScope: 'last-sweep', codexRouting: null });
   process.send({ type: 'ready', instance });
   const previousHealth = await optionalJson(join(state, 'health.json'));
   let nextHealth = Date.parse(previousHealth?.nextAttemptAt ?? '') || 0;
   let healthAttempts = previousHealth?.attempts ?? 0;
+  const routeCodex = codexRouting(state);
   try {
     do {
       const errors: string[] = [];
+      let routing: Awaited<ReturnType<typeof routeCodex>> = null;
       try {
         const installation = installationSchema.parse(await jsonFile(join(state, 'installation.json')));
-        try { errors.push(...await routeCodex(state, installation)); } catch { errors.push('Codex routing unavailable; queued events retained'); }
+        try { routing = await routeCodex(installation); errors.push(...routing?.errors ?? []); } catch { errors.push('Codex routing unavailable; queued events retained'); }
         for (const client of installation.clients) {
           const sourceState = join(state, 'sources', client.source);
           try {
@@ -121,7 +94,8 @@ export async function runInstalled(state: string) {
           if (request) await unlink(join(state, 'health-request.json')).catch(() => undefined);
         }
       } catch { errors.push('Background configuration could not be read; retained local state needs inspection'); }
-      await atomicJson(join(state, 'runtime.json'), { pid: process.pid, instance, checkedAt: new Date().toISOString(), errors }).catch(() => undefined);
+      await atomicJson(join(state, 'runtime.json'), { pid: process.pid, instance, checkedAt: new Date().toISOString(),
+        errors, errorsScope: 'last-sweep', codexRouting: routing?.status ?? null }).catch(() => undefined);
       if (!stop.signal.aborted) await setTimeout(1000, undefined, { signal: stop.signal }).catch(() => undefined);
     } while (!stop.signal.aborted);
   } finally { await unlink(lockPath).catch(() => undefined); await releaseRuntime(lease); if (process.connected) process.disconnect(); }
