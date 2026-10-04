@@ -34,6 +34,7 @@ import { migrateMetrics, metricsService } from './metrics.js';
 import { metricsQuerySchema } from '../../packages/contracts/metrics.js';
 import { migrateSessionInsights,sessionInsightsService } from './session-insights.js';
 import { sessionInsightsQuery } from '../../packages/contracts/session-insights.js';
+import { migrateUsageOutput, usageOutputService } from './usage-output.js';
 import { migrateDeliveryReceipts, saveDeliveryReceipt } from './delivery-receipts.js';
 import { migrateAssembly, assemblyService, processingService, recordAssemblyRecipe } from './assembly.js';
 
@@ -49,6 +50,7 @@ export async function createApp(options: { db: Database; rawDirectory: string; w
   await migrateCoverage(db);
   await migrateWorkViews(db);
   await migrateMetrics(db);
+  await migrateUsageOutput(db);
   await migrateDeliveryReceipts(db);
   await migrateAssembly(db);
   const raw = new RawStore(options.rawDirectory);
@@ -245,6 +247,13 @@ export async function createApp(options: { db: Database; rawDirectory: string; w
   });
   const analysis = analysisService(db, archive);
   const insights = sessionInsightsService(db, archive, analysis);
+  const usage = usageOutputService(db, metrics, insights);
+  app.get('/api/usage-output', { onRequest: readerGuard }, request => usage.read(request.query));
+  app.post('/api/usage-output/recompute', { onRequest: readerGuard }, request => usage.recompute(request.body));
+  app.get('/api/usage-output/export', { onRequest: readerGuard }, async (request, reply) => {
+    const data = await usage.export(request.query);
+    return reply.header('Content-Disposition', `attachment; filename="skynet-usage-output-${data.version}.json"`).type('application/json').send(data);
+  });
   app.get('/api/snapshots/:id/insights', { onRequest: readerGuard }, async request => insights.read(z.uuid().parse((request.params as {id:string}).id), sessionInsightsQuery.parse(request.query)));
   const reports = reportService(db, analysis,workStatistics, options.reportClock);
   const workViews = workViewService(db, reports, options.reportClock);
