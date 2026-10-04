@@ -51,7 +51,7 @@ const navigation: { label: string; items: NavigationItem[] }[] = [
     { label: '用量与产出', icon: 'chart', view: 'metrics' },
     { label: '会话产效', icon: 'gauge' },
     { label: '提示词分析', icon: 'quote' },
-    { label: '响应与等待', icon: 'clock' },
+    { label: '响应与等待', icon: 'clock', view: 'waits' },
   ] },
   { label: '存档', items: [{ label: '会话找回', icon: 'restore', view: 'recovery' }] },
   { label: '运行', items: [

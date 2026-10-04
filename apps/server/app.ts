@@ -33,6 +33,7 @@ import { conversationInputSchema, conversationTraceInputSchema } from '../../pac
 import { migrateMetrics, metricsService } from './metrics.js';
 import { metricsQuerySchema } from '../../packages/contracts/metrics.js';
 import { migrateDeliveryReceipts, saveDeliveryReceipt } from './delivery-receipts.js';
+import { migrateWaits, waitsService } from './waits.js';
 
 export async function createApp(options: { db: Database; rawDirectory: string; webDirectory?: string; publicOrigin?: string; reportClock?: () => Date }) {
   const { db } = options;
@@ -46,6 +47,7 @@ export async function createApp(options: { db: Database; rawDirectory: string; w
   await migrateWorkViews(db);
   await migrateMetrics(db);
   await migrateDeliveryReceipts(db);
+  await migrateWaits(db);
   const raw = new RawStore(options.rawDirectory);
   await backfillOrigins(db, raw);
   await reconcileOriginIntegrity(db,raw);
@@ -199,6 +201,13 @@ export async function createApp(options: { db: Database; rawDirectory: string; w
   const archive = archiveQuery(db, raw);
   const conversation = conversationQuery(db, raw);
   const metrics = metricsService(db, raw, options.reportClock);
+  const waits = waitsService(db, raw, options.reportClock);
+  app.get('/api/waits', { onRequest: readerGuard }, request => waits.read(request.query));
+  app.post('/api/waits/recompute', { onRequest: readerGuard }, request => waits.recompute(request.body));
+  app.get('/api/waits/export', { onRequest: readerGuard }, async (request, reply) => {
+    const data = await waits.export(request.query);
+    return reply.header('Content-Disposition', `attachment; filename="skynet-waits-${data.version}.json"`).type('application/json').send(data);
+  });
   app.get('/api/snapshots/:id/conversation', { onRequest: readerGuard }, async request => {
     const { id } = z.object({ id: z.uuid() }).parse(request.params);
     const q = z.object({ readingVersion: z.enum(['conversation-2', 'conversation-3']).optional(), cursor: z.string().optional(), includeTools: z.enum(['true', 'false']).optional(), includeContext: z.enum(['true', 'false']).optional(),
@@ -354,7 +363,7 @@ export async function createApp(options: { db: Database; rawDirectory: string; w
     const file = await archive.exported((request.params as { id: string }).id, format);
     return reply.header('Content-Disposition', `attachment; filename="${file.filename}"`).type(file.contentType).send(file.bytes);
   });
-  if (options.publicOrigin) await registerMcp(app, db, archive, options.publicOrigin, analysis, reports, coverage, workStatistics, workViews,operations,conversation,metrics);
+  if (options.publicOrigin) await registerMcp(app, db, archive, options.publicOrigin, analysis, reports, coverage, workStatistics, workViews,operations,conversation,metrics,waits);
   if (options.webDirectory) {
     await app.register(fastifyStatic, { root: resolve(options.webDirectory), wildcard: false });
   }

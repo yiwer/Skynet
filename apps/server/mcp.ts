@@ -19,8 +19,10 @@ import { conversationInputSchema, conversationTraceInputSchema } from '../../pac
 import { metricsQuerySchema } from '../../packages/contracts/metrics.js';
 import type { conversationQuery } from './conversation.js';
 import type { metricsService } from './metrics.js';
+import { waitsQuerySchema } from '../../packages/contracts/waits.js';
+import type { waitsService } from './waits.js';
 
-export async function registerMcp(app: FastifyInstance, db: Database, archive: ArchiveQuery, publicOrigin: string, analysis: AnalysisService, reports: ReportService, coverage: CoverageService, workStatistics: WorkStatisticsService, workViews: WorkViewService,operations:ServerOperationsService, conversation: ReturnType<typeof conversationQuery>, metrics: ReturnType<typeof metricsService>) {
+export async function registerMcp(app: FastifyInstance, db: Database, archive: ArchiveQuery, publicOrigin: string, analysis: AnalysisService, reports: ReportService, coverage: CoverageService, workStatistics: WorkStatisticsService, workViews: WorkViewService,operations:ServerOperationsService, conversation: ReturnType<typeof conversationQuery>, metrics: ReturnType<typeof metricsService>, waits: ReturnType<typeof waitsService>) {
   const { guard } = await registerMcpAuth(app, db, publicOrigin);
   const offset = z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).default(0);
   const snapshotId = z.uuid().describe('Immutable snapshot ID from list_sessions, never a mutable session ID');
@@ -48,6 +50,8 @@ export async function registerMcp(app: FastifyInstance, db: Database, archive: A
       annotations, inputSchema: {} }, () => result(async () => metrics.readMetricCatalog()));
     mcp.registerTool('get_report_summary', { description: '读取来源日期归期、去重且版本化的基础用量。Token 未知单列；会话可下钻原件。后续页传入同一 version 和 nextOffset，不混用新版本。',
       annotations, inputSchema: metricsQuerySchema }, input => result(() => metrics.readMetrics(input)));
+    mcp.registerTool('read_waits', { description: '读取与 Web、导出共用的固定等待记录：原生本轮结束至下一条真实用户，末尾空闲排除，满600秒为长等待；权限未知单列。同员工其他逻辑会话活动含其他项目与Agent。后续页固定version；contextSnapshotId与lines可读取该版本的对话行标签。',
+      annotations, inputSchema: waitsQuerySchema }, input => result(() => waits.read(input)));
     mcp.registerTool('list_sessions', { description: '分页列出全体员工的会话快照。nextCursor 保持同一查询时间范围。',
       annotations, inputSchema: { cursor: z.string().max(1024).optional(), limit: z.number().int().min(1).max(10).default(10) } },
     input => result(() => archive.sessions(input.cursor, input.limit)));
