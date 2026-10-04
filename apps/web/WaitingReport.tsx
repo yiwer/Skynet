@@ -3,6 +3,8 @@ import type { WaitsQuery, WaitsPage, ReplyWait } from '../../packages/contracts/
 import { sourceLabel } from '../../packages/contracts/archive.js';
 import './usage-metrics.css';
 import './waits.css';
+import {WaitStatistics} from './WaitStatistics.js';
+import type {WaitReport} from '../../packages/contracts/wait-report.js';
 
 type Request = (path: string, signal?: AbortSignal, method?: 'POST', body?: unknown) => Promise<Response>;
 const params = (value: object) => new URLSearchParams(Object.entries(value).filter(([, item]) => item !== undefined).map(([key, item]) => [key, String(item)]));
@@ -23,6 +25,7 @@ export function WaitingReport({ request }: { request: Request }) {
   const [page, setPage] = useState<WaitsPage>(); const [facets, setFacets] = useState<ReplyWait[]>([]);
   const [busy, setBusy] = useState(false), [error, setError] = useState(''), [retry, setRetry] = useState(0);
   const [project, setProject] = useState('');
+  const [statistics,setStatistics]=useState<WaitReport>(),[statisticsError,setStatisticsError]=useState('');
   useEffect(() => {
     const abort = new AbortController(); setBusy(true); setError(''); setPage(undefined);
     request('/api/waits?' + params(query), abort.signal).then(response => response.json()).then((data: WaitsPage) => {
@@ -37,6 +40,12 @@ export function WaitingReport({ request }: { request: Request }) {
     }).catch(() => { /* Primary page retains its own data and error state. */ });
     return () => abort.abort();
   }, [page?.version]);
+  useEffect(()=>{
+    setStatistics(undefined);setStatisticsError('');if(!page)return;const abort=new AbortController();
+    request('/api/wait-report?'+params({period:query.period,employeeId:query.employeeId,source:query.source,project:query.project,waitVersion:page.version}),abort.signal)
+      .then(response=>response.json()).then((value:WaitReport)=>{if(!abort.signal.aborted)setStatistics(value);})
+      .catch(failure=>{if(!abort.signal.aborted)setStatisticsError(failure.message);});return()=>abort.abort();
+  },[page?.version]);
   const scope = (next: Partial<WaitsQuery>) => setQuery({ ...query, ...next, offset: 0, version: undefined });
   const employees = [...new Map(facets.map(interval => [interval.employeeId, interval.employee])).entries()].sort((a, b) => a[1].localeCompare(b[1], 'zh-CN'));
   async function recompute() {
@@ -50,21 +59,26 @@ export function WaitingReport({ request }: { request: Request }) {
       const url = URL.createObjectURL(await response.blob()), link = document.createElement('a'); link.href = url; link.download = `skynet-waits-${page.version}.json`; link.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
     } catch (failure) { setError((failure as Error).message); }
   }
+  async function downloadStatistics() {
+    if (!statistics) return;
+    try {
+      const response = await request('/api/wait-report/export?' + params({period:query.period,employeeId:query.employeeId,source:query.source,project:query.project,version:statistics.version}));
+      const url=URL.createObjectURL(await response.blob()),link=document.createElement('a');link.href=url;link.download=`skynet-wait-report-${statistics.version}.json`;link.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
+    } catch (failure) {setError((failure as Error).message);}
+  }
   return <section className="waiting-report usage-metrics workspace-page" aria-label="响应与等待" aria-busy={busy}>
-    <div className="usage-page-head"><h1>响应与等待</h1>{page && <div className="usage-export-actions"><button disabled={busy} onClick={recompute}>从原件重算</button><button disabled={busy} onClick={download}>导出当前版本</button></div>}</div>
+    <div className="usage-page-head"><h1>响应与等待</h1>{page && <div className="usage-export-actions"><button disabled={busy} onClick={recompute}>从原件重算</button><button disabled={busy} onClick={download}>导出当前版本</button>{statistics&&<button disabled={busy} onClick={downloadStatistics}>导出统计</button>}</div>}</div>
     <form className="usage-filters" onSubmit={event => { event.preventDefault(); scope({ project: project || undefined }); }}><div className="usage-filter-row">
       <div className="usage-periods" role="group" aria-label="时间范围">{([['this-week', '本周'], ['last-week', '上周'], ['since-enrollment', '接入至今']] as const).map(([period, label]) => <button type="button" key={period} aria-pressed={query.period === period} onClick={() => scope({ period })}>{label}</button>)}</div>
       <label>员工<select value={query.employeeId ?? ''} onChange={event => scope({ employeeId: event.target.value || undefined })}><option value="">全部员工</option>{employees.map(([id, name]) => <option key={id} value={id}>{name}</option>)}</select></label>
       <label>Agent<select value={query.source ?? ''} onChange={event => scope({ source: event.target.value as WaitsQuery['source'] || undefined })}><option value="">全部 Agent</option><option value="codex-cli">Codex CLI</option><option value="codex-desktop">Codex Desktop</option><option value="claude-code-cli">Claude Code CLI</option></select></label>
       <label>项目<input aria-label="项目路径" value={project} maxLength={1024} placeholder="全部项目" onChange={event => setProject(event.target.value)}/></label><button>应用</button>
-    </div>{page && <p className="wait-scope">{page.scope.from} — {page.scope.to} · 北京时间 · 版本 {page.revision}</p>}</form>
+    </div>{page && <p className="wait-scope">{page.scope.from} — {page.scope.to} · 北京时间 · 版本 {page.revision}{page.dataAsOf&&` · 截至 ${timestamp(page.dataAsOf)}`}</p>}</form>
     <div className="workspace-scroll">
       {busy && <p role="status">正在读取等待记录…</p>}{error && <div role="alert"><p>{error}</p><button onClick={() => setRetry(value => value + 1)}>重试</button></div>}
-      {page && <><dl className="usage-stats wait-stats">
-        <div className="usage-stat"><dt>{page.summary.replyWaitMs === null ? '已确认等待回复' : '等待回复'}</dt><dd data-testid="wait-reply-total">{page.summary.replyWaitCount ? waitDuration(page.summary.knownReplyWaitMs) : page.summary.replyWaitMs === null ? '未知' : '0 分 0 秒'}</dd><span>{page.summary.replyWaitCount} 段{page.summary.unknownReplyWaitCount > 0 && ` · 未知 ${page.summary.unknownReplyWaitCount} 段`}</span></div>
-        <div className="usage-stat"><dt>{page.summary.replyWaitMs === null ? '已确认长等待' : '长等待'}</dt><dd>{page.summary.replyWaitMs === null && !page.summary.replyWaitCount ? '未知' : page.summary.longWaitCount}</dd><span>≥ 10 分钟</span></div>
-        <div className="usage-stat"><dt>权限等待</dt><dd data-testid="wait-permission-total">未知</dd></div>
-      </dl>
+      {page && <>
+      {statistics?<WaitStatistics key={statistics.version} report={statistics}/>:statisticsError?<p role="alert">{statisticsError}</p>:<p role="status">正在读取等待分布…</p>}
+      <p className="wait-total-caption">已确认等待合计 <span data-testid="wait-reply-total">{page.summary.replyWaitCount?waitDuration(page.summary.knownReplyWaitMs):page.summary.replyWaitMs===null?'未知':'0 分 0 秒'}</span> · {page.summary.replyWaitCount} 段</p>
       {page.daily.length > 0 && <details className="usage-data-status"><summary>按日查看</summary><div className="usage-table-scroll"><table><caption>按日等待</caption><thead><tr><th>日期</th><th>已确认等待回复</th><th>未知段数</th></tr></thead><tbody>{page.daily.map(day => <tr key={day.date}><th>{day.date}</th><td>{waitDuration(day.knownReplyWaitMs)}</td><td>{day.unknownReplyWaitCount}</td></tr>)}</tbody></table></div></details>}
       <section className="usage-figure"><div className="usage-figure-head"><h2>等待记录</h2><span>{page.total} 段</span></div>
         <div className="usage-table-scroll"><table aria-label="等待记录"><thead><tr><th>员工 / 项目</th><th>轮次结束 → 用户回复</th><th>等待回复</th><th>期间活动</th><th>来源</th></tr></thead><tbody>{page.intervals.map(interval => <tr key={interval.id} data-long={interval.long || undefined}>
