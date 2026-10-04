@@ -116,9 +116,9 @@ test('V2 public originals → conversation and metrics Web → real HTTPS OAuth 
     assert.equal(new URL(page.url()).hash, `#${snapshotId}`);
     await page.getByRole('navigation', { name: '平台页面', exact: true }).getByRole('button', { name: '用量与产出', exact: true }).click();
     await expect(page).toHaveURL(new RegExp(`#metrics$`));
-    await page.getByRole('region', { name: '会话用量', exact: true }).locator(`a[href="#${snapshotId}"]`).click();
+    await page.getByRole('region', { name: '会话用量', exact: true }).locator(`a[href^="#${snapshotId}?insightVersion="]`).click();
     await expect(conversation).toContainText(inputText);
-    assert.equal(new URL(page.url()).hash, `#${snapshotId}`);
+    assert.equal(new URL(page.url()).hash.split('?')[0], `#${snapshotId}`);
     assert.equal(defaultPages[0]!.messages.find(message => message.line === 2)!.toolEvidence, 'none-observed');
     assert.equal(defaultPages[0]!.status.verification, 'not-assessed');
     await expect(conversation.getByRole('button', { name: '显示 1 次工具调用、2 条工具记录', exact: true })).toBeVisible();
@@ -233,9 +233,9 @@ test('V2 public originals → conversation and metrics Web → real HTTPS OAuth 
     await capture(page, 'recovery');
     await page.getByRole('navigation', { name: '平台页面', exact: true }).getByRole('button', { name: '用量与产出', exact: true }).click();
     const usagePage = page.getByRole('region', { name: '用量指标', exact: true });
-    await expect(usagePage.getByRole('heading', { name: '用量指标', exact: true })).toBeVisible();
+    await expect(usagePage.getByRole('heading', { name: '用量与产出', exact: true })).toBeVisible();
     await expect(usagePage.getByRole('region', { name: '会话用量', exact: true }).getByRole('link', { name: '查看会话', exact: true })).toHaveCount(2);
-    const dailyPoint = usagePage.locator('.usage-daily-chart [tabindex="0"]').first();
+    const dailyPoint = usagePage.getByRole('region', {name:'每日用量',exact:true}).locator('[tabindex="0"][aria-label*="110"]').first();
     await expect(dailyPoint).toHaveCount(1);
     await dailyPoint.focus();
     await expect(usagePage.getByRole('tooltip')).toContainText('110');
@@ -245,7 +245,7 @@ test('V2 public originals → conversation and metrics Web → real HTTPS OAuth 
     await expect(usagePage.getByRole('tooltip')).toContainText('Claude Code CLI');
     await page.keyboard.press('Tab');
     await expect(usagePage.getByRole('tooltip')).toHaveCount(0);
-    await expect(usagePage.getByRole('heading', { name: /^(每人产出|会话：Token 与已验证结果)$/ })).toHaveCount(0);
+    await expect(usagePage.getByRole('heading', { name: /^(每人产出|会话：Token 与已验证结果)$/ })).toHaveCount(2);
     await expect(usagePage.getByRole('group', { name: '时间范围', exact: true }).getByRole('button')).toHaveText(['本周', '上周', '接入至今']);
     await expect(usagePage).toHaveAttribute('aria-busy', 'false');
     await usagePage.getByRole('combobox', { name: /^Agent/ }).selectOption('claude-code-cli');
@@ -257,7 +257,7 @@ test('V2 public originals → conversation and metrics Web → real HTTPS OAuth 
     await expect(usagePage.getByRole('region', { name: '会话用量', exact: true }).getByRole('cell', { name: '22', exact: true })).toBeVisible();
     const downloadPending = page.waitForEvent('download'); await usagePage.getByRole('button', { name: '导出当前版本', exact: true }).click();
     const download = await downloadPending; const downloadPath = await download.path(); assert.ok(downloadPath);
-    assert.deepEqual(JSON.parse(await readFile(downloadPath!, 'utf8')), filtered);
+    assert.deepEqual(JSON.parse(await readFile(downloadPath!, 'utf8')), await (await api('/api/usage-output?' + params(filteredSelection))).json());
     const addedId = randomUUID(); await upload(encoded([native('user', '后续新增会话，不应改变旧指标版本', undefined, addedId)]), addedId);
     await usagePage.getByRole('button', { name: '从原件重算', exact: true }).click();
     await expect(usagePage.getByRole('region', { name: '会话用量', exact: true }).getByRole('link', { name: '查看会话', exact: true })).toHaveCount(2);
@@ -268,10 +268,10 @@ test('V2 public originals → conversation and metrics Web → real HTTPS OAuth 
     assert.deepEqual(await tool('get_report_summary', { ...filteredSelection, version: filtered.version }), filtered);
     assert.deepEqual(await (await api('/api/metrics/export?' + params({ ...filteredSelection, version: filtered.version }))).json(), filtered);
     const dailyUsage = usagePage.getByRole('region', { name: '每日用量', exact: true });
-    await dailyUsage.getByRole('button', { name: '切换为图表', exact: true }).click();
-    await expect(dailyUsage.getByRole('group', { name: '每日 Token 趋势', exact: true })).toHaveCount(1);
-    await dailyUsage.getByRole('button', { name: '切换为表格', exact: true }).click();
-    await expect(usagePage.getByRole('table', { name: '按来源日期归期的已知用量与未知会话', exact: true })).toBeVisible();
+    await dailyUsage.getByRole('button', { name: '每日用量切换为图表', exact: true }).click();
+    await expect(dailyUsage.getByRole('group', { name: /每日 Token$/ })).toHaveCount(1);
+    await dailyUsage.getByRole('button', { name: '每日用量切换为表格', exact: true }).click();
+    await expect(usagePage.getByRole('table', { name: '员工每日输入 Token', exact: true })).toBeVisible();
     await capture(page, 'metrics');
     assert.equal(await page.evaluate(() => Reflect.get(window, 'skynetV2Injected')), undefined);
     assert.deepEqual(pageErrors, []); assert.deepEqual(sandbox.serverErrors.slice(expectedAuthenticationErrors), []);

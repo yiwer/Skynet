@@ -45,7 +45,7 @@ export function usageOutputService(db: Database, metrics: MetricsService, insigh
     // remain evidence; continuations and verified copies share contribution IDs.
     const carriers = ids.length ? (await db.query(`WITH carrying AS MATERIALIZED (SELECT DISTINCT se.snapshot_id FROM effective_snapshot_events se
       JOIN effective_event_origins o ON o.event_id=se.event_id WHERE o.snapshot_id=ANY($1::uuid[]))
-      SELECT s.id,s.device_id,s.source,s.source_session_id,s.committed_at,s.provenance FROM snapshots s
+      SELECT s.id,s.device_id,s.source,s.source_session_id,s.committed_at,s.provenance,s.manifest->'restoredFrom'->>'materialId' AS restored_material_id FROM snapshots s
       WHERE s.id IN (SELECT snapshot_id FROM carrying) OR EXISTS(SELECT 1 FROM snapshots base WHERE base.id=ANY($1::uuid[]) AND base.device_id=s.device_id
         AND base.source=s.source AND base.source_session_id=s.source_session_id)
       ORDER BY s.committed_at,s.id LIMIT 20001`, [ids])).rows : [];
@@ -53,24 +53,27 @@ export function usageOutputService(db: Database, metrics: MetricsService, insigh
     const views = await insights.readMany(carriers.map(carrier => carrier.id), { full });
     const eventIds = [...new Set(views.flatMap(view => [...Object.values(view.facts).flatMap(fact => fact.contributions.map(item => item.eventId)),
       ...view.inferences?.outcomes.flatMap(outcome => outcome.citations.flatMap(cite => cite.origin ? [cite.origin.eventId] : [])) ?? []]))];
-    const origins = new Map<string, any>(eventIds.length ? (await db.query(`SELECT event_id,employee_id,source_date,project,snapshot_id,context
+    const origins = new Map<string, any>(eventIds.length ? (await db.query(`SELECT event_id,employee_id,source_date,project,snapshot_id,context,source,source_session_id
       FROM effective_event_origins WHERE event_id=ANY($1::text[])`, [eventIds])).rows.map(row => [row.event_id, row]) : []);
-    const mappings = carriers.length ? (await db.query(`SELECT DISTINCT se.snapshot_id,o.snapshot_id AS original FROM effective_snapshot_events se
+    const mappings = carriers.length ? (await db.query(`SELECT DISTINCT se.snapshot_id,o.snapshot_id AS original,o.source,o.source_session_id FROM effective_snapshot_events se
       JOIN effective_event_origins o ON o.event_id=se.event_id WHERE se.snapshot_id=ANY($1::uuid[])`, [carriers.map(row => row.id)])).rows : [];
     const carrierOrigins = new Map<string, Set<string>>();
-    for (const map of mappings) { const set = carrierOrigins.get(map.snapshot_id) ?? new Set(); set.add(map.original); carrierOrigins.set(map.snapshot_id, set); }
+    const originKey=(snapshotId:string,source:string,sessionId:string)=>JSON.stringify([snapshotId,source,sessionId]);
+    for (const map of mappings) { const set = carrierOrigins.get(map.snapshot_id) ?? new Set(); set.add(originKey(map.original,map.source,map.source_session_id)); carrierOrigins.set(map.snapshot_id, set); }
     const byCarrier = new Map(carriers.map(carrier => [carrier.id,carrier]));
     const newest = new Map(carriers.map(carrier => [JSON.stringify([carrier.device_id,carrier.source,carrier.source_session_id]),carrier.id]));
     const leaves = new Set<string>(newest.values());
     for (const id of newest.values()) {
       let carrier=byCarrier.get(id); const visited=new Set<string>();
       while(carrier?.provenance?.sourceSnapshotId && carrier.provenance.relation !== 'unconfirmed') {
+        if(carrier.restored_material_id)break;
         const parent=carrier.provenance.sourceSnapshotId; if(visited.has(parent)||visited.size>=128)throw new HttpError(409,'会话谱系循环或过长');visited.add(parent);
+        if(byCarrier.get(parent)?.source_session_id!==carrier.source_session_id)break;
         leaves.delete(parent);carrier=byCarrier.get(parent);
       }
     }
     const rows: UsageSession[] = metric.sessions.map(row => ({ ...row, selected: !q.employeeId || row.employeeId === q.employeeId, outputs: emptyOutputs(), insightVersions: [], latestCarrierSnapshotIds: [] }));
-    const rowViews = rows.map(row => views.filter(view => row.snapshotIds.some(id => carrierOrigins.get(view.snapshotId)?.has(id))));
+    const rowViews = rows.map(row => views.filter(view => row.snapshotIds.some(id => carrierOrigins.get(view.snapshotId)?.has(originKey(id,row.source,row.sourceSessionId)))));
     for (const [index, row] of rows.entries()) {
       const inputs = rowViews[index]!;
       row.insightVersions = inputs.map(view => ({ snapshotId: view.snapshotId, version: view.version }));
@@ -91,9 +94,13 @@ export function usageOutputService(db: Database, metrics: MetricsService, insigh
       for (const outcome of view.inferences?.outcomes ?? []) {
         if (outcome.status === 'inferred') continue;
         const citations = outcome.citations.filter(cite => cite.origin && cite.context === 'after-enrollment');
-        if (citations.length !== outcome.citations.length || !citations.length) continue;
-        const employees = new Set(citations.map(cite => cite.origin!.employeeId)), dates = new Set(citations.map(cite => cite.origin!.sourceDate));
-        if (employees.size !== 1 || dates.size !== 1) continue;
+        const employees = new Set(citations.map(cite => cite.origin!.employeeId)), dates = new Set(citations.map(cite => cite.origin!.sourceDate)), projects=new Set(citations.map(cite=>cite.origin!.project));
+        if (citations.length !== outcome.citations.length || !citations.length || employees.size !== 1 || dates.size !== 1 || dates.has(null) || projects.size !== 1) {
+          if(outcome.citations.some(cite=>cite.context==='after-enrollment'||cite.context==='unknown-time'))for(const [index,row] of rows.entries())if(rowViews[index]!.some(input=>input.snapshotId===view.snapshotId)){
+            row.outputs[outcome.status].value=null;row.outputs[outcome.status].unknownSessions=1;
+          }
+          continue;
+        }
         const origin = citations[0]!.origin!;
         const key = JSON.stringify(citations.map(cite => [cite.origin!.eventId,cite.textOffset,cite.quote]).sort());
         contributions.set(`${outcome.status}/${key}`, { kind: outcome.status, fact: { eventId: origin.eventId, employeeId: origin.employeeId,
@@ -101,11 +108,11 @@ export function usageOutputService(db: Database, metrics: MetricsService, insigh
       }
     }
     const scopedRows = new Map<string,UsageSession>();
-    for(const row of rows)for(const snapshotId of row.snapshotIds)scopedRows.set(JSON.stringify([row.employeeId,row.project,snapshotId]),row);
+    for(const row of rows)for(const snapshotId of row.snapshotIds)scopedRows.set(JSON.stringify([row.employeeId,row.project,snapshotId,row.source,row.sourceSessionId]),row);
     for (const { kind, fact } of contributions.values()) {
       const origin = origins.get(fact.eventId);
       if (!origin || origin.context !== 'after-enrollment' || !origin.source_date || origin.source_date < metric.scope.from || origin.source_date > metric.scope.to) continue;
-      const row = scopedRows.get(JSON.stringify([origin.employee_id,origin.project,origin.snapshot_id]));
+      const row = scopedRows.get(JSON.stringify([origin.employee_id,origin.project,origin.snapshot_id,origin.source,origin.source_session_id]));
       if (!row) continue;
       const amount = row.outputs[kind]; amount.known += fact.value;
       for (const field of ['added','removed','passed','failed'] as const) amount[field] += fact[field] ?? 0;
@@ -114,12 +121,12 @@ export function usageOutputService(db: Database, metrics: MetricsService, insigh
     const selected = rows.filter(row => row.selected);
     const employees = metric.employees.filter(person => !q.employeeId || person.employeeId === q.employeeId).map(person => {
       const mine = selected.filter(row => row.employeeId === person.employeeId);
-      return { ...person, outputs: outputTotals(mine), agents: metric.sources.map(({ source }) => ({ source, ...totals(mine.filter(row => row.source === source)) })),
-        daily: metric.employeeDaily?.filter(day => day.employeeId === person.employeeId).map(({ employeeId: _id, employee: _name, ...day }) => day) ?? [] };
+      return { ...person, activeDates: metric.employeeDaily?.find(series=>series.employeeId===person.employeeId)?.days.filter(day=>day.activeSessions>0).map(day=>day.date)??[], outputs: outputTotals(mine), agents: metric.sources.map(({ source }) => ({ source, ...totals(mine.filter(row => row.source === source)) })),
+        daily: metric.employeeDaily?.find(series => series.employeeId === person.employeeId)?.days ?? [] };
     });
     const content = { metricVersion: metric.version, catalogVersion, scope: { ...metric.scope, ...(q.employeeId ? { employeeId: q.employeeId } : {}) },
       totals: q.employeeId ? totals(selected) : metric.totals, outputs: outputTotals(selected), employees,
-      daily: q.employeeId ? employees[0]?.daily ?? [] : metric.daily, sessions: rows, nextOffset: null,
+      daily: q.employeeId ? employees[0]?.daily ?? [] : metric.daily.map(day=>({date:day.date,activeSessions:day.sessions,...(day.tokenTrend??{inputTokens:day.inputTokens,outputTokens:day.outputTokens,includedSessions:day.sessions-day.unknownTokenSessions,excludedSessions:day.unknownTokenSessions})})), sessions: rows, nextOffset: null,
       sourceInputsComplete: metric.sourceInputsComplete, unknownReasons: metric.unknownReasons, dataAsOf: metric.dataAsOf };
     const version = digest(JSON.stringify(content)), request = selection(q), scopeKey = digest(JSON.stringify(request));
     const client = await db.connect();
