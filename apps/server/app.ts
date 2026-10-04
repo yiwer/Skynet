@@ -214,6 +214,7 @@ export async function createApp(options: { db: Database; rawDirectory: string; w
   });
   app.get('/api/metrics/catalog', { onRequest: readerGuard }, () => metrics.readMetricCatalog());
   app.get('/api/metrics', { onRequest: readerGuard }, request => metrics.readMetrics(metricsQuerySchema.parse(request.query)));
+  app.get('/api/team-coverage/metrics', { onRequest: readerGuard }, request => metrics.readCoverageMetrics(request.query));
   app.get('/api/snapshots/:id/metrics', { onRequest: readerGuard }, request => {
     const { id } = z.object({ id: z.uuid() }).parse(request.params);
     return metrics.readSnapshotMetrics(id, metricsQuerySchema.parse(request.query));

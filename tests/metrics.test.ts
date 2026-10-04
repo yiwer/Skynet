@@ -20,7 +20,7 @@ test('public uploads produce frozen same-source metrics: known zero, unknown, so
   try {
     const alpha = await sandbox.provision('甲：原始员工'), beta = await sandbox.provision('乙：未上报员工');
     const now = new Date(Date.now() + 60000); const day = beijingDate(now), tomorrow = addDays(day, 1);
-    app = await createApp({ db, rawDirectory: sandbox.env.RAW_DIRECTORY!, reportClock: () => now });
+    app = await createApp({ db, rawDirectory: sandbox.env.RAW_DIRECTORY!, reportClock: () => new Date(now.getTime() + 86400000) });
     const api = (url: string, credential = alpha.readerCredential, body?: unknown, method: 'GET' | 'POST' | 'PUT' = 'GET') => app!.inject({
       url, method, headers: { Authorization: `Bearer ${credential}`, ...(body instanceof Buffer ? { 'Content-Type': 'application/octet-stream' } : {}) },
       ...(body !== undefined ? { payload: body instanceof Buffer ? body : body as object } : {}) });
@@ -52,7 +52,7 @@ test('public uploads produce frozen same-source metrics: known zero, unknown, so
     await upload(restoredDevice, session, restoredBytes, '/synthetic/metrics', { snapshotId: firstId, hash: digest(original), byteLength: original.length });
     const unknownId = randomUUID(); await upload(b, unknownId, encode([user(unknownId, t1)]), '/synthetic/unknown');
     const zeroId = randomUUID(); await upload(b, zeroId, encode([user(zeroId, t1), assistant(zeroId, t1, 0, 0)]), '/synthetic/zero');
-    const selection = { period: 'custom', from: day, to: tomorrow };
+    const selection = { period: 'since-enrollment' };
     const path = '/api/metrics?' + new URLSearchParams(selection);
     assert.equal((await app.inject({ url: path })).statusCode, 401);
     assert.equal((await api(path, a.deviceCredential)).statusCode, 401);
@@ -103,7 +103,7 @@ test('Codex cumulative counters require a baseline; resets, unsupported versions
       ...(body !== undefined ? { payload: body as object } : {}) });
     const device = (await api('/api/devices/enroll', { installationId: randomUUID(), name: '累计计数合成设备' }, employee.enrollmentCredential, 'POST')).json();
     const timestamp = new Date(Date.now() + 60000).toISOString(), baseline = new Date(Date.now() - 86400000).toISOString(), day = beijingDate(new Date(timestamp));
-    const scope = new URLSearchParams({ period: 'custom', from: day, to: day });
+    const scope = new URLSearchParams({ period: 'since-enrollment' });
     const native = randomUUID();
     const counter = (time: string, value: number) => ({ timestamp: time, type: 'event_msg', payload: { type: 'token_count', info: { total_token_usage: {
       input_tokens: value * 2, cached_input_tokens: value, output_tokens: value, reasoning_output_tokens: 0, total_tokens: value * 3 } } } });
@@ -126,6 +126,7 @@ test('Codex cumulative counters require a baseline; resets, unsupported versions
     await upload(native, Buffer.concat([original, encode(counter(new Date(Date.parse(timestamp) + 1000).toISOString(), 5))]));
     const reset = (await api('/api/metrics?' + scope)).json<MetricsPage>();
     assert.equal(reset.totals.inputTokens, null); assert.equal(reset.totals.knownInputTokens, 20); assert.equal(reset.totals.unknownTokenSessions, 1);
+    assert.deepEqual((reset.daily[0] as any).tokenTrend, { inputTokens: null, outputTokens: null, includedSessions: 0, excludedSessions: 1 }, 'a session with a reset may retain known totals but contributes no point to the Token trend');
     assert.deepEqual((await api('/api/metrics?' + scope + '&version=' + first.version)).json(), first);
     const unsupported = randomUUID(); await upload(unsupported, encode(header(unsupported), counter(baseline, 10), event(unsupported), counter(timestamp, 20)), 'future-unverified');
     const unknown = (await api('/api/metrics?' + scope)).json<MetricsPage>();
@@ -161,19 +162,19 @@ test('Codex usage on a day without business events retains its source date, owne
     const commit = await api('/api/snapshots', { protocolVersion: 1, sourceSessionId: native, source: 'codex-cli', sourceVersion: '0.157.1', sourceOs: process.platform,
       project: '/synthetic/midnight', hash: digest(content), byteLength: content.length, qualifiedAt: new Date(`${nextDay}T00:00:01+08:00`).toISOString(), capability: 'unverified' }, device.deviceCredential, 'POST');
     assert.equal(commit.statusCode, 200, commit.body); const snapshotId = commit.json().snapshotId;
-    const query = (from: string, to: string) => new URLSearchParams({ period: 'custom', from, to });
-    const singleResponse = await api('/api/metrics?' + query(nextDay, nextDay)); assert.equal(singleResponse.statusCode, 200, singleResponse.body);
+    const query = (from: string, to: string) => new URLSearchParams({ date: to, view: from === to ? 'day' : 'week' });
+    const singleResponse = await api('/api/team-coverage/metrics?' + query(nextDay, nextDay)); assert.equal(singleResponse.statusCode, 200, singleResponse.body);
     const single = singleResponse.json<MetricsPage>();
     assert.deepEqual([single.totals.sessions, single.totals.userTurns, single.totals.toolCalls, single.totals.inputTokens, single.totals.outputTokens], [0, 0, 0, 20, 10]);
     assert.equal(single.sourceInputsComplete, true); assert.deepEqual(single.sessions[0]!.snapshotIds, [snapshotId]);
     assert.deepEqual(single.daily.map(row => [row.date, row.sessions, row.userTurns, row.inputTokens, row.outputTokens]), [[nextDay, 0, 0, 20, 10]]);
-    const bothResponse = await api('/api/metrics?' + query(day, nextDay)); assert.equal(bothResponse.statusCode, 200, bothResponse.body);
+    const bothResponse = await api('/api/team-coverage/metrics?' + query(day, nextDay)); assert.equal(bothResponse.statusCode, 200, bothResponse.body);
     const both = bothResponse.json<MetricsPage>();
     assert.deepEqual([both.totals.sessions, both.totals.userTurns, both.totals.toolCalls, both.totals.inputTokens, both.totals.outputTokens], [1, 1, 0, 40, 20]);
     assert.equal(both.sourceInputsComplete, true);
     assert.deepEqual(both.daily.map(row => [row.date, row.sessions, row.userTurns, row.inputTokens, row.outputTokens]), [[day, 1, 1, 20, 10], [nextDay, 0, 0, 20, 10]]);
-    for (const [selection, payload] of [[query(nextDay, nextDay), single], [query(day, nextDay), both]] as const) {
-      selection.set('version', payload.version);
+    for (let [selection, payload] of [[query(nextDay, nextDay), single], [query(day, nextDay), both]] as const) {
+      selection = new URLSearchParams({ period: 'custom', from: payload.scope.from, to: payload.scope.to, version: payload.version });
       assert.deepEqual((await api('/api/metrics?' + selection)).json(), payload);
       assert.deepEqual((await api('/api/metrics/export?' + selection)).json(), payload);
       const detail = await api(`/api/snapshots/${snapshotId}/metrics?${selection}`); assert.equal(detail.statusCode, 200, detail.body);
@@ -184,10 +185,10 @@ test('Codex usage on a day without business events retains its source date, owne
     const relabel = await api('/api/snapshots', { protocolVersion: 1, sourceSessionId: native, source: 'codex-cli', sourceVersion: '0.157.1', sourceOs: process.platform,
       project: '/synthetic/relabeled', hash: digest(content), byteLength: content.length, qualifiedAt: new Date(`${nextDay}T00:01:00+08:00`).toISOString(), capability: 'unverified' }, device.deviceCredential, 'POST');
     assert.equal(relabel.statusCode, 200, relabel.body);
-    const originalProject = (await api('/api/metrics?' + query(nextDay, nextDay) + '&project=%2Fsynthetic%2Fmidnight')).json<MetricsPage>();
+    const originalProject = (await api('/api/team-coverage/metrics?' + query(nextDay, nextDay) + '&project=%2Fsynthetic%2Fmidnight')).json<MetricsPage>();
     assert.equal(originalProject.totals.inputTokens, 20); assert.equal(originalProject.sessions[0]!.project, '/synthetic/midnight');
     assert.deepEqual(originalProject.sessions[0]!.snapshotIds, [snapshotId]);
-    const relabeledProject = (await api('/api/metrics?' + query(nextDay, nextDay) + '&project=%2Fsynthetic%2Frelabeled')).json<MetricsPage>();
+    const relabeledProject = (await api('/api/team-coverage/metrics?' + query(nextDay, nextDay) + '&project=%2Fsynthetic%2Frelabeled')).json<MetricsPage>();
     assert.equal(relabeledProject.totals.inputTokens, 0); assert.equal(relabeledProject.sessions.length, 0);
     // Verified recovery copies include both dates but only their new suffix is
     // new usage. It must not invent business activity on the token-only day.
@@ -198,10 +199,10 @@ test('Codex usage on a day without business events retains its source date, owne
       project: '/synthetic/midnight', hash: digest(restored), byteLength: restored.length, qualifiedAt: new Date(`${nextDay}T00:02:00+08:00`).toISOString(), capability: 'unverified',
       restoredFrom: { snapshotId, hash: digest(content), byteLength: content.length } }, restoredDevice.deviceCredential, 'POST');
     assert.equal(recovery.statusCode, 200, recovery.body);
-    const continued = (await api('/api/metrics?' + query(nextDay, nextDay))).json<MetricsPage>();
+    const continued = (await api('/api/team-coverage/metrics?' + query(nextDay, nextDay))).json<MetricsPage>();
     assert.deepEqual([continued.totals.sessions, continued.totals.userTurns, continued.totals.toolCalls, continued.totals.inputTokens, continued.totals.outputTokens], [0, 0, 0, 40, 20]);
     assert.equal(continued.sessions.length, 1); assert.equal(continued.sourceInputsComplete, true);
-    assert.deepEqual((await api('/api/metrics?' + query(nextDay, nextDay) + '&version=' + single.version)).json(), single);
+    assert.deepEqual((await api('/api/team-coverage/metrics?' + query(nextDay, nextDay) + '&version=' + single.version)).json(), single);
     // The same discovery path retains unknown usage from an unsupported source
     // version even if that original has no business events on any date.
     const unknownNative = randomUUID();
@@ -212,7 +213,7 @@ test('Codex usage on a day without business events retains its source date, owne
     const unknownCommit = await api('/api/snapshots', { protocolVersion: 1, sourceSessionId: unknownNative, source: 'codex-cli', sourceVersion: 'future-unverified', sourceOs: process.platform,
       project: '/synthetic/unknown-token-only', hash: digest(unknownRaw), byteLength: unknownRaw.length, qualifiedAt: new Date(`${nextDay}T00:03:00+08:00`).toISOString(), capability: 'unverified' }, device.deviceCredential, 'POST');
     assert.equal(unknownCommit.statusCode, 200, unknownCommit.body);
-    const unknown = (await api('/api/metrics?' + query(nextDay, nextDay) + '&project=%2Fsynthetic%2Funknown-token-only')).json<MetricsPage>();
+    const unknown = (await api('/api/team-coverage/metrics?' + query(nextDay, nextDay) + '&project=%2Fsynthetic%2Funknown-token-only')).json<MetricsPage>();
     assert.deepEqual([unknown.totals.sessions, unknown.totals.userTurns, unknown.totals.inputTokens, unknown.totals.unknownTokenSessions, unknown.sourceInputsComplete], [0, 0, null, 1, false]);
   } finally { await app?.close(); await db.end(); await sandbox.close(); }
 });
