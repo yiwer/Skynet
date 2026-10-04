@@ -23,10 +23,16 @@ const nativeKey = (record: Snapshot) => JSON.stringify([record.device_id, record
 /** Read committed originals once, preserving each immutable history. Parallel
  * activity deliberately uses all projects/Agents, independent of report filters. */
 export async function waitDataset(client: pg.PoolClient, raw: RawStore, full: boolean, employees: string[] | null, observe?: (record:Snapshot,bytes:Buffer,facts:WaitInput)=>void): Promise<WaitOriginal[]> {
-  const records = (await client.query(`WITH RECURSIVE selected(id) AS (
+  // Build both ownership sources once. A correlated EXISTS inside the owner
+  // OR can repeatedly join every scoped event against each other snapshot.
+  // Registered owners also retain sources with no readable business events.
+  const records = (await client.query(`WITH RECURSIVE seeds(id) AS (
     SELECT s.id FROM snapshots s JOIN devices d ON d.id=s.device_id WHERE $1::uuid[] IS NULL OR d.employee_id=ANY($1)
-      OR EXISTS(SELECT 1 FROM effective_snapshot_events se JOIN effective_event_origins o ON o.event_id=se.event_id
-        WHERE se.snapshot_id=s.id AND o.employee_id=ANY($1))
+    UNION
+    SELECT se.snapshot_id FROM effective_snapshot_events se JOIN effective_event_origins o ON o.event_id=se.event_id
+      WHERE $1::uuid[] IS NOT NULL AND o.employee_id=ANY($1)
+    ), selected(id) AS (
+    SELECT id FROM seeds
     UNION SELECT p.id FROM selected x JOIN snapshots s ON s.id=x.id JOIN snapshots p ON p.id=(s.provenance->>'sourceSnapshotId')::uuid
       WHERE s.provenance->>'relation' IN ('verified-restoration','same-device-continuation')
     ) SELECT s.*,d.employee_id,e.name AS employee FROM selected x JOIN snapshots s ON s.id=x.id JOIN devices d ON d.id=s.device_id JOIN employees e ON e.id=d.employee_id ORDER BY s.committed_at,s.id LIMIT 20001`, [employees])).rows as Snapshot[];

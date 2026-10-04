@@ -50,3 +50,33 @@ test('waiting preparation preserves full batches, pending legacy proofs, affecte
     assert.deepEqual(await get(path+'&version='+before.version),before);
   }finally{if(restore)await writeFile(restore.path,restore.bytes);await f.close();}
 });
+
+test('employee selection retains unavailable zero-event sources and cross-owner carriers without contaminating unrelated owners',{timeout:120000},async()=>{
+  const f=await assessmentFixture();let restore:{path:string;bytes:Buffer}|undefined;
+  try{
+    const emptyOwner=await f.owner('Zero-event original owner'),other=await f.owner('Independent original owner');
+    const input=f.rows({prompts:0}),empty=await f.upload(emptyOwner,input.rows,input.sessionId),active=f.rows({prompts:2});
+    const original=await f.upload(other,active.rows,active.sessionId);
+    const path='/api/waits/export?period=since-enrollment&employeeId='+emptyOwner.employeeId;
+    const get=async(query:string)=>{const response=await f.api(other,query);assert.equal(response.status,200,await response.clone().text());return response.json();};
+    const before=await get(path);assert.equal(before.total,0);assert.equal(before.summary.replyWaitMs,null);assert.equal(before.summary.knownReplyWaitMs,0);
+    assert.deepEqual(before.unavailableSources,[]);
+    restore={path:join(f.directory,'raw',emptyOwner.deviceId,digest(empty.bytes)),bytes:empty.bytes};await unlink(restore.path);
+    const unavailable=await get(path);assert.equal(unavailable.total,0);assert.equal(unavailable.summary.replyWaitMs,null);
+    assert.deepEqual(unavailable.unavailableSources.map((row:any)=>[row.snapshotId,row.employeeId,row.reason]),[[empty.snapshotId,emptyOwner.employeeId,'missing']]);
+    const independent=await get('/api/waits/export?period=since-enrollment&employeeId='+other.employeeId);
+    assert.equal(independent.total,1);assert.equal(independent.summary.replyWaitMs,1000);assert.deepEqual(independent.unavailableSources,[]);
+    assert.deepEqual(await get(path+'&version='+before.version),before);
+    await writeFile(restore.path,restore.bytes);assert.deepEqual(await get(path),before);
+    const copyOwner=await f.owner('Foreign registered carrier'),copy=await f.upload(copyOwner,original.rows,original.sessionId,
+      {restoredFrom:{snapshotId:original.snapshotId,hash:digest(original.bytes),byteLength:original.bytes.length}});
+    const originalPath='/api/waits/export?period=since-enrollment&employeeId='+other.employeeId,beforeCopy=await get(originalPath);
+    assert.equal(beforeCopy.total,1);assert.equal(beforeCopy.summary.replyWaitMs,1000);
+    restore={path:join(f.directory,'raw',copyOwner.deviceId,digest(copy.bytes)),bytes:copy.bytes};await unlink(restore.path);
+    const missingCarrier=await get(originalPath);assert.equal(missingCarrier.total,1);assert.equal(missingCarrier.summary.replyWaitMs,null);
+    assert.deepEqual(missingCarrier.unavailableSources.map((row:any)=>[row.snapshotId,row.employeeId,row.reason]),[[copy.snapshotId,other.employeeId,'missing']]);
+    assert.deepEqual((await get('/api/waits/export?period=since-enrollment&employeeId='+copyOwner.employeeId)).unavailableSources,[]);
+    assert.deepEqual(await get(originalPath+'&version='+beforeCopy.version),beforeCopy);
+    await writeFile(restore.path,restore.bytes);assert.deepEqual(await get(originalPath),beforeCopy);
+  }finally{if(restore)await writeFile(restore.path,restore.bytes);await f.close();}
+});
