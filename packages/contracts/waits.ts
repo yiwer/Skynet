@@ -13,6 +13,12 @@ export const waitsQuerySchema = z.object({
   .refine(q => !q.lines || !!q.snapshotId || !!q.contextSnapshotId, '对话行筛选需要固定原件')
   .refine(q => !q.contextSnapshotId || !!q.version && !!q.lines && !q.snapshotId && !q.employeeId && !q.source && q.project === undefined, '版本内对话标签需要 version 与 lines');
 export type WaitsQuery = z.infer<typeof waitsQuerySchema>;
+export const waitSections=['intervals','daily','unavailableSources','employees'] as const;
+export type WaitSection=typeof waitSections[number];
+export const waitsReadingQuerySchema=waitsQuerySchema.safeExtend({section:z.enum(waitSections).optional()})
+  .refine(q=>!q.section||!!q.version,'分区读取必须固定版本')
+  .refine(q=>!q.section||!q.lines&&!q.contextSnapshotId,'分区不能与对话行混用');
+export type WaitsReadingQuery=z.infer<typeof waitsReadingQuerySchema>;
 export interface WaitEvidence { snapshotId: string; line: number; block: number; webPath: string; conversationPath: string | null }
 export interface ReplyWait {
   id: string; sessionId: string; snapshotId: string; source: Source; employeeId: string; employee: string; project: string;
@@ -32,4 +38,7 @@ export interface WaitsPage {
   replySupport: 'observed' | 'unknown'; permissionSupport: 'unknown'; unknownReasons: string[];
   definition: string;
 }
+export type WaitEmployee={employeeId:string;employee:string};
+export type WaitsReadingPage=WaitsPage&{readingVersion:'wait-page-1';employees:WaitEmployee[];
+  pages:Record<WaitSection,{total:number;offset:number;nextOffset:number|null}>};
 export type WaitsScope = { activityDate?:string;snapshotId?: string; period?: 'this-week' | 'last-week' | 'since-enrollment'; from?: string; to?: string; timeZone: 'Asia/Shanghai'; employeeId?: string; employeeName?:string; source?: Source; project?: string };

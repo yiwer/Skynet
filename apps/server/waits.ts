@@ -3,10 +3,10 @@ import { digest, type Database } from './database.js';
 import { HttpError } from './identities.js';
 import type { RawStore } from './raw-store.js';
 import { waitDataset, waitBounded } from './wait-dataset.js';
-import { waitsQuerySchema, type WaitsQuery, type WaitsPage, type WaitsScope } from '../../packages/contracts/waits.js';
+import { waitsQuerySchema,waitsReadingQuerySchema, type WaitsQuery, type WaitsPage, type WaitsScope } from '../../packages/contracts/waits.js';
 import { beijingDate } from '../../packages/contracts/reports.js';
 import { monday, addDays } from '../../packages/contracts/work-views.js';
-import {assertWaitScope,openWaitRevision} from './wait-reading.js';
+import {assertWaitScope,openWaitRevision,readWaitPage} from './wait-reading.js';
 import {prepareReportDownload} from './report-download.js';
 
 export async function migrateWaits(db: Database) {
@@ -70,14 +70,11 @@ export function waitsService(db: Database, raw: RawStore, clock: () => Date = ()
     if(q.offset||q.lines||q.contextSnapshotId)throw new HttpError(400,'完整等待输入不能指定分页或对话行');
     return (await load(q,options.full??false)).result;
   }
-  async function read(input: unknown, full = false, exporting = false) {
-    const {q,result}=await load(input,full);
-    const lines = q.lines ? new Set(q.lines.split(',').map(Number)) : null;
-    const page = exporting ? result : { ...result,
-      intervals: lines ? result.intervals.filter(interval => lines.has(interval.displayLine) && (!q.contextSnapshotId || interval.snapshotId === q.contextSnapshotId)) : result.intervals.slice(q.offset, q.offset + 25),
-      nextOffset: lines ? null : q.offset + 25 < result.total ? q.offset + 25 : null };
-    if (Buffer.byteLength(JSON.stringify(page)) > (exporting ? 16 * 1024 * 1024 : 80 * 1024)) throw waitBounded();
-    return page;
+  async function read(input: unknown, full = false) {
+    const q=waitsReadingQuerySchema.parse(input);
+    if(full&&(q.version||q.section||q.offset||q.lines||q.contextSnapshotId))throw new HttpError(400,'重算不能指定旧版本、分页或对话行');
+    const version=q.version??(await compute(q,full)).version;
+    return readWaitPage(db,{...q,version});
   }
   async function download(input:unknown){
     const q=waitsQuerySchema.parse(input);
@@ -85,5 +82,5 @@ export function waitsService(db: Database, raw: RawStore, clock: () => Date = ()
     const version=q.version??(await compute(q,false)).version;
     return prepareReportDownload(db,reader=>openWaitRevision(reader,{...q,version}));
   }
-  return {complete,forScope:(input:unknown,range:{from:string;to:string},full=false)=>compute(waitsQuerySchema.parse(input),full,range), read, recompute: (input: unknown) => read(input, true), export: (input: unknown) => read(input, false, true),download };
+  return {complete,forScope:(input:unknown,range:{from:string;to:string},full=false)=>compute(waitsQuerySchema.parse(input),full,range), read, recompute: (input: unknown) => read(input, true),download };
 }
