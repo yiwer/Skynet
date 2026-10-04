@@ -3,7 +3,7 @@ import fastifyStatic from '@fastify/static';
 import { resolve } from 'node:path';
 import { z } from 'zod';
 import { digest, migrate, type Database } from './database.js';
-import { RawStore } from './raw-store.js';
+import { RawStore, RawUnavailableError } from './raw-store.js';
 import { deliveryHealthSchema } from '../../packages/contracts/delivery.js';
 import { archiveQuery, exportFormat } from './archive-query.js';
 import { registerMcp } from './mcp.js';
@@ -89,6 +89,7 @@ export async function createApp(options: { db: Database; rawDirectory: string; w
   app.addHook('onClose',async()=>{clearInterval(qualificationTimer);await qualifying;});
   app.setErrorHandler((error, _request, reply) => {
     if (error instanceof z.ZodError) return reply.code(400).send({ error: '请求格式无效' });
+    if (error instanceof RawUnavailableError) return reply.code(503).send({error:'原件不可读取',code:'source_unavailable',reason:error.reason});
     const code = (error as { statusCode?: number }).statusCode ?? 500;
     return reply.code(code).send({ error: code < 500 || error instanceof HttpError ? (error as Error).message : '服务暂时不可用；原件尚未确认，请重试' });
   });

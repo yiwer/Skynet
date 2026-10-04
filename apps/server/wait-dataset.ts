@@ -1,7 +1,8 @@
 import type pg from 'pg';
 import { digest } from './database.js';
 import { HttpError } from './identities.js';
-import type { RawStore } from './raw-store.js';
+import { RawUnavailableError, type RawStore } from './raw-store.js';
+import { readEvidence } from './evidence.js';
 import { eventOrigins } from './provenance.js';
 import { attributionRevisions } from './qualification.js';
 import { verifySnapshotIntegrity } from './evidence-integrity.js';
@@ -15,7 +16,7 @@ import { evidenceLink } from '../../packages/contracts/search.js';
 
 type Snapshot = { id: string; device_id: string; source: Source; source_session_id: string; manifest: Manifest;
   hash: string; committed_at: Date; provenance: Provenance | null;employee_id:string;employee:string };
-export type WaitOriginal = { record: Snapshot; sessionId: string; facts: WaitInput; origins: Awaited<ReturnType<typeof eventOrigins>>; revision: string };
+export type WaitOriginal = { record: Snapshot; sessionId: string; facts: WaitInput; origins: Awaited<ReturnType<typeof eventOrigins>>; revision: string; unavailable?:RawUnavailableError['reason']; ownerFallback?:Snapshot };
 export const waitBounded = () => new HttpError(413, '等待记录超过单次计算上限，未返回截断汇总');
 const nativeKey = (record: Snapshot) => JSON.stringify([record.device_id, record.source, record.source_session_id]);
 
@@ -32,6 +33,7 @@ export async function waitDataset(client: pg.PoolClient, raw: RawStore, full: bo
   if (records.length > 20000 || records.reduce((sum, row) => sum + row.manifest.byteLength, 0) > 128 * 1024 * 1024) throw waitBounded();
   const byId = new Map(records.map(record => [record.id, record])), latest = new Map(records.map(record => [nativeKey(record), record]));
   const roots = new Map<string, string>();
+  const ownerFallbacks=new Map<string,Snapshot>();
   for (const record of latest.values()) {
     let current = record; const seen = new Set<string>(); let root: string | undefined;
     while (current.provenance?.sourceSnapshotId && current.provenance.relation !== 'unconfirmed') {
@@ -40,25 +42,41 @@ export async function waitDataset(client: pg.PoolClient, raw: RawStore, full: bo
       if (!prior) throw new HttpError(409, '会话谱系来源缺失');
       if (current.manifest.restoredFrom?.materialId) {
         const original = await materialSource(client, prior, current.manifest.restoredFrom.materialId);
+        current=byId.get(original.origin.id)??prior;
         root = digest(JSON.stringify([original.origin.device_id, prior.source, original.material.sourceSessionId])); break;
       }
       if (prior.source_session_id !== current.source_session_id) break;
       current = prior;
     }
     roots.set(nativeKey(record), root ?? digest(nativeKey(current)));
+    ownerFallbacks.set(nativeKey(record),current);
   }
   const result: WaitOriginal[] = []; let events = 0;
   for (const record of records) {
-    await verifySnapshotIntegrity(client, raw, record.id);
-    const bytes = await raw.read(record.device_id, record.hash);
-    const facts = await waitInput(client, { snapshotId: record.id, source: record.source, hash: record.hash, bytes, full });
+    let bytes:Buffer|undefined,unavailable:WaitOriginal['unavailable'];
+    try{await verifySnapshotIntegrity(client,raw,record.id);bytes=await raw.read(record.device_id,record.hash);}
+    catch(error){if(!(error instanceof RawUnavailableError))throw error;unavailable=error.reason;}
+    if(bytes&&bytes.length!==record.manifest.byteLength)throw new HttpError(409,'等待原件大小不一致');
+    const facts:WaitInput = bytes?await waitInput(client, { snapshotId: record.id, source: record.source, hash: record.hash, bytes, full }):
+      {parserVersion:readEvidence(Buffer.alloc(0),record.source).parserVersion,boundaries:[],messages:[],pairs:[]};
     if ((events += facts.messages.length) > 100000) throw waitBounded();
-    observe?.(record,bytes,facts);
-    result.push({ record, sessionId: roots.get(nativeKey(record))!, facts, origins: await eventOrigins(client, record.id), revision: '' });
+    if(bytes)observe?.(record,bytes,facts);
+    result.push({ record, sessionId: roots.get(nativeKey(record))!, facts, origins: await eventOrigins(client, record.id), revision: '',...(unavailable?{unavailable}:{}),ownerFallback:ownerFallbacks.get(nativeKey(record)) });
   }
   const revisions=await attributionRevisions(client,records.map(record=>record.id));
   for(const original of result)original.revision=revisions.get(original.record.id)!;
   return result;
+}
+
+/** Registered ownership scopes an unavailable source, never its missing dates,
+ * messages, durations or current native turn state. Restored copies retain the
+ * original owners; the verified ancestry is the fallback for zero-event input. */
+export function unavailableOwners(original:WaitOriginal,scope:{employeeId?:string;project?:string}={}){
+  if(!original.unavailable)return [];
+  const fallback=original.ownerFallback??original.record;
+  const owners=original.origins.length?original.origins:[{employeeId:fallback.employee_id,employee:fallback.employee,project:fallback.manifest.project,snapshotId:fallback.id}];
+  return [...new Map(owners.filter(owner=>(!scope.employeeId||owner.employeeId===scope.employeeId)&&(scope.project===undefined||owner.project===scope.project))
+    .map(owner=>[JSON.stringify([owner.employeeId,owner.project]),{employeeId:owner.employeeId,employee:owner.employee,project:owner.project,snapshotId:owner.snapshotId}])).values()];
 }
 
 export function waitEvidence(original: WaitOriginal, line: number, block = 0, rawEvent = false): WaitEvidence {

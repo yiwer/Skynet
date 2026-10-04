@@ -12,6 +12,7 @@ import type { Database } from './database.js';
 import { exportFormat, type ArchiveQuery } from './archive-query.js';
 import { registerMcpAuth } from './mcp-auth.js';
 import { HttpError } from './identities.js';
+import { RawUnavailableError } from './raw-store.js';
 import { searchSchema, locationSchema } from '../../packages/contracts/search.js';
 import type { AnalysisService } from './analysis.js';
 import type { ReportService } from './reports.js';
@@ -64,7 +65,7 @@ export async function registerMcp(app: FastifyInstance, db: Database, archive: A
         if (Buffer.byteLength(JSON.stringify(output)) > 96 * 1024) throw new HttpError(413, '该元数据超过响应上限，请使用 read_export 分页读取完整恢复包');
         return output;
       } catch (error) {
-        return { isError: true, content: [{ type: 'text' as const, text: error instanceof HttpError ? error.message : '查询暂时不可用，请重试；上传不受影响' }] };
+        return { isError: true, content: [{ type: 'text' as const, text: error instanceof RawUnavailableError ? '原件不可读取' : error instanceof HttpError ? error.message : '查询暂时不可用，请重试；上传不受影响' }] };
       }
     }
     mcp.registerTool('get_capability_profile', { description: '读取员工画像的固定评估、协作方式、代表原句、同模型基线的上周与本周趋势，以及使用数据、工作来源、会话和最近活动。pages 提供各部分的总量和 nextOffset；后续页携带同一 version 与 section。correctionIds 最多列出 16 项，correctionCount 为总量，完整更正可沿固定 insight 版本查询。', annotations, inputSchema: profileQuery.safeExtend({ employeeId: z.uuid() }) }, input => { const { employeeId, ...query } = input; return result(() => profiles.read(employeeId, query)); });

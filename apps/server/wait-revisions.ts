@@ -3,7 +3,7 @@ import { digest } from './database.js';
 import { HttpError } from './identities.js';
 import { waitIntervals } from './wait-intervals.js';
 import { waitAlgorithmVersion } from './wait-inputs.js';
-import { waitBounded,type WaitOriginal } from './wait-dataset.js';
+import { waitBounded,waitEvidence,unavailableOwners,type WaitOriginal } from './wait-dataset.js';
 import type { WaitsScope,WaitsPage } from '../../packages/contracts/waits.js';
 import { beijingDate } from '../../packages/contracts/reports.js';
 import { addDays } from '../../packages/contracts/work-views.js';
@@ -16,6 +16,7 @@ export async function materializeWaits(client:pg.PoolClient,originals:WaitOrigin
   const scopeKey=digest(JSON.stringify(scope));
   if(!(await client.query('SELECT pg_try_advisory_xact_lock(hashtextextended($1,3701)) AS locked',[scopeKey])).rows[0].locked)throw new HttpError(409,'等待记录正在计算，请稍后重试');
   const {intervals,selected,rangeStart,rangeEnd}=waitIntervals(originals,scope);
+  const unavailableSources=[...selected].flatMap(original=>unavailableOwners(original,scope).map(owner=>({...owner,snapshotId:original.record.id,reason:original.unavailable!,evidence:waitEvidence(original,1,0,true)})));
   // Earlier immutable prefixes remain evidence, but a complete continuation
   // can resolve their temporary coverage gap for the current report.
   const coverage = [...new Map([...selected].map(original => [original.sessionId, original])).values()];
@@ -24,6 +25,7 @@ export async function materializeWaits(client:pg.PoolClient,originals:WaitOrigin
     ...(!facts.boundaries.some(boundary => boundary.kind === 'completed' && boundary.turnId && boundary.timestamp) ? ['部分来源未记录可识别的本轮结束'] : []),
     ...(record.manifest.capture?.partialLine || record.manifest.capture?.gaps.length || record.manifest.capture?.compacted ? ['来源材料存在压缩或采集缺口'] : [])]))];
   if (!selected.size) unknownReasons.push('尚无所选范围的来源材料');
+  if(unavailableSources.length)unknownReasons.push('部分原件不可读取；等待次数、时长及来源日期无法确认');
   const known = intervals.filter(interval => interval.durationMs !== null), unknown = intervals.length - known.length;
   const knownReplyWaitMs = known.reduce((sum, interval) => sum + interval.durationInScopeMs!, 0);
   if (!Number.isSafeInteger(knownReplyWaitMs)) throw waitBounded();
@@ -38,7 +40,7 @@ export async function materializeWaits(client:pg.PoolClient,originals:WaitOrigin
       if (days.size > 3661) throw waitBounded();
     }
   }
-  const content = { scope, algorithmVersion: waitAlgorithmVersion, summary: { replyWaitCount: known.length, unknownReplyWaitCount: unknown,
+  const content = { scope, algorithmVersion: waitAlgorithmVersion, unavailableSources,summary: { replyWaitCount: known.length, unknownReplyWaitCount: unknown,
     replyWaitMs: unknown || unknownReasons.length ? null : knownReplyWaitMs, knownReplyWaitMs, longWaitCount: known.filter(interval => interval.long).length,
     permissionWaitMs: null, permissionWaitCount: null }, intervals, total: intervals.length, nextOffset: null,
     daily: [...days.values()].sort((a, b) => a.date.localeCompare(b.date)), replySupport, permissionSupport: 'unknown' as const, unknownReasons, definition,

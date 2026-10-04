@@ -1,6 +1,6 @@
 import type { Database } from './database.js';
 import { digest } from './database.js';
-import type { RawStore } from './raw-store.js';
+import { RawUnavailableError, type RawStore } from './raw-store.js';
 import { HttpError } from './identities.js';
 import { readEvidence } from './evidence.js';
 import { attributionRevisions } from './qualification.js';
@@ -43,10 +43,13 @@ async function readInsightBatchOnce(db: Database, raw: RawStore, requested: stri
   const records = (await db.query('SELECT id,device_id,source,hash,manifest FROM snapshots WHERE id=ANY($1::uuid[])', [ids])).rows as Record[];
   if (records.length !== ids.length) throw new HttpError(404, '会话洞察输入原件不存在');
   if (records.reduce((sum, row) => sum + row.manifest.byteLength, 0) > 128 * 1024 * 1024) throw new HttpError(413, '会话洞察原件超过范围上限');
-  const missing = (await db.query(`SELECT DISTINCT se.event_id FROM snapshot_events se WHERE se.snapshot_id=ANY($1::uuid[])
+  const unavailable = new Map<string,RawUnavailableError>();
+  const missing = (await db.query(`SELECT DISTINCT se.snapshot_id,se.event_id FROM snapshot_events se WHERE se.snapshot_id=ANY($1::uuid[])
     AND NOT EXISTS(SELECT 1 FROM event_integrity i WHERE i.event_id=se.event_id AND i.version='original-utf8-1')`, [ids])).rows;
-  await verifyOriginIntegrity(db, raw, missing.map(row => row.event_id));
-  await repairLegacyCarriers(db, raw);
+  await verifyOriginIntegrity(db, raw, missing.map(row => row.event_id),(error,eventIds)=>{
+    const affected=new Set(eventIds);for(const row of missing)if(affected.has(row.event_id))unavailable.set(row.snapshot_id,error);
+  });
+  await repairLegacyCarriers(db, raw,undefined,undefined,(error,snapshotIds)=>{for(const id of snapshotIds)if(ids.includes(id))unavailable.set(id,error);});
   const client = await db.connect();
   try {
     await client.query('BEGIN ISOLATION LEVEL REPEATABLE READ');
@@ -80,7 +83,16 @@ async function readInsightBatchOnce(db: Database, raw: RawStore, requested: stri
     const views: SessionInsights[] = [], inserted: { version: string; snapshotId: string; payload: Facts }[] = [];
     let parsedEvents = 0;
     for (const record of records) {
-      const bytes = await raw.read(record.device_id, record.hash);
+      let bytes:Buffer|undefined;
+      try{bytes=await raw.read(record.device_id,record.hash);}catch(error){if(!(error instanceof RawUnavailableError))throw error;unavailable.set(record.id,error);}
+      const failure=unavailable.get(record.id);
+      if(failure){
+        // An unavailable observation is a distinct historical view, never a
+        // normal fact-cache entry or a usable inference over unreadable bytes.
+        const value=projectSessionInsights(record.id,{hash:record.hash,parserVersion:readEvidence(Buffer.alloc(0),record.source).parserVersion,attributionRevision:revisions.get(record.id)!},undefined,unknownFacts(),undefined);
+        value.sourceAvailability={state:'unavailable',reason:failure.reason};value.version=digest(JSON.stringify([value.version,'source-unavailable-1',failure.reason]));views.push(value);continue;
+      }
+      if(!bytes)throw new Error('Verified original bytes missing');
       if (bytes.length !== record.manifest.byteLength) throw new HttpError(409, '会话洞察原件大小不一致');
       const key = keys.get(record.id)!;
       let facts = cached.get(key);
