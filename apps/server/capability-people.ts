@@ -3,6 +3,7 @@ import { HttpError } from './identities.js';
 import type { assessmentService } from './assessment.js';
 import { capabilityLevels, peopleQuery, type CapabilityCard, type CapabilityPeople } from '../../packages/contracts/capability-people.js';
 import { dimKeys } from '../../packages/contracts/assessment.js';
+import { assessmentModelVersion } from './assessment-model.js';
 
 export async function migrateCapabilityPeople(db: Database) {
   await db.query('CREATE TABLE IF NOT EXISTS capability_people_revisions(version text PRIMARY KEY,payload jsonb NOT NULL)');
@@ -32,7 +33,7 @@ export function capabilityPeopleService(db: Database, assessments: ReturnType<ty
         verified: output ?? { value: 0, known: 0, unknownSessions: 0, added: 0, removed: 0, passed: 0, failed: 0 },
         rework: { numerator, denominator, value: numerator === null || !denominator ? null : numerator / denominator } };
     }).sort((a, b) => capabilityLevels.indexOf(a.level) - capabilityLevels.indexOf(b.level) || a.employee.localeCompare(b.employee, 'zh-CN') || a.employeeId.localeCompare(b.employeeId));
-    const content = { selection, modelVersion: inputSet.values[0]?.modelVersion ?? '', frontierVersion: inputSet.frontierVersion, usageVersion: inputSet.report.version,
+    const content = { selection, modelVersion: assessmentModelVersion, frontierVersion: inputSet.frontierVersion, usageVersion: inputSet.report.version,
       baselineVersion: inputSet.baselineVersion, groups: capabilityLevels.map(level => ({ level, count: employees.filter(person => person.level === level).length })), total: employees.length, employees, nextOffset: null };
     const version = digest(JSON.stringify(content, (_key, value) => value && typeof value === 'object' && !Array.isArray(value)
       ? Object.fromEntries(Object.entries(value).sort(([a], [b]) => a.localeCompare(b))) : value));

@@ -37,3 +37,25 @@ test('employee groups preserve names and exact individual assessment versions ac
     assert.deepEqual(await (await sandbox.api(zeta, '/api/capability-people/export?version=' + report.version)).json(), report);
   } finally { await sandbox.close(); }
 });
+
+test('parallel employee overview reads and later membership changes keep a complete stable paged list', { timeout: 180000 }, async () => {
+  const sandbox = await assessmentFixture();
+  try {
+    const owner = await sandbox.owner('Member 00');
+    for (let i = 1; i <= 21; i++) await sandbox.owner('Member ' + String(i).padStart(2, '0'));
+    await sandbox.session(owner, { prompts: 3 });
+    const simultaneous = await Promise.all(Array.from({ length: 6 }, async () => {
+      const response = await sandbox.api(owner, '/api/capability-people');
+      const value = await response.json(); assert.equal(response.status, 200, JSON.stringify(value)); return value;
+    }));
+    assert.equal(new Set(simultaneous.map(value => value.version)).size, 1);
+    const first = simultaneous[0]; assert.equal(first.total, 22); assert.equal(first.employees.length, 20); assert.equal(first.nextOffset, 20);
+    await sandbox.owner('Member 22');
+    const second = await (await sandbox.api(owner, '/api/capability-people?version=' + first.version + '&offset=20')).json();
+    assert.deepEqual(second.employees.map((p: any) => p.employee), ['Member 20', 'Member 21']); assert.equal(second.nextOffset, null);
+    const whole = await (await sandbox.api(owner, '/api/capability-people/export?version=' + first.version)).json();
+    assert.equal(whole.employees.length, 22); assert.deepEqual(whole.employees, [...first.employees, ...second.employees]);
+    assert.equal((await sandbox.api(owner, '/api/capability-people?version=' + first.version + '&period=last-week')).status, 409);
+    const latest = await (await sandbox.api(owner, '/api/capability-people')).json(); assert.equal(latest.total, 23); assert.notEqual(latest.version, first.version);
+  } finally { await sandbox.close(); }
+});
