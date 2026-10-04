@@ -9,7 +9,7 @@ import type { ReportService } from './reports.js';
 import type { workViewService } from './work-views.js';
 import { dailyPath, monday, addDays } from '../../packages/contracts/work-views.js';
 import type { DailyItem } from '../../packages/contracts/reports.js';
-import { profileQuery, type CapabilityProfile } from '../../packages/contracts/capability-profile.js';
+import { profileQuery, profileSections, type CapabilityProfile, type CapabilityProfilePage } from '../../packages/contracts/capability-profile.js';
 
 export async function migrateCapabilityProfiles(db: Database) {
   await db.query('CREATE TABLE IF NOT EXISTS capability_profiles(version text PRIMARY KEY,employee_id uuid NOT NULL REFERENCES employees(id),payload jsonb NOT NULL)');
@@ -119,8 +119,26 @@ export function capabilityProfileService(db: Database, assessments: ReturnType<t
     return (await db.query('SELECT payload FROM capability_profiles WHERE version=$1', [version])).rows[0].payload;
   }
   async function read(employeeId: string, input: unknown = {}, full = false) {
-    const value = await load(employeeId, input, full);
-    if (Buffer.byteLength(JSON.stringify(value)) > 80 * 1024) throw new HttpError(413, '画像响应超过范围上限');
+    const q = profileQuery.parse(input), stored = await load(employeeId, input, full), value = structuredClone(stored) as CapabilityProfilePage;
+    const sections = { daily: value.usage.daily, devices: value.header.devices, sessions: value.sessions, work: value.work.items, reports: value.work.reports, activity: value.recentActivity.events };
+    value.pages = {} as CapabilityProfilePage['pages'];
+    const analysisCount = value.assessment.inputs.analysisVersions.length, insightCount = value.assessment.inputs.insightVersions.length;
+    value.assessment.inputs.analysisVersions = value.assessment.inputs.analysisVersions.slice(0, 32);
+    value.assessment.inputs.insightVersions = value.assessment.inputs.insightVersions.slice(0, 32);
+    value.assessment.inputPage = { offset: 0, analysisCount, insightCount, nextOffset: Math.max(analysisCount, insightCount) > 32 ? 32 : null };
+    for (const section of profileSections) {
+      const rows = sections[section], total = rows.length, offset = q.section === section ? q.offset : 0;
+      if (offset > total) throw new HttpError(400, '画像分页位置超出范围');
+      const limit = q.section && q.section !== section ? 0 : 20;
+      rows.splice(0, offset); rows.splice(limit);
+      value.pages[section] = { total, offset, nextOffset: offset + rows.length < total ? offset + rows.length : null };
+    }
+    while (Buffer.byteLength(JSON.stringify(value)) > 80 * 1024) {
+      const section = profileSections.filter(key => sections[key].length > (q.section === key ? 1 : 0))
+        .sort((a, b) => Buffer.byteLength(JSON.stringify(sections[b])) - Buffer.byteLength(JSON.stringify(sections[a])))[0];
+      if (!section) throw new HttpError(413, '画像单条内容超过响应上限，请使用完整导出');
+      sections[section].pop(); value.pages[section].nextOffset = value.pages[section].offset + sections[section].length;
+    }
     return value;
   }
   return { read, export: load, recompute: (employeeId: string, input: unknown) => read(employeeId, input, true) };

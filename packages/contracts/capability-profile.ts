@@ -5,8 +5,10 @@ import type { EfficiencySession, EfficiencyTiming } from './session-efficiency.j
 import type { ActivityEvent } from './activity.js';
 import type { DailyItem, DailyReport } from './reports.js';
 
+export const profileSections = ['daily', 'devices', 'sessions', 'work', 'reports', 'activity'] as const;
 export const profileQuery = z.object({ period: assessmentPeriod.optional(), preset: assessmentPreset.optional(),
-  version: z.string().regex(/^[a-f0-9]{64}$/).optional() }).strict();
+  version: z.string().regex(/^[a-f0-9]{64}$/).optional(), section: z.enum(profileSections).optional(),
+  offset: z.coerce.number().int().min(0).max(100000).default(0) }).strict().refine(q => q.offset === 0 || !!q.version, '后续页必须固定画像版本');
 export type CapabilityProfile = {
   version: string; algorithmVersion: string; generatedAt: string; frontierVersion: string;
   employeeId: string; employee: string; range: CapabilityAssessment['range'];
@@ -22,3 +24,4 @@ export type CapabilityProfile = {
     items: { id: string; date: string; item: DailyItem; reportIds: string[] }[] };
   recentActivity: { events: ActivityEvent[]; references: { date: string; version: string; path: string }[]; hasEarlier: boolean };
 };
+export type CapabilityProfilePage = CapabilityProfile & { pages: Record<typeof profileSections[number], { total: number; offset: number; nextOffset: number | null }> };

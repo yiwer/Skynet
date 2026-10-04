@@ -6,6 +6,26 @@ import { beijingDate } from '../packages/contracts/reports.js';
 import { monday, addDays } from '../packages/contracts/work-views.js';
 import { setTimeout } from 'node:timers/promises';
 
+test('large profiles page sessions at one frozen version while export retains every row', { timeout: 180000 }, async () => {
+  const fixture = await assessmentFixture();
+  try {
+    const owner = await fixture.owner('Paged profile');
+    for (let i = 0; i < 25; i++) { const item = fixture.rows({ prompts: 1 }); await fixture.upload(owner, item.rows, item.sessionId); }
+    const path = '/api/capability-profiles/' + owner.employeeId;
+    const response = await fixture.api(owner, path); assert.equal(response.status, 200, await response.clone().text());
+    const profile = await response.json();
+    assert.equal(profile.sessions.length, 20); assert.equal(profile.pages.sessions.total, 25); assert.equal(profile.pages.sessions.nextOffset, 20);
+    assert.ok(Buffer.byteLength(JSON.stringify(profile)) <= 80 * 1024);
+    const fixed = await (await fixture.api(owner, path + '/export?version=' + profile.version)).json(); assert.equal(fixed.sessions.length, 25);
+    const item = fixture.rows(); await fixture.upload(owner, item.rows, item.sessionId);
+    const page = await (await fixture.api(owner, path + '?version=' + profile.version + '&section=sessions&offset=20')).json();
+    assert.equal(page.sessions.length, 5); assert.equal(page.pages.sessions.nextOffset, null); assert.equal(page.version, profile.version);
+    assert.deepEqual([...profile.sessions, ...page.sessions], fixed.sessions);
+    assert.equal((await fixture.api(owner, path + '?section=sessions&offset=20')).status, 400);
+    assert.equal((await fixture.api(owner, path + '?version=' + profile.version + '&section=sessions&offset=26')).status, 400);
+  } finally { await fixture.close(); }
+});
+
 test('profile work content binds daily and weekly report revisions without generating reports on read', { timeout: 120000 }, async () => {
   const fixture = await assessmentFixture();
   try {
@@ -31,7 +51,7 @@ test('profile work content binds daily and weekly report revisions without gener
     assert.equal(profile.work.items[0].date, date);
     assert.notEqual(profile.version, first.version);
     assert.deepEqual(await (await fixture.api(owner, path + '?version=' + first.version)).json(), first);
-    assert.deepEqual(await (await fixture.api(owner, path + '/export?version=' + profile.version)).json(), profile);
+    const { pages: _pages, ...exported } = profile; assert.deepEqual(await (await fixture.api(owner, path + '/export?version=' + profile.version)).json(), exported);
   } finally { await fixture.close(); }
 });
 
@@ -64,7 +84,7 @@ test('an employee profile binds real device sync metadata and usage to its exact
     const latest = await (await fixture.api(owner, path)).json(); assert.notEqual(latest.version, profile.version); assert.equal(latest.kpis.sessions, 2);
     await fixture.restart();
     assert.deepEqual(await (await fixture.api(owner, path + '?version=' + profile.version)).json(), profile);
-    assert.deepEqual(await (await fixture.api(owner, path + '/export?version=' + profile.version)).json(), profile);
+    const { pages: _pages, ...exported } = profile; assert.deepEqual(await (await fixture.api(owner, path + '/export?version=' + profile.version)).json(), exported);
   } finally { await fixture.close(); }
 });
 
