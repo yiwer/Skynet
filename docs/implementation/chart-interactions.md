@@ -32,6 +32,21 @@ mouse exit now closes only when leaving their shared container. The test enters
 from a real button hover, scrolls the tooltip to its final date, and exits it.
 Both failures and their fixes have separate public RED and GREEN logs.
 
+Independent review of `19412a0` then found that first taps still clipped the
+team tooltip at 320/390px and the box status at 320px. The formal team regression
+also reproduced an intersection ratio of 0.28194; the different box fixture did
+not reproduce that second case, so its independent evidence is retained.
+The team tooltip now measures the viewport and every clipping ancestor only
+while open, chooses the upper or lower available space, and keeps its existing
+180px maximum height with internal scrolling. Its content width is bounded to
+the same reading area. Resize and scroll reposition it, with listeners removed
+when closed. This does not move the page or its activation button. Box status
+uses the same figure-local sticky behavior as heat status.
+
+Every width/theme appearance case now starts with an actual tap and asserts an
+IntersectionObserver ratio of 1 before keyboard focus and color checks; checking
+only the document rectangle would miss the internal reading-area clip.
+
 `tests/chart-interactions.test.ts` checks exact source values and denominators,
 not just target dimensions: waits of 60/120/600/1200 seconds produce a 360-second
 median, Q1 105 seconds, Q3 750 seconds, P90 1200 seconds, 4 known/1 unknown, and
@@ -69,6 +84,8 @@ logs and image hashes. No deployment or issue closure is part of this slice.
 The integrated build and original waiting HTTP/Web/OAuth/download journey plus
 the four chart cases passed 5/5 (72.291 seconds). After the final two visibility
 fixes, the build and all four chart cases passed again, 4/4 (57.665 seconds), with
-no skips. Current screenshots are in `visibility-green`; the older `final`
-screenshots predate the heat-status visibility fix and are not its acceptance
-evidence. This limited chart slice does not complete AC31 or AC32.
+no skips. The independent viewport fixes then passed all four chart cases again
+(54.114 seconds). Screenshots from `final` and `visibility-green` predate the
+independent narrow-screen fixes; the final author receipt identifies the current
+`readable-viewport-green` screenshots and final run. This limited chart slice
+does not complete AC31 or AC32.

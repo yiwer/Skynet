@@ -73,7 +73,7 @@ test('team daily trend details open on the first touch and preserve known and un
     await expect(detail).toBeVisible();await detail.tap();
     await writeFile(join(directory,'team-first-touch.json'),JSON.stringify({version:report.version,date,inputTokens:day.inputTokens,verified:day.outputs.verified.value,tooltipCount:await panel.getByRole('tooltip').count()},null,2));
     await page.screenshot({path:join(directory,'team-first-touch.png'),animations:'disabled'});
-    await expect(panel.getByRole('tooltip')).toHaveCount(1);await expect(panel.getByRole('tooltip')).toContainText(date+'：1000');
+    await expect(panel.getByRole('tooltip')).toHaveCount(1);await expect(panel.getByRole('tooltip')).toBeInViewport({ratio:1});await expect(panel.getByRole('tooltip')).toContainText(date+'：1000');
     await detail.tap();await expect(panel.getByRole('tooltip')).toHaveCount(0);
     await detail.tap();await expect(panel.getByRole('tooltip')).toHaveCount(1);await page.keyboard.press('Escape');await expect(panel.getByRole('tooltip')).toHaveCount(0);
     await detail.press('Tab');await detail.focus();await expect(panel.getByRole('tooltip')).toContainText(date+'：1000');
@@ -120,7 +120,7 @@ test('waiting box plots expose all quartiles on touch and keyboard and dismiss w
   const {f,owner,report}=await waitingFixture();let browser:Browser|undefined;
   const directory=process.env.SKYNET_CHART_INTERACTIONS_EVIDENCE??join(f.directory,'chart-interactions');await mkdir(directory,{recursive:true});
   try{
-    browser=await chromium.launch();const page=await browser.newPage({ignoreHTTPSErrors:true,hasTouch:true,viewport:{width:390,height:900},reducedMotion:'reduce'});
+    browser=await chromium.launch();const page=await browser.newPage({ignoreHTTPSErrors:true,hasTouch:true,viewport:{width:320,height:900},reducedMotion:'reduce'});
     await page.goto(f.origin+'/#waits?period=since-enrollment&version='+report.waitVersion);await page.getByLabel('个人读取凭据').fill(owner.readerCredential);await page.getByRole('button',{name:'进入存档',exact:true}).click();
     const people=page.getByRole('region',{name:'按人等待分布',exact:true}),plot=people.getByLabel(/等待图交互合成员工 · 4 段已知，1 段未知/);
     await plot.tap();const tip=people.getByRole('status');await expect(tip).toBeInViewport({ratio:1});await expect(tip).toContainText('最短 1 分 0 秒 · Q1 1 分 45 秒 · 中位数 6 分 0 秒 · Q3 12 分 30 秒 · 最长 20 分 0 秒 · P90 20 分 0 秒');
@@ -136,7 +136,7 @@ test('waiting box plots expose all quartiles on touch and keyboard and dismiss w
     await people.getByRole('button',{name:'人员分布表格',exact:true}).tap();
     const table=people.getByRole('table',{name:'按人等待分布',exact:true});
     assert.deepEqual(await table.locator('tbody tr').first().locator('th,td').allTextContents(),['等待图交互合成员工','4 / 1','1 分 0 秒','1 分 45 秒','6 分 0 秒','12 分 30 秒','20 分 0 秒','20 分 0 秒','0% · 0/4']);
-    await page.screenshot({path:join(directory,'box-table-390.png'),animations:'disabled'});
+    await page.screenshot({path:join(directory,'box-table-320.png'),animations:'disabled'});
     assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth||document.documentElement.scrollHeight>innerHeight),false);
   }finally{await browser?.close();await f.close();}
 });
@@ -156,6 +156,7 @@ test('team and waiting charts retain legible text and marks, focus and local scr
         await page.setViewportSize({width,height:900});await page.evaluate(value=>document.documentElement.dataset.theme=value,theme);
         if(view==='team'){
           const panel=page.getByRole('region',{name:'期间使用概况',exact:true}),button=panel.getByRole('button',{name:'每日 Token 输入详情',exact:true});
+          await button.tap();await expect(panel.getByRole('tooltip')).toBeInViewport({ratio:1});await page.keyboard.press('Escape');
           await page.keyboard.press('Tab');await button.focus();await expect(panel.getByRole('tooltip')).toBeVisible();
           const appearance=await chartAppearance(panel,'.team-spark circle,.team-spark polyline');observations.push({view,width,theme,...appearance});
           const tip=panel.getByRole('tooltip');assert.equal(await tip.evaluate(el=>el.scrollHeight>el.clientHeight),true);
@@ -165,6 +166,7 @@ test('team and waiting charts retain legible text and marks, focus and local scr
         }else{
           for(const [name,selector] of [['星期与小时','.wait-heat-cell[data-level]'],['按人等待分布','.wait-person-plot line,.wait-person-plot rect']] as const){
             const panel=page.getByRole('region',{name,exact:true}),button=name==='星期与小时'?panel.getByRole('button',{name:/4 条等待/}):panel.getByLabel(/等待图交互合成员工 · 4 段已知/);
+            await button.tap();await expect(panel.getByRole('status')).toBeInViewport({ratio:1});await page.keyboard.press('Escape');
             await page.keyboard.press('Tab');await button.focus();await expect(panel.getByRole('status')).toBeVisible();
             observations.push({view:name,width,theme,...await chartAppearance(panel,selector)});
             const target=await button.boundingBox();assert.ok(target&&target.width>=44&&target.height>=44);
