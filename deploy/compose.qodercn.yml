@@ -1,0 +1,5 @@
+# Explicit Qoder CN worker overlay, in addition to compose.analysis.yml.
+services:
+  analysis:
+    build:
+      dockerfile: Dockerfile.qodercn
