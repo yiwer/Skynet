@@ -1,0 +1,22 @@
+.platform-main .review-notes{margin-top:28px;border-top:1px solid var(--color-rule);padding-top:24px;min-width:0}
+.platform-main .review-notes>header{display:flex;align-items:center;gap:10px;margin-bottom:16px}
+.platform-main .review-notes h2{font-size:16px;margin:0}
+.platform-main .review-notes>header>span,.platform-main .review-notes-status,.platform-main .review-notes-empty{font-size:12px;color:var(--color-muted)}
+.platform-main .review-notes>header>button{margin-left:auto}
+.platform-main .review-notes button,.platform-main .review-notes a{min-height:44px;min-width:44px;font-size:12px}
+.platform-main .review-notes-list{list-style:none;margin:0 0 18px;padding:0 14px 0 22px;max-height:420px;overflow:auto;overscroll-behavior:contain;scrollbar-gutter:stable}
+.platform-main .review-notes-list>li{position:relative;padding:0 0 18px 20px;border-left:1px solid var(--color-rule);min-width:0}
+.platform-main .review-notes-list>li::before{content:'';position:absolute;left:-4px;top:7px;width:7px;height:7px;border-radius:50%;background:var(--color-accent)}
+.platform-main .review-note-meta{display:flex;gap:8px 14px;flex-wrap:wrap;align-items:baseline;font-size:12px;line-height:1.8}
+.platform-main .review-note-meta strong{overflow-wrap:anywhere}.platform-main .review-note-meta time{color:var(--color-muted);font:11px var(--font-mono)}
+.platform-main .review-note-text{font-size:13px;line-height:1.8;margin:8px 0 0;white-space:pre-wrap;overflow-wrap:anywhere}
+.platform-main .review-notes-list a{display:inline-flex;align-items:center;color:var(--color-accent-ink);text-decoration:none}
+.platform-main .review-notes-list a:hover{text-decoration:underline}
+.platform-main .review-notes form{margin:0;padding:18px;border:1px solid var(--color-rule);border-radius:10px;background:var(--color-card)}
+.platform-main .review-notes label{font-size:12px;margin:0 0 8px;display:block}
+.platform-main .review-notes textarea{display:block;width:100%;box-sizing:border-box;min-height:96px;max-height:280px;resize:vertical;margin:0;font-size:13px;line-height:1.7;background:var(--color-paper);color:var(--color-ink);border:1px solid var(--color-rule);border-radius:6px;padding:10px 12px}
+.platform-main .review-notes-submit,.platform-main .review-notes nav{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:12px}
+.platform-main .review-notes-submit>span{font-size:11px;color:var(--color-muted)}
+.platform-main .review-notes-submit>button{margin-left:auto;background:var(--color-accent);color:var(--color-on-accent);border-color:var(--color-accent)}
+.platform-main .review-notes nav{margin:0 0 16px}
+@media(max-width:390px){.platform-main .review-notes form{padding:12px}.platform-main .review-notes-list{padding-left:5px;padding-right:4px}.platform-main .review-notes-list>li{padding-left:14px}}

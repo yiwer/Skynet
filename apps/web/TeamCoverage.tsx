@@ -1,8 +1,10 @@
+import {TeamKpis,TeamPeople,TeamFilters,teamParams,teamHashQuery} from './TeamUsage.js';
+import type {TeamReport} from '../../packages/contracts/team-report.js';
 import { useEffect, useState } from 'react';
 import { beijingDate, type DailyReport } from '../../packages/contracts/reports.js';
 import { assessmentLabels } from '../../packages/contracts/analysis.js';
 import type { CoverageCell, CoverageMatrix, CoverageObservation, WorkStatistics } from '../../packages/contracts/coverage.js';
-import type { MetricsPage } from '../../packages/contracts/metrics.js';
+
 import { PlatformIcon } from './PlatformShell.js';
 import './team-coverage.css';
 
@@ -27,56 +29,19 @@ function CoverageGlyph({ cell, kind }: { cell?: CoverageCell; kind?: 'observed' 
   </svg>;
 }
 
-function TokenTrend({ days }: { days: MetricsPage['daily'] }) {
-  const values = days.map(day => day.tokenTrend ? day.tokenTrend.inputTokens : day.inputTokens);
-  if (!values.some(value => value !== null)) return null;
-  const maximum = Math.max(1, ...values.filter((value): value is number => value !== null));
-  const segments: string[][] = []; let segment: string[] = [];
-  values.forEach((value, index) => {
-    if (value === null) { if (segment.length) segments.push(segment); segment = []; }
-    else segment.push(`${4 + index / Math.max(1, values.length - 1) * 132},${29 - value / maximum * 24}`);
-  });
-  if (segment.length) segments.push(segment);
-  return <svg className="coverage-token-trend" viewBox="0 0 140 34" role="img" aria-label={`每日 Token 输入：${days.map((day, index) => `${day.date} ${values[index] ?? '未知'}`).join('；')}`}><line x1="4" y1="29" x2="136" y2="29" />{segments.map((points, index) => <polyline key={index} points={points.join(' ')} />)}</svg>;
-}
-
 export function TeamCoverage({ request, onEvidence, currentEmployeeId }: { request: (path: string, signal?: AbortSignal) => Promise<Response>; onEvidence: () => void; currentEmployeeId: string }) {
-  const [date, setDate] = useState(beijingDate()); const [offset, setOffset] = useState(0);
+  const [query,setQuery]=useState(teamHashQuery);const date=beijingDate();const [offset,setOffset]=useState(0);
   const [matrix, setMatrix] = useState<CoverageMatrix>(); const [selection, setSelection] = useState<CoverageCell>();
   const [error, setError] = useState(''); const [retry, setRetry] = useState(0);
   const [detail, setDetail] = useState<{ statistics: WorkStatistics; observations: CoverageObservation[]; nextObservationOffset: number | null; report: DailyReport | null }>();
   const [detailError, setDetailError] = useState(''); const [detailRetry, setDetailRetry] = useState(0); const [observationOffset, setObservationOffset] = useState(0);
   const [statisticsOffset, setStatisticsOffset] = useState(0); const [statisticsRevision, setStatisticsRevision] = useState<number>();
   const [reportRevision, setReportRevision] = useState<number>();
-  const [overview, setOverview] = useState<MetricsPage>(); const [overviewError, setOverviewError] = useState('');
-  const [dayMetrics, setDayMetrics] = useState<MetricsPage>(); const [dayMetricsError, setDayMetricsError] = useState('');
-  const from = matrix?.dates[0], to = matrix?.dates.at(-1);
-  useEffect(() => {
-    setOverview(undefined); setOverviewError('');
-    if (!from || !to) return;
-    const abort = new AbortController();
-    void request(`/api/team-coverage/metrics?${new URLSearchParams({ date: to, view: 'week' })}`, abort.signal).then(response => response.json()).then((page: MetricsPage) => {
-      if (!abort.signal.aborted) setOverview(page);
-    }).catch(failure => { if (!abort.signal.aborted) setOverviewError(failure.message); });
-    return () => abort.abort();
-  }, [from, to, retry]);
-  useEffect(() => {
-    setDayMetrics(undefined); setDayMetricsError('');
-    if (!selection) return;
-    const abort = new AbortController();
-    void request(`/api/team-coverage/metrics?${new URLSearchParams({ date: selection.date, view: 'day' })}`, abort.signal).then(response => response.json()).then((page: MetricsPage) => {
-      if (!abort.signal.aborted) setDayMetrics(page);
-    }).catch(failure => { if (!abort.signal.aborted) setDayMetricsError(failure.message); });
-    return () => abort.abort();
-  }, [selection?.date, retry]);
-  useEffect(() => {
-    const abort = new AbortController(); setError(''); setMatrix(undefined); setSelection(undefined);
-    void request(`/api/team-coverage?date=${date}&offset=${offset}`, abort.signal).then(response => response.json()).then((value: CoverageMatrix) => {
-      if (!abort.signal.aborted) { setMatrix(value); setSelection((value.rows.find(row => row.employeeId === currentEmployeeId) ?? value.rows[0])?.cells.find(cell => cell.date === date)); setObservationOffset(0); setStatisticsOffset(0); setStatisticsRevision(undefined); setReportRevision(undefined); }
-    }).catch(failure => { if (!abort.signal.aborted) setError(failure.message); });
-    return () => abort.abort();
-  }, [date, offset, retry]);
-  useEffect(() => {
+  const [overview, setOverview] = useState<TeamReport>(); const [overviewError, setOverviewError] = useState('');
+
+  const from = overview?.scope.from, to = overview?.scope.to;
+  useEffect(()=>{const change=()=>{if(location.hash.split('?')[0]==='#coverage'){const next=teamHashQuery();setQuery(previous=>JSON.stringify(previous)===JSON.stringify(next)?previous:next);setOffset(0);}};window.addEventListener('hashchange',change);return()=>window.removeEventListener('hashchange',change);},[]);
+  useEffect(()=>{setOverview(undefined);setOverviewError('');const abort=new AbortController();request('/api/team-report?'+teamParams(query),abort.signal).then(response=>response.json()).then(value=>{if(!abort.signal.aborted)setOverview(value);}).catch(error=>{if(!abort.signal.aborted)setOverviewError(error.message);});return()=>abort.abort();},[query,retry]);  useEffect(()=>{setMatrix(undefined);setSelection(undefined);if(!overview)return;const value={...overview.coverage,rows:overview.coverage.rows.slice(offset,offset+10),nextOffset:overview.coverage.rows.length>offset+10?offset+10:null};setMatrix(value);const row=value.rows.find(row=>row.employeeId===currentEmployeeId)??value.rows[0];setSelection(row?.cells.find(cell=>cell.date===date)??row?.cells.at(-1));setObservationOffset(0);setStatisticsOffset(0);setStatisticsRevision(undefined);setReportRevision(undefined);},[overview?.version,overview?.coverage.dateOffset,offset]);  useEffect(() => {
     const abort = new AbortController(); setDetail(undefined); setDetailError('');
     if (selection) void Promise.all([
       request(`/api/work-statistics/${selection.employeeId}?date=${selection.date}&offset=${statisticsOffset}${statisticsRevision ? `&revision=${statisticsRevision}` : ''}`, abort.signal).then(response => response.json()),
@@ -87,22 +52,17 @@ export function TeamCoverage({ request, onEvidence, currentEmployeeId }: { reque
     return () => abort.abort();
   }, [selection?.employeeId, selection?.date, observationOffset, statisticsOffset, detailRetry]);
   function select(cell: CoverageCell) { setSelection(cell); setObservationOffset(0); setStatisticsOffset(0); setStatisticsRevision(undefined); setReportRevision(undefined); setDetailRetry(value => value + 1); }
-  const showDayMetrics = !!dayMetrics && dayMetrics.scope.from === selection?.date && dayMetrics.employees.length > 0;
+  const dayMetrics=selection&&overview?{scope:{from:selection.date},employees:overview.people.flatMap(person=>{const day=person.daily.find(day=>day.date===selection.date);return day&&day.userTurns!==undefined&&(day.activeSessions>0||(day.knownInputTokens??0)>0)?[{employeeId:person.employeeId,sessions:day.activeSessions,userTurns:day.userTurns,toolCalls:day.toolCalls,knownInputTokens:day.knownInputTokens??0,unknownInputSessions:day.unknownInputSessions??0}]:[];})}:undefined;  const showDayMetrics = !!dayMetrics && dayMetrics.scope.from === selection?.date && dayMetrics.employees.length > 0;
   const showReports = matrix?.rows.some(row => row.cells.some(cell => cell.date === selection?.date && ['ready', 'unfinished'].includes(cell.analysis)));
   return <section className="team-coverage workspace-page" aria-label="团队覆盖矩阵">
     <div className="heading coverage-heading"><div><h1>团队概览</h1>{matrix && <p>{from} — {to}</p>}</div>
-      <div className="coverage-heading-actions"><label>截止日期<input type="date" value={date} onChange={event => { if (event.target.value) { setDate(event.target.value); setOffset(0); } }} /></label><a className="coverage-report-link" href="#metrics"><PlatformIcon name="chart" />数据报表</a></div></div>
-    <div className="workspace-scroll coverage-scroll">
-    {error ? <><p role="alert" className="error">{error}</p><button onClick={() => setRetry(value => value + 1)}>重试覆盖矩阵</button></> : !matrix ? <p role="status">加载中…</p> : <>
-      {overview && overview.totals.sessions > 0 && <div className="coverage-kpis" aria-label="所示期间指标">
-        <div className="coverage-kpi"><p>活跃员工</p><strong>{overview.employees.filter(employee => employee.sessions > 0).length}</strong></div>
-        <div className="coverage-kpi"><p>会话</p><strong>{metric(overview.totals.sessions)}</strong></div>
-        <div className="coverage-kpi"><p>用户轮次</p><strong>{metric(overview.totals.userTurns)}</strong></div>
-        {overview.totals.sessions > overview.totals.unknownInputSessions && <div className="coverage-kpi"><p>Token 输入{overview.totals.unknownInputSessions > 0 ? '（已知）' : ''}</p><strong>{compact(overview.totals.knownInputTokens)}</strong><TokenTrend days={overview.daily} /></div>}
-      </div>}
-      {overviewError && <p role="status" className="coverage-data-note">指标加载失败</p>}
+      <div className="coverage-heading-actions"><button disabled={!overview} onClick={async()=>{if(!overview)return;try{const response=await request('/api/team-report/export?'+teamParams({...query,version:overview.version})),url=URL.createObjectURL(await response.blob()),a=document.createElement('a');a.href=url;a.download=`skynet-team-${overview.version}.json`;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);}catch(error){setOverviewError((error as Error).message);}}}>导出当前版本</button></div></div>
+    <TeamFilters query={query} report={overview} onChange={value=>{location.hash='#coverage?'+teamParams(value);}}/>
+    {overview&&<p className="team-cutoff">数据截至 {new Date(overview.dataAsOf).toLocaleString('zh-CN',{timeZone:'Asia/Shanghai'})} · <a href="#team-definitions" onClick={event=>{event.preventDefault();document.getElementById('team-definitions')?.setAttribute('open','');document.getElementById('team-definitions')?.scrollIntoView();}}>指标口径</a></p>}    <div className="workspace-scroll coverage-scroll">
+    {error||overviewError ? <><p role="alert" className="error">{error||overviewError}</p><button onClick={() => setRetry(value => value + 1)}>重试覆盖矩阵</button></> : !matrix ? <p role="status">加载中…</p> : <>
+      {overview&&<TeamKpis report={overview}/>}
       {matrix.rows.length > 0 ? <>
-      <div className="coverage-section-heading"><h2 className="coverage-block-title">覆盖与活动</h2><span>{selection?.date ?? date} 周{weekday(selection?.date ?? date)}</span></div>
+      <div className="coverage-section-heading"><h2 className="coverage-block-title">覆盖与活动</h2><div className="team-date-pages"><span>{matrix.dates[0]} — {matrix.dates.at(-1)}</span>{(overview?.coverage.totalDates??0)>7&&<><button disabled={overview?.coverage.nextDateOffset==null} onClick={()=>{location.hash='#coverage?'+teamParams({...query,version:overview!.version,coverageOffset:overview!.coverage.nextDateOffset!});}}>更早 7 天</button><button disabled={!overview?.coverage.dateOffset} onClick={()=>{location.hash='#coverage?'+teamParams({...query,version:overview!.version,coverageOffset:Math.max(0,(overview!.coverage.dateOffset??0)-7)});}}>更晚 7 天</button></>}</div></div>
       <div className="coverage-layout"><div>
         <div className="coverage-matrix" role="group" aria-label="员工与日期覆盖">
           <table className="coverage-table"><caption className="platform-sr-only">员工与日期覆盖状态</caption><thead><tr><th scope="col">员工</th>
@@ -122,7 +82,7 @@ export function TeamCoverage({ request, onEvidence, currentEmployeeId }: { reque
           })}</tbody></table>
         </div>
         <div className="coverage-legend" aria-label="符号说明"><span><CoverageGlyph kind="observed" />有活动</span><span><CoverageGlyph />无记录</span><span><CoverageGlyph kind="unknown" />覆盖未知</span><span><CoverageGlyph kind="gap" />采集缺口</span><span><CoverageGlyph kind="pending" />待确认</span><span><CoverageGlyph kind="unfinished" />处理中</span></div>
-        {dayMetricsError && <p role="status" className="coverage-data-note">当日指标加载失败</p>}
+
         {(offset > 0 || matrix.nextOffset !== null) && <div className="pagination"><button disabled={!offset} onClick={() => setOffset(value => Math.max(0, value - 10))}>上一页员工</button><button disabled={matrix.nextOffset === null} onClick={() => setOffset(matrix.nextOffset!)}>下一页员工</button></div>}
       </div>{selection && <aside className="coverage-inspector" aria-label="选中员工与日期">
         <div className="coverage-inspector-heading"><span className="coverage-person-avatar" aria-hidden="true">{Array.from(selection.employee)[0]}</span><div><h2>{selection.employee}</h2><p>{selection.date} 周{weekday(selection.date)}</p></div></div>
@@ -145,8 +105,7 @@ export function TeamCoverage({ request, onEvidence, currentEmployeeId }: { reque
         </>}
       </aside>}</div>
       </> : <p className="report-empty">暂无员工</p>}
-      {!!overview?.employees.length && <section className="coverage-people-summary" aria-label="所示期间人员汇总"><div className="coverage-summary-heading"><h2>人员汇总</h2><a href="#metrics">完整报表 →</a></div><div className="coverage-summary-table"><table><thead><tr><th scope="col">员工</th><th scope="col">会话</th><th scope="col">Token 输入</th><th scope="col">用户轮次</th><th scope="col">工具调用</th></tr></thead><tbody>{[...overview.employees].sort((a, b) => a.employee.localeCompare(b.employee, 'zh-CN') || a.employeeId.localeCompare(b.employeeId)).map(employee => <tr key={employee.employeeId}><th scope="row"><span className="coverage-summary-person"><span className="coverage-person-avatar" aria-hidden="true">{Array.from(employee.employee)[0]}</span>{employee.employee}</span></th><td>{metric(employee.sessions)}</td><td>{employee.sessions > employee.unknownInputSessions ? <>{compact(employee.knownInputTokens)}{employee.unknownInputSessions > 0 && <sup title="部分会话未上报 Token">*</sup>}</> : null}</td><td>{metric(employee.userTurns)}</td><td>{metric(employee.toolCalls)}</td></tr>)}</tbody></table></div></section>}
-    </>}
+      {overview&&<><TeamPeople report={overview} query={query}/><details id="team-definitions"><summary>指标口径与版本</summary><p>人数按所选范围有业务会话的员工计算；人员固定按姓名。Token 为已知部分，未知会话不进入趋势。已验证结果、仅声称和返工为模型推断；返工显示分子、有效非首条分母与未知数。</p><p>覆盖矩阵中活动随员工、日期、Agent 和项目筛选；采集观测描述设备与来源，不能按项目证明连续覆盖。每日检查可进入各自原文及日报版本。</p><p>{overview.coverage.definition}</p><p>团队版本 {overview.version}</p><p>来源 {overview.usageVersion} · {overview.promptVersion} · {overview.waitReportVersion}</p></details></>}    </>}
     </div>
   </section>;
 }

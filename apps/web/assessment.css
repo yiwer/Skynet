@@ -6,15 +6,16 @@
 .platform-main .assessment-actions button{white-space:nowrap;font-size:12px}
 .platform-main .assessment-controls{border-bottom:1px solid var(--color-rule);padding-bottom:14px;font-size:12px;flex:none;color:var(--color-muted)}
 .platform-main .assessment-controls label{display:flex;align-items:center;gap:8px;margin:0;min-width:0;white-space:nowrap}
-.platform-main .assessment-controls select{max-width:220px;margin:0;min-height:34px}
+.platform-main .assessment-controls select{max-width:220px;margin:0;min-height:44px}
+.platform-main .assessment-controls>a{display:inline-flex;align-items:center;min-height:44px}
 .platform-main .assessment-controls>span{padding-left:10px;border-left:1px solid var(--color-rule)}
 .platform-main .assessment-segments{display:inline-flex;max-width:100%;padding:3px;gap:2px;border:1px solid var(--color-rule);border-radius:8px;background:var(--color-paper-2)}
-.platform-main .assessment-segments button{padding:6px 10px;min-height:32px;border:0;box-shadow:none;background:transparent;color:var(--color-muted);font-size:12px;white-space:nowrap;border-radius:5px}
+.platform-main .assessment-segments button{padding:6px 10px;min-width:44px;min-height:44px;border:0;box-shadow:none;background:transparent;color:var(--color-muted);font-size:12px;white-space:nowrap;border-radius:5px}
 .platform-main .assessment-segments button[aria-pressed=true]{background:var(--color-card);color:var(--color-ink);box-shadow:0 1px 3px #00000010}
 .platform-main .assessment-segments button:hover{color:var(--color-ink);background:var(--color-hover)}
 .platform-main .assessment-range{display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;font-size:11px;color:var(--color-muted);margin:0 0 12px}
 .platform-main .assessment-history{font-size:12px;margin-bottom:14px;color:var(--color-muted)}
-.platform-main .assessment-history summary{cursor:pointer;width:max-content;padding:5px 0}
+.platform-main .assessment-history summary{cursor:pointer;width:max-content;min-height:44px;padding:12px 0;line-height:20px}
 .platform-main .assessment-history ol{list-style:none;margin:8px 0 12px;padding:0;display:grid;gap:1px;border:1px solid var(--color-rule);border-radius:8px;overflow:hidden}
 .platform-main .assessment-history li>a{display:grid;grid-template-columns:minmax(130px,1fr) auto;gap:4px 12px;padding:12px 14px;text-decoration:none;background:var(--color-card);color:var(--color-ink)}
 .platform-main .assessment-history li+li{border-top:1px solid var(--color-rule-soft)}
