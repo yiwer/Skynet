@@ -79,7 +79,7 @@ export function WaitingReport({ request }: { request: Request }) {
     <div className="workspace-scroll">
       {busy && <p role="status">正在读取等待记录…</p>}{error && <div role="alert"><p>{error}</p><button onClick={() => setRetry(value => value + 1)}>重试</button></div>}
       {page && <>
-      {statistics?<WaitStatistics key={statistics.version} report={statistics}/>:statisticsError?<p role="alert">{statisticsError}</p>:<p role="status">正在读取等待分布…</p>}
+      {statistics?<WaitStatistics key={statistics.version} report={statistics} sourceUnavailable={!!page.unavailableSources?.length}/>:statisticsError?<p role="alert">{statisticsError}</p>:<p role="status">正在读取等待分布…</p>}
       <p className="wait-total-caption">已确认等待合计 <span data-testid="wait-reply-total">{page.summary.replyWaitCount?waitDuration(page.summary.knownReplyWaitMs):page.summary.replyWaitMs===null?'未知':'0 分 0 秒'}</span> · {page.summary.replyWaitCount} 段</p>
       {page.daily.length > 0 && <details className="usage-data-status"><summary>按日查看</summary><div className="usage-table-scroll"><table><caption>按日等待</caption><thead><tr><th>日期</th><th>已确认等待回复</th><th>未知段数</th></tr></thead><tbody>{page.daily.map(day => <tr key={day.date}><th>{day.date}</th><td>{waitDuration(day.knownReplyWaitMs)}</td><td>{day.unknownReplyWaitCount}</td></tr>)}</tbody></table></div></details>}
       <section className="usage-figure"><div className="usage-figure-head"><h2>等待记录</h2><span>{page.total} 段</span></div>
@@ -90,7 +90,7 @@ export function WaitingReport({ request }: { request: Request }) {
           <td>{interval.parallel === 'observed' ? <details><summary>有并行活动</summary>{interval.parallelEvidence.map((evidence, index) => <a className="usage-cell-detail" href={evidence.conversationPath ?? evidence.webPath} key={index}>活动原件 {index + 1}</a>)}</details> : interval.parallel === 'not-observed' ? '未观察到' : '未知'}</td>
           <td><a href={`${interval.end.conversationPath}&waitVersion=${page.version}`}>查看对话</a>{interval.start && <a className="usage-cell-detail" href={interval.start.webPath}>轮次结束原件</a>}</td>
         </tr>)}</tbody></table></div>
-        {page.total === 0 && <p className="usage-empty">暂无等待记录</p>}
+        {page.total === 0 && <p className="usage-empty">{page.unavailableSources?.length?'原件不可读取，等待记录未知':'暂无等待记录'}</p>}
         {page.total > 25 && <div className="usage-pagination"><button disabled={busy || query.offset === 0} onClick={() => setQuery({ ...query, version: page.version, offset: Math.max(0, query.offset - 25) })}>上一页等待</button><span>第 {Math.floor(query.offset / 25) + 1} 页</span><button disabled={busy || page.nextOffset === null} onClick={() => setQuery({ ...query, version: page.version, offset: page.nextOffset! })}>下一页等待</button></div>}
       </section><details className="usage-data-status"><summary>计算口径与来源</summary><p>{page.definition}</p>{page.unknownReasons.map(reason => <p key={reason}>{reason}</p>)}<span>{page.algorithmVersion}</span></details></>}
     </div>

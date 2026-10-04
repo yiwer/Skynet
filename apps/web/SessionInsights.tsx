@@ -19,8 +19,8 @@ export function SessionInsights({snapshotId,request,analysisRefresh=0}:{snapshot
   const inferences=data?.inferences;
   return <section className="session-insights" aria-label="会话洞察"><header><h2>会话洞察</h2><button type="button" aria-label="刷新会话洞察" onClick={()=>setRefresh(value=>value+1)}>↻</button></header>
     {error&&<p role="alert">{error}</p>}{!data?<p role="status">正在读取…</p>:<>
-      <div className="insight-status"><span>{states[data.state]}{data.corrections?.appliedIds.length?' · 已更正':''}</span>{inferences&&<strong>{taskTypeLabels[inferences.taskType.value]}</strong>}</div>
-      <dl className="insight-counts">{([['已验证',data.metrics.verified],['仅声称',data.metrics.claimed],['返工',data.metrics.rework],['追问',data.metrics.clarifications]] as const).map(([label,value])=><div key={label}><dt>{label}</dt><dd>{value===null?'未完成':value}</dd></div>)}</dl>
+      <div className="insight-status"><span>{data.sourceAvailability?'原件不可读取':states[data.state]}{data.corrections?.appliedIds.length?' · 已更正':''}</span>{inferences&&<strong>{taskTypeLabels[inferences.taskType.value]}</strong>}</div>
+      <dl className="insight-counts">{([['已验证',data.metrics.verified],['仅声称',data.metrics.claimed],['返工',data.metrics.rework],['追问',data.metrics.clarifications]] as const).map(([label,value])=><div key={label}><dt>{label}</dt><dd>{value===null?(data.sourceAvailability?'未知':'未完成'):value}</dd></div>)}</dl>
       <InferenceCorrections key={selection} view={data} request={request} fixed={!!fixedVersion} onUpdated={()=>setRefresh(value=>value+1)}/>
       {inferences&&<>
         <details><summary>任务类型 · {inferences.taskType.correctionId?'人工更正':'模型推断'}</summary><p>{taskTypeLabels[inferences.taskType.value]}</p><Evidence citations={inferences.taskType.citations}/></details>

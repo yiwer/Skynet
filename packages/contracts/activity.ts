@@ -20,7 +20,7 @@ export interface ActivityLane {employeeId:string;employee:string;sessions:{id:st
   points:Pick<ActivityEvent,'id'|'type'|'timestamp'|'sessionId'|'evidence'>[];segments:{id:string;kind:'wait';startedAt:string;endedAt:string;durationInScopeMs:number;evidence:ActivityEvidence}[];}
 export interface ActivityPage { version:string;revision:number;algorithmVersion:string;createdAt:string;dataAsOf:string|null;
   scope:{date:string;timeZone:'Asia/Shanghai';employeeId?:string;source?:Source;project?:string;type?:ActivityType};events:ActivityEvent[];total:number;nextOffset:number|null;
-  inputs:{snapshotId:string;hash:string;attributionRevision:string;parserVersion:string}[];lanes:ActivityLane[];coverage:{permission:'unknown';sessionEnd:'unknown';unknownTime:number};
+  inputs:{snapshotId:string;hash:string;attributionRevision:string;parserVersion:string;unavailable?:'missing'|'unreadable'|'hash-mismatch'}[];lanes:ActivityLane[];coverage:{permission:'unknown';sessionEnd:'unknown';unknownTime:number;unavailableSources?:number};
   analyses:Pick<SessionInsights,'snapshotId'|'version'|'state'|'analysisVersion'>[];
   nextLaneOffset:number|null;nextInputOffset:number|null;inputCount:number;laneItemCount:number;employeeOrder:{employeeId:string;employee:string}[];waitAlgorithmVersion:string;waitVersion:string;inputVersion:string; }
 export const activityLink = (selection:{date:string;employeeId?:string}) => '#activity?'+new URLSearchParams(selection).toString();

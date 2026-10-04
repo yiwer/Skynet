@@ -25,6 +25,7 @@ export interface WaitsSummary {
   longWaitCount: number; permissionWaitMs: null; permissionWaitCount: null;
 }
 export interface WaitsPage {
+  unavailableSources?:{snapshotId:string;employeeId:string;employee:string;project:string;reason:'missing'|'unreadable'|'hash-mismatch';evidence:WaitEvidence}[];
   version: string; revision: number; algorithmVersion: string; createdAt: string; dataAsOf: string | null;
   scope: WaitsScope; summary: WaitsSummary; intervals: ReplyWait[]; total: number; nextOffset: number | null;
   daily: { date: string; knownReplyWaitMs: number; unknownReplyWaitCount: number }[];
