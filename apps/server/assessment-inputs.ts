@@ -19,8 +19,9 @@ export async function assessmentInputs(db: Database, usage: ReturnType<typeof us
   const baselineReport = period === 'since-enrollment' ? report : await usage.export({ period: 'since-enrollment', ...(baselineHead ? { version: baselineHead.version } : {}) });
   const baselineReferences = [...new Map(baselineReport.sessions.flatMap(row => row.insightVersions).map(ref => [ref.version, ref])).values()];
   const references = [...new Map([...report.sessions.flatMap(row => row.insightVersions), ...baselineReferences].map(ref => [ref.version, ref])).values()];
-  const views = await insights.readVersions(references), factors = assessmentSessions(report.sessions, views, report.scope);
-  const baselineFactors = period === 'since-enrollment' ? factors : assessmentSessions(baselineReport.sessions, views, baselineReport.scope);
+  const views = await insights.readVersions(references), messages=[...new Map((await insights.readMessageFacts(views)).flatMap(fact=>fact.messages).map(message=>[message.id,message])).values()];
+  const factors = assessmentSessions(report.sessions, views, report.scope,messages);
+  const baselineFactors = period === 'since-enrollment' ? factors : assessmentSessions(baselineReport.sessions, views, baselineReport.scope,messages);
   const baseline = { ...assessmentBaseline(baselineFactors), modelVersion: assessmentModelVersion, usageVersion: baselineReport.version,
     sourceVersions: baselineReferences.map(ref => ref.version).sort() }, baselineVersion = digest(JSON.stringify(baseline));
   const people = (await db.query(`SELECT e.id,e.name,min(d.enrolled_at) AS enrolled_at,

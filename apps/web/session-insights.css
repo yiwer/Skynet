@@ -21,3 +21,15 @@
 .insight-evidence{margin-top:6px;color:var(--color-muted);font-size:var(--text-xs)}
 .insight-evidence>div{padding:8px 0}.insight-evidence q{display:block;white-space:pre-wrap;overflow-wrap:anywhere;color:var(--color-ink);margin-top:6px;line-height:1.65}
 .insight-version{font-size:var(--text-xs)}.insight-version div{margin:10px 0}.insight-version dt{color:var(--color-muted)}.insight-version dd{margin:3px 0 0;overflow-wrap:anywhere;font-family:var(--font-mono)}
+.inference-corrections{border-top:1px solid var(--color-rule-soft);margin-top:12px;min-width:0}
+.inference-corrections>details{border-bottom:1px solid var(--color-rule-soft)}
+.platform-main .session-side .inference-corrections summary{min-height:44px;padding:12px 0;line-height:20px}
+.inference-corrections form{display:grid;gap:12px;padding:4px 0 16px;min-width:0}
+.inference-corrections label{display:grid;gap:6px;min-width:0;font-size:var(--text-xs);color:var(--color-muted)}
+.platform-main .inference-corrections select,.platform-main .inference-corrections textarea{min-width:0;max-width:100%;width:100%;margin:0;font-size:12px}
+.platform-main .inference-corrections select,.platform-main .inference-corrections button{min-height:44px}
+.inference-corrections textarea{resize:vertical;min-height:80px}
+.inference-edit-elements{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+.inference-audit-author{color:var(--color-muted);font-size:11px}
+.inference-audit-links{display:flex;gap:14px;flex-wrap:wrap}
+.inference-audit-links a,.inference-current{display:inline-flex;align-items:center;min-height:44px;font-size:12px}

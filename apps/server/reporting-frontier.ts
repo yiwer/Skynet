@@ -32,10 +32,12 @@ async function reportingFrontier(db: Database, clock: () => Date, extra?:(client
       FROM snapshot_input_integrity WHERE version=$1 ORDER BY snapshot_id`, [inputIntegrityVersion])).rows;
     const gaps = (await client.query(`SELECT device_id,source,date,hour,gap_observed,fault_codes
       FROM device_coverage_observations WHERE date <= $1 AND gap_observed ORDER BY device_id,source,date,hour`, [day])).rows;
+    const corrections=(await client.query('SELECT id,sequence FROM inference_corrections ORDER BY sequence')).rows;
     const additional=extra?await extra(client):undefined;
     await client.query('COMMIT');
     return digest(JSON.stringify(['reporting-frontier-1', day,
-      snapshots.map(row => [row, revisions.get(row.id)]), people, devices, jobs, targets, integrity, gaps,...(extra?[additional]:[])]));
+      snapshots.map(row => [row, revisions.get(row.id)]), people, devices, jobs, targets, integrity, gaps,
+      ...(corrections.length?[['inference-corrections-1',corrections]]:[]),...(extra?[additional]:[])]));
   } catch (error) { await client.query('ROLLBACK'); throw error; } finally { client.release(); }
 }
 

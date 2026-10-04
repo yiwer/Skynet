@@ -12,7 +12,7 @@ import type {RecordedMessage} from '../../packages/contracts/message-facts.js';
 import {efficiencyQuerySchema,type EfficiencyQuery,type EfficiencySession,type SessionEfficiencyPage} from '../../packages/contracts/session-efficiency.js';
 
 const algorithmVersion='session-efficiency-1';
-const definition='产效比 = 已验证结果 ÷ 百万 Token；代码产出 = 代码变更行 ÷ 百万 Token。Token 使用已知输入与输出之和，未知或零分母不计算比值。只在同类任务之间参考；任务类型与返工为模型推断。P75 按所选范围 Token 已知的逻辑会话使用线性插值，同一会话的归属分片先合计。';
+const definition='产效比 = 已验证结果 ÷ 百万 Token；代码产出 = 代码变更行 ÷ 百万 Token。Token 使用已知输入与输出之和，未知或零分母不计算比值。只在同类任务之间参考；任务类型与返工来自模型推断及人工更正。P75 按所选范围 Token 已知的逻辑会话使用线性插值，同一会话的归属分片先合计。';
 const selection=(q:EfficiencyQuery)=>({period:q.period,...(q.employeeId?{employeeId:q.employeeId}:{}),...(q.source?{source:q.source}:{}),...(q.project!==undefined?{project:q.project}:{})});
 const ratio=(numerator:number|null,denominator:number|null)=>({numerator,denominator,value:numerator!==null&&denominator!==null&&denominator>0?numerator/denominator*1e6:null});
 function quantile(values:number[],q:number){if(!values.length)return null;const sorted=[...values].sort((a,b)=>a-b),p=(sorted.length-1)*q,lo=Math.floor(p);return sorted[lo]!+(sorted[Math.ceil(p)]!-sorted[lo]!)*(p-lo);}
@@ -32,6 +32,7 @@ function applyInferences(row:EfficiencySession,parts:UsageSession[],views:Map<st
   const complete=latest.length>0&&latest.every(view=>view?.state==='complete'&&view.inferences?.complete);
   const types=new Set(latest.map(view=>view?.inferences?.taskType.value??'unknown'));
   if(complete&&types.size===1){row.taskType=[...types][0]!;row.taskEvidence=latest.flatMap(view=>view!.inferences!.taskType.citations).slice(0,3);}
+  const correctionIds=[...new Set(latest.flatMap(view=>view?.corrections?.appliedIds??[]))];if(correctionIds.length)row.correctionIds=correctionIds;
   if(!complete)return;
   const selected=messages.filter(m=>m.context==='after-enrollment'&&m.sourceDate&&m.sourceDate>=scope.from&&m.sourceDate<=scope.to);
   const inputs=row.inputVersions.map(key=>views.get(key.snapshotId)!).filter(Boolean);

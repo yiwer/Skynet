@@ -19,6 +19,7 @@ import { projectSessionInsights } from './session-insights.js';
 import {recordedMessages} from './message-facts.js';
 import type {MessageFacts} from '../../packages/contracts/message-facts.js';
 import {messageHistoryProofs} from './message-history.js';
+import {inferenceCorrectionRows,applyInferenceCorrections,saveCorrectionViews} from './inference-corrections.js';
 
 type Record = { id: string; device_id: string; source: Source; hash: string; manifest: Manifest };
 type Facts = { input: SessionInsights['input']; facts: SessionInsights['facts']; sourceState: NonNullable<SessionInsights['sourceState']>; messageFacts:MessageFacts };
@@ -51,6 +52,8 @@ async function readInsightBatchOnce(db: Database, raw: RawStore, requested: stri
     await client.query('BEGIN ISOLATION LEVEL REPEATABLE READ');
     const revisions = await attributionRevisions(client,ids);
     const historyProofs=await messageHistoryProofs(client,ids);
+    const corrections=await inferenceCorrectionRows(client,ids);
+    await saveCorrectionViews(client,corrections);
     const jobs = (await client.query(`SELECT j.id,j.snapshot_id AS "snapshotId",j.state,j.config,j.input-'events' AS input,j.result,j.target_generation AS generation,
       t.applicable_job_id,t.desired_snapshot_id,t.config_hash,t.generation AS desired_generation,t.parser_version,t.attribution_revision
       FROM (SELECT DISTINCT ON(snapshot_id) * FROM analysis_jobs WHERE snapshot_id=ANY($1::uuid[]) ORDER BY snapshot_id,created_at DESC,id DESC) j
@@ -99,7 +102,7 @@ async function readInsightBatchOnce(db: Database, raw: RawStore, requested: stri
         }
         inserted.push({ version: key, snapshotId: record.id, payload: facts });
       }
-      views.push(projectSessionInsights(record.id, facts.input, runs.get(record.id), facts.facts, facts.sourceState,false,key,facts.messageFacts.complete));
+      views.push(applyInferenceCorrections(projectSessionInsights(record.id, facts.input, runs.get(record.id), facts.facts, facts.sourceState,false,key,facts.messageFacts.complete),corrections.get(record.id)??[],facts.messageFacts));
     }
     for (let offset = 0; offset < inserted.length; offset += 100) await client.query(`INSERT INTO insight_fact_revisions(version,snapshot_id,payload)
       SELECT x.version,x."snapshotId",x.payload FROM jsonb_to_recordset($1::jsonb) AS x(version text,"snapshotId" uuid,payload jsonb) ON CONFLICT DO NOTHING`, [JSON.stringify(inserted.slice(offset,offset+100))]);

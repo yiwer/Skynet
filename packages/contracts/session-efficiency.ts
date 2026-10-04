@@ -18,6 +18,7 @@ export type EfficiencyRatio={numerator:number|null;denominator:number|null;value
 export type EfficiencySegment={kind:'agent'|'reply'|'permission'|'gap';startedAt:string|null;endedAt:string|null;durationMs:number|null;evidence:WaitEvidence[];reason:string|null};
 export type EfficiencyTiming={waitVersion:string;knownAgentMs:number;knownReplyMs:number;activeMs:number|null;permissionMs:null;waitFraction:EfficiencyRatio;segments:EfficiencySegment[];segmentTotal:number;nextSegmentOffset:number|null};
 export type EfficiencySession={sessionId:string;snapshotId:string;sourceSessionId:string;source:Source;projects:string[];employees:{employeeId:string;employee:string}[];
+  correctionIds?:string[];
   dates:string[];webPath:string;tokens:number|null;knownTokens:number;userTurns:number;toolCalls:number;verified:number|null;claimed:number|null;codeChanges:number|null;
   efficiency:EfficiencyRatio;codeOutput:EfficiencyRatio;taskType:typeof taskTypes[number];taskEvidence:InsightCitation[];rework:number|null;reworkEvidence:InsightCitation[];reviewReasons:string[];
   inputVersions:{snapshotId:string;version:string}[];timing?:EfficiencyTiming};

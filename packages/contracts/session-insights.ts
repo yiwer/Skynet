@@ -18,8 +18,8 @@ export type InsightCitation = AnalysisItem['citations'][number];
 type Cited<T> = Omit<T,'citations'> & {citations:InsightCitation[]};
 export type SessionInferences = {
   version:'session-insights-1'; complete:boolean;
-  taskType:Cited<InsightOutput['taskType']>;
-  prompts:(Cited<InsightOutput['prompts'][number]> & {length:number;first:boolean;complete:boolean})[];
+  taskType:Cited<InsightOutput['taskType']> & {correctionId?:string};
+  prompts:(Cited<InsightOutput['prompts'][number]> & {length:number;first:boolean;complete:boolean;corrections?:{elements?:string;rework?:string}})[];
   replies:(Cited<InsightOutput['replies'][number]> & {complete:boolean})[];
   outcomes:(Cited<InsightOutput['outcomes'][number]> & {classificationAdjusted:boolean})[];
   suggestions:Cited<InsightOutput['suggestions'][number]>[];
@@ -28,6 +28,7 @@ export type FactContribution = {eventId:string;employeeId:string;sourceDate:stri
 export type RecordedFact = {value:number|null;complete:boolean;evidence:InsightCitation[];contributions:FactContribution[];scope:'after-enrollment';added?:number;removed?:number;passed?:number;failed?:number};
 export const sessionInsightsQuery = z.object({ analysisId: z.uuid().optional(),version:z.string().regex(/^[a-f0-9]{64}$/).optional() }).strict();
 export type SessionInsights = {
+  corrections?:{version:string;appliedIds:string[];pendingIds:string[]};
   version: string; factsVersion:string; snapshotId: string; state: 'unavailable'|'pending'|'failed'|'legacy'|'stale'|'partial'|'complete';
   messageFactsVersion?:string;
   messageHistoryComplete?:boolean;
