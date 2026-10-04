@@ -94,3 +94,15 @@ from page two reset the data offset but retained its page-number stack. The
 filter now resets both together; the complete Web journey passes. Final
 integration and visual evidence are recorded with the author receipt. None of
 these functional runs is full AC32 P95 acceptance.
+
+After merging accepted integration `3f00383944579c1ead062946bb03397d4577321e`
+(Usage paging plus the local collector operational record), the build and three
+new public download/page/Web journeys passed (44.556 seconds); the composed
+profile source-outage regression also passed (14.815 seconds). The preceding
+full efficiency regression was 9/9 (114.906 seconds), including the real isolated
+Claude executable against the controlled loopback fixture, OAuth MCP, complete
+download, eight viewport/theme states, fixed evidence and native timing. No paid
+provider was called. Sixteen screenshots are retained in `54-efficiency-browser`;
+320px dark and 1280px light were visually checked for internal scrolling and
+layout. The author tree and exact artifact hashes are recorded in
+`54-efficiency-author-verification.json` for independent acceptance.
