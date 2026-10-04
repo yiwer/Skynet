@@ -7,7 +7,7 @@ export type MetricScore = { key: string; label: string; value: number | null; an
   evidence: { snapshotId: string; webPath: string; quote?: string }[]; evidenceCount: number; reason: string | null };
 export type CapabilityAssessment = {
   version: string; employeeId: string; employee: string; period: '接入至今'; preset: '默认'; modelVersion: string;
-  inputs: { metricsVersion: string; usageVersion: string; analysisVersions: string[]; insightVersions: string[]; baselineVersion: string; waitsVersion: string; coverageVersion: string };
+  inputs: { metricsVersion: string; usageVersion: string; analysisVersions: string[]; insightVersions: string[]; baselineVersion: string; waitsVersion: string; coverageVersion: string; frontierVersion?: string };
   inputPage: { offset: number; analysisCount: number; insightCount: number; nextOffset: number | null };
   range: { from: string | null; to: string; timeZone: 'Asia/Shanghai' };
   index: number | null; margin: number | null; confidence: '高' | '中' | '低'; level: '较好' | '一般' | '需提升' | '待定';

@@ -31,9 +31,11 @@
 
 每份结果绑定模型、基础指标、用量、等待、分析、洞察、基线、采集覆盖及员工接入后的北京时间范围。生成时间以 UTC 存储，在页面明确按北京时间显示。迟到原件、原生状态变化、重新分析或团队基线变化生成新版本；相同输入复用原生成时间。固定旧结果和基线在新输入到达、显式全量重算、服务重启后仍可读取，异步旧分析不能覆盖新评估。
 
+跨服务组合使用 `reporting-frontier.ts` 的 `consistentReportingInputs(db, clock, read)`。在完整组合读取前后，分别以可重复读事务取得原件集合与 SHA-256、清单和谱系、批量归属修订、最新分析及适用目标、实际输入完整性、员工/设备/接入日期、真实缺口和北京时间日期的语义指纹。两端相同才绑定 `inputs.frontierVersion` 并保存组合评估；变化则从头读取全部输入，最多三次，仍在变化返回 409。它不以相近墙钟、原件数量或组件生成时间替代输入一致性；包含尚无业务事件的原件，也不把心跳时间或派生缓存写入当作输入变化。旧结果可不含该字段，固定版本读取仍原样返回。组件自身的有效固定版本可以独立保存，但未通过核验的组合结果不会发布。
+
 ## TDD 与公开验证
 
-测试 seam 沿用 PRD 的 2026-09-28 用户确认：合成设备公开上传 → Reporting/Evidence、公开 Analysis 请求/外部执行边界、HTTP/OAuth MCP/Web。没有通过数据库查询断言评分；数据库只用于隔离工作器配置，模型响应由测试外部执行器确定。
+测试 seam 沿用 PRD 的 2026-09-28 用户确认：合成设备公开上传 → Reporting/Evidence、公开 Analysis 请求/外部执行边界、HTTP/OAuth MCP/Web。没有通过数据库查询断言评分；数据库用于隔离工作器配置，以及在跨服务并发测试中安排真实数据库发布边界的交错。产品正确性全部通过 HTTP 与固定导出断言，模型响应由测试外部执行器确定。
 
 RED 依次验证缺少评估入口、只有空分数、缺少 MCP/画像、未知 Token 被误当采集缺口、原生结束边界未知被误记为样本不足、无会话仍显示空维度、纯 Token 日期被误算为活跃日、固定输入分页尚不存在。GREEN 覆盖：
 
@@ -42,16 +44,17 @@ RED 依次验证缺少评估入口、只有空分数、缺少 MCP/画像、未�
 - 2 条首提示词不足与第 3 条达标；零结果的 0.5 轮次除数；采集缺口高可信度降为中；未知来源与真实零值不同。
 - 恢复后只有新 `task_started`、没有新增业务消息也会更新当前叶子；结束后增量与全量相同，历史前缀不增加提示词或会话数。
 - 35 项输入引用跨页无遗漏/重复；后续页要求固定版本；HTTP/MCP/完整导出一致；旧评估和旧基线冻结。
+- 真实公开上传发生在用量读取与等待读取之间，以及原件数量不变但分析在读取期间完成，两种交错均先在旧实现失败，再经完整输入核验通过；固定等待引用必须属于同份用量输入，新分析必须进入该份评估，随后全量重算和历史读取相同。
 - 真实 HTTPS OAuth/PKCE、浏览器登录、明暗主题 1440/390/320、低于 60 分维度默认展开、对话证据跳转、参数与基线下载、无会话空状态。外层文档不滚动，内容区内部滚动。
 
-测试入口：`tests/assessment-public.test.ts`、`tests/assessment-model-public.test.ts`、`tests/assessment-journey.test.ts`；合成 fixture 在 `tests/assessment-fixture.ts`。可复现命令：
+测试入口：`tests/assessment-public.test.ts`、`tests/assessment-model-public.test.ts`、`tests/assessment-journey.test.ts`、`tests/assessment-concurrency.test.ts`；合成 fixture 在 `tests/assessment-fixture.ts`。可复现命令：
 
 ```powershell
 $env:SKYNET_TEST_POSTGRES_BIN='C:/Users/yiwer/AppData/Local/Temp/ticket28-pg-0eb735e987dc48d186870e8a96801e01/bin'
 $env:SKYNET_OPENSSL='D:/DevEnv/Git/usr/bin/openssl.exe'
 $env:SKYNET_ASSESSMENT_EVIDENCE_DIR='E:/GenCode/Skynet-evidence/v2-2026-10-04/45-assessment'
 npm run build
-node --import tsx --test --test-concurrency=1 tests/assessment-public.test.ts tests/assessment-model-public.test.ts tests/assessment-journey.test.ts
+node --import tsx --test --test-concurrency=1 tests/assessment-public.test.ts tests/assessment-model-public.test.ts tests/assessment-journey.test.ts tests/assessment-concurrency.test.ts
 ```
 
 原生 fixture 的 wire 名称和持久化范围核对官方 [Codex 0.157.1 protocol.rs](https://raw.githubusercontent.com/openai/codex/rust-v0.157.1/codex-rs/protocol/src/protocol.rs) 与 [rollout policy.rs](https://raw.githubusercontent.com/openai/codex/rust-v0.157.1/codex-rs/rollout/src/policy.rs)，未发明不存在的权限原始事件。0.160.0 Token 与元数据支持沿用 #40 的已验证实现。
