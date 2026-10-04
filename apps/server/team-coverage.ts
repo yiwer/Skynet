@@ -1,4 +1,6 @@
 import type { Database } from './database.js';
+import type pg from 'pg';
+import type {MetricsScope} from '../../packages/contracts/metrics.js';
 import { beijingDate, reportDate } from '../../packages/contracts/reports.js';
 import type { CoverageCell, CoverageMatrix, CoverageObservation } from '../../packages/contracts/coverage.js';
 import type { Source } from '../../packages/contracts/archive.js';
@@ -56,32 +58,34 @@ export async function observeCoverage(db: Database, deviceId: string, report: {
 }
 
 const definition = '北京时间员工×来源日期。活动按原员工的已确认接入后 eventId 去重；无已观察活动不证明没有工作。采集观测按服务器收到日期保存，心跳只证明对应时刻可达，历史无观测为未知。宿主确认待核对不等于已证实未信任；原件提交、设备可达与分析完成分开。';
-export function coverageService(db: Database) {
-  async function matrix(selectedDate: string, offset = 0): Promise<CoverageMatrix> {
+export function coverageService(db: Database,clock:()=>Date=()=>new Date()) {
+  async function matrix(selectedDate: string, offset = 0,filters:Partial<MetricsScope>={},limit=10): Promise<CoverageMatrix> {
     reportDate.parse(selectedDate);
     const end = new Date(`${selectedDate}T00:00:00+08:00`).getTime();
-    const dates = Array.from({ length: 7 }, (_, index) => beijingDate(new Date(end - (6 - index) * 86400_000)));
-    const employees = (await db.query('SELECT id,name FROM employees ORDER BY name,id LIMIT 11 OFFSET $1', [offset])).rows;
-    const ids = employees.slice(0, 10).map(row => row.id);
+    const start=filters.from?Date.parse(filters.from+'T00:00:00+08:00'):end-6*86400_000;
+    const dates=Array.from({length:Math.floor((end-start)/86400_000)+1},(_,index)=>beijingDate(new Date(start+index*86400_000)));
+    const employees = (await db.query('SELECT id,name FROM employees WHERE ($2::uuid IS NULL OR id=$2) ORDER BY name,id LIMIT $3 OFFSET $1', [offset,filters.employeeId??null,limit+1])).rows;
+    const ids = employees.slice(0,limit).map(row => row.id);
     const [activity, observations, devices, reportStates, schema] = await Promise.all([
       db.query(`SELECT employee_id,source_date,count(*)::integer AS records,count(DISTINCT (source,source_session_id))::integer AS sessions
         FROM effective_event_origins WHERE employee_id=ANY($1::uuid[]) AND source_date=ANY($2::text[]) AND context='after-enrollment'
-        GROUP BY employee_id,source_date`, [ids, dates]),
+          AND ($3::text IS NULL OR source=$3) AND ($4::text IS NULL OR project=$4)
+        GROUP BY employee_id,source_date`, [ids, dates,filters.source??null,filters.project??null]),
       db.query(`SELECT d.employee_id,o.date,bool_or(o.gap_observed) AS gap,min(o.first_received_at) AS first,max(o.last_received_at) AS last,
         bool_or(o.configured=true) AS configured,bool_or(o.configured=false) AS unconfigured,
         bool_or(o.host_event='observed') AS host_observed,bool_or(o.host_event='not-observed' AND o.configured=true) AS pending
         FROM device_coverage_observations o JOIN devices d ON d.id=o.device_id
-        WHERE d.employee_id=ANY($1::uuid[]) AND o.date=ANY($2::text[]) GROUP BY d.employee_id,o.date`, [ids, dates]),
-      db.query(`SELECT d.employee_id,bool_or(d.active AND e.active AND h.live_valid AND h.received_at>now()-interval '90 seconds') AS connected,
+        WHERE d.employee_id=ANY($1::uuid[]) AND o.date=ANY($2::text[]) AND ($3::text IS NULL OR o.source=$3 OR o.source='') GROUP BY d.employee_id,o.date`, [ids, dates,filters.source??null]),
+      db.query(`SELECT d.employee_id,bool_or(d.active AND e.active AND h.live_valid AND h.received_at>$2::timestamptz-interval '90 seconds') AS connected,
         bool_or(h.received_at IS NOT NULL) AS seen FROM devices d JOIN employees e ON e.id=d.employee_id
-        LEFT JOIN device_health h ON h.device_id=d.id WHERE d.employee_id=ANY($1::uuid[]) GROUP BY d.employee_id`, [ids]),
+        LEFT JOIN device_health h ON h.device_id=d.id WHERE d.employee_id=ANY($1::uuid[]) GROUP BY d.employee_id`, [ids,clock()]),
       db.query(`SELECT p.employee_id,p.date,r.payload->>'state' AS state,p.refresh_pending FROM daily_report_periods p
         LEFT JOIN LATERAL(SELECT payload FROM daily_report_revisions WHERE employee_id=p.employee_id AND date=p.date ORDER BY revision DESC LIMIT 1) r ON true
         WHERE p.employee_id=ANY($1::uuid[]) AND p.date=ANY($2::text[])`, [ids, dates]),
       db.query('SELECT started_at FROM coverage_schema WHERE id=1'),
     ]);
-    const today = beijingDate();
-    const rows = employees.slice(0, 10).map(employee => ({ employeeId: employee.id, employee: employee.name, cells: dates.map(date => {
+    const today = beijingDate(clock());
+    const rows = employees.slice(0,limit).map(employee => ({ employeeId: employee.id, employee: employee.name, cells: dates.map(date => {
       const a = activity.rows.find(row => row.employee_id === employee.id && row.source_date === date);
       const o = observations.rows.find(row => row.employee_id === employee.id && row.date === date);
       const device = devices.rows.find(row => row.employee_id === employee.id);
@@ -96,8 +100,8 @@ export function coverageService(db: Database) {
         firstReceivedAt: o?.first?.toISOString() ?? null, lastReceivedAt: o?.last?.toISOString() ?? null };
       return cell;
     }) }));
-    return { selectedDate, dates, rows, nextOffset: employees.length > 10 ? offset + 10 : null, definition,
-      observationStartedAt: schema.rows[0].started_at.toISOString(), checkedAt: new Date().toISOString() };
+    return { selectedDate, dates, rows, nextOffset: employees.length > limit ? offset + limit : null, definition,
+      observationStartedAt: schema.rows[0].started_at.toISOString(), checkedAt: clock().toISOString() };
   }
   async function observations(employeeId: string, date: string, offset = 0) {
     reportDate.parse(date);
@@ -112,3 +116,14 @@ export function coverageService(db: Database) {
   return { matrix, observations };
 }
 export type CoverageService = ReturnType<typeof coverageService>;
+
+/** Extra semantic inputs needed only by coverage-bearing composite reports. */
+export async function coverageFrontier(client:pg.PoolClient,clock:()=>Date){
+  const result=await client.query(`SELECT jsonb_build_object(
+    'people',(SELECT jsonb_agg(jsonb_build_array(id,active) ORDER BY id) FROM employees),
+    'devices',(SELECT jsonb_agg(jsonb_build_array(d.id,d.active,h.received_at,h.live_valid,h.received_at>$1::timestamptz-interval '90 seconds') ORDER BY d.id) FROM devices d LEFT JOIN device_health h ON h.device_id=d.id),
+    'observations',(SELECT jsonb_agg(to_jsonb(o) ORDER BY device_id,source,date,hour) FROM device_coverage_observations o),
+    'periods',(SELECT jsonb_agg(jsonb_build_array(employee_id,date,refresh_pending) ORDER BY employee_id,date) FROM daily_report_periods),
+    'reports',(SELECT jsonb_agg(jsonb_build_array(employee_id,date,revision,payload->>'state') ORDER BY employee_id,date,revision) FROM daily_report_revisions),
+    'schema',(SELECT started_at FROM coverage_schema WHERE id=1)) AS value`,[clock()]);return result.rows[0].value;
+}

@@ -20,11 +20,12 @@ export function WaitMark({ wait }: { wait: ReplyWait }) {
       {wait.parallelEvidence.map((item, index) => <a key={`${item.snapshotId}:${item.line}:${item.block}`} href={item.conversationPath ?? item.webPath}>并行活动 {index + 1}</a>)}
     </div></details>;
 }
+function hashWaits():WaitsQuery{const p=new URLSearchParams(location.hash.split('?')[1]);return {period:(p.get('period')??'this-week') as WaitsQuery['period'],offset:0,...Object.fromEntries(['employeeId','source','project','week','version'].flatMap(key=>p.has(key)?[[key,p.get(key)!]]:[]))};}
 export function WaitingReport({ request }: { request: Request }) {
-  const [query, setQuery] = useState<WaitsQuery>({ period: 'this-week', offset: 0 });
+  const [query, setQuery] = useState<WaitsQuery>(hashWaits);
   const [page, setPage] = useState<WaitsPage>(); const [facets, setFacets] = useState<ReplyWait[]>([]);
   const [busy, setBusy] = useState(false), [error, setError] = useState(''), [retry, setRetry] = useState(0);
-  const [project, setProject] = useState('');
+  const [project, setProject] = useState(()=>hashWaits().project??'');
   const [statistics,setStatistics]=useState<WaitReport>(),[statisticsError,setStatisticsError]=useState('');
   useEffect(() => {
     const abort = new AbortController(); setBusy(true); setError(''); setPage(undefined);
@@ -42,11 +43,12 @@ export function WaitingReport({ request }: { request: Request }) {
   }, [page?.version]);
   useEffect(()=>{
     setStatistics(undefined);setStatisticsError('');if(!page)return;const abort=new AbortController();
-    request('/api/wait-report?'+params({period:query.period,employeeId:query.employeeId,source:query.source,project:query.project,waitVersion:page.version}),abort.signal)
+    request('/api/wait-report?'+params({period:query.period,week:query.week,employeeId:query.employeeId,source:query.source,project:query.project,waitVersion:page.version}),abort.signal)
       .then(response=>response.json()).then((value:WaitReport)=>{if(!abort.signal.aborted)setStatistics(value);})
       .catch(failure=>{if(!abort.signal.aborted)setStatisticsError(failure.message);});return()=>abort.abort();
   },[page?.version]);
-  const scope = (next: Partial<WaitsQuery>) => setQuery({ ...query, ...next, offset: 0, version: undefined });
+  useEffect(()=>{const change=()=>{if(location.hash.split('?')[0]==='#waits'){const next=hashWaits();setQuery(next);setProject(next.project??'');}};window.addEventListener('hashchange',change);return()=>window.removeEventListener('hashchange',change);},[]);
+  const scope = (next: Partial<WaitsQuery>) => setQuery({ ...query, ...next, offset: 0, version: undefined,week:undefined });
   const employees = [...new Map(facets.map(interval => [interval.employeeId, interval.employee])).entries()].sort((a, b) => a[1].localeCompare(b[1], 'zh-CN'));
   async function recompute() {
     setBusy(true); setError('');
@@ -62,15 +64,15 @@ export function WaitingReport({ request }: { request: Request }) {
   async function downloadStatistics() {
     if (!statistics) return;
     try {
-      const response = await request('/api/wait-report/export?' + params({period:query.period,employeeId:query.employeeId,source:query.source,project:query.project,version:statistics.version}));
+      const response = await request('/api/wait-report/export?' + params({period:query.period,week:query.week,employeeId:query.employeeId,source:query.source,project:query.project,version:statistics.version}));
       const url=URL.createObjectURL(await response.blob()),link=document.createElement('a');link.href=url;link.download=`skynet-wait-report-${statistics.version}.json`;link.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
     } catch (failure) {setError((failure as Error).message);}
   }
   return <section className="waiting-report usage-metrics workspace-page" aria-label="响应与等待" aria-busy={busy}>
-    <div className="usage-page-head"><h1>响应与等待</h1>{page && <div className="usage-export-actions"><button disabled={busy} onClick={recompute}>从原件重算</button><button disabled={busy} onClick={download}>导出当前版本</button>{statistics&&<button disabled={busy} onClick={downloadStatistics}>导出统计</button>}</div>}</div>
+    <div className="usage-page-head"><h1>响应与等待</h1>{page && <div className="usage-export-actions">{!query.week&&<button disabled={busy} onClick={recompute}>从原件重算</button>}<button disabled={busy} onClick={download}>导出当前版本</button>{statistics&&<button disabled={busy} onClick={downloadStatistics}>导出统计</button>}</div>}</div>
     <form className="usage-filters" onSubmit={event => { event.preventDefault(); scope({ project: project || undefined }); }}><div className="usage-filter-row">
-      <div className="usage-periods" role="group" aria-label="时间范围">{([['this-week', '本周'], ['last-week', '上周'], ['since-enrollment', '接入至今']] as const).map(([period, label]) => <button type="button" key={period} aria-pressed={query.period === period} onClick={() => scope({ period })}>{label}</button>)}</div>
-      <label>员工<select value={query.employeeId ?? ''} onChange={event => scope({ employeeId: event.target.value || undefined })}><option value="">全部员工</option>{employees.map(([id, name]) => <option key={id} value={id}>{name}</option>)}</select></label>
+      <div className="usage-periods" role="group" aria-label="时间范围">{([['this-week', '本周'], ['last-week', '上周'], ['since-enrollment', '接入至今']] as const).map(([period, label]) => <button type="button" key={period} aria-pressed={!query.week&&query.period === period} onClick={() => scope({ period })}>{label}</button>)}</div>
+      <label>员工<select value={query.employeeId ?? ''} onChange={event => scope({ employeeId: event.target.value || undefined })}><option value="">全部员工</option>{query.employeeId&&!employees.some(([id])=>id===query.employeeId)&&<option value={query.employeeId}>{page?.scope.employeeName??'所选员工'}</option>}{employees.map(([id, name]) => <option key={id} value={id}>{name}</option>)}</select></label>
       <label>Agent<select value={query.source ?? ''} onChange={event => scope({ source: event.target.value as WaitsQuery['source'] || undefined })}><option value="">全部 Agent</option><option value="codex-cli">Codex CLI</option><option value="codex-desktop">Codex Desktop</option><option value="claude-code-cli">Claude Code CLI</option></select></label>
       <label>项目<input aria-label="项目路径" value={project} maxLength={1024} placeholder="全部项目" onChange={event => setProject(event.target.value)}/></label><button>应用</button>
     </div>{page && <p className="wait-scope">{page.scope.from} — {page.scope.to} · 北京时间 · 版本 {page.revision}{page.dataAsOf&&` · 截至 ${timestamp(page.dataAsOf)}`}</p>}</form>

@@ -25,9 +25,10 @@ function ViewToggle({ chart, setChart, daily = false }: { chart: boolean; setCha
 function Person({ name, index }: { name: string; index: number }) {
   return <span className="usage-person"><span className="usage-avatar" data-tone={index % 6} aria-hidden="true">{Array.from(name)[0]}</span><span>{name}</span></span>;
 }
+function hashMetrics():MetricsQuery{const p=new URLSearchParams(location.hash.split('?')[1]);return {period:(p.get('period')??'this-week') as MetricsQuery['period'],offset:0,...Object.fromEntries(['employeeId','source','project','week','version','from','to'].flatMap(key=>p.has(key)?[[key,p.get(key)!]]:[]))};}
 export function UsageMetrics({ request }: Props) {
   const definitions=useRef<HTMLDetailsElement>(null);
-  const [draft, setDraft] = useState<MetricsQuery>({ period: 'this-week', offset: 0 });
+  const [draft, setDraft] = useState<MetricsQuery>(hashMetrics);
   const [query, setQuery] = useState<MetricsQuery>(draft);
   const [page, setPage] = useState<UsageOutputPage | null>(null);
   const [complete, setComplete] = useState<UsageOutputPage | null>(null);
@@ -61,11 +62,13 @@ export function UsageMetrics({ request }: Props) {
     return () => abort.abort();
   }, [page?.version, chartRetry]);
   useEffect(() => { if (complete) setProjects(previous => [...new Set([...previous, ...complete.sessions.map(session => session.project).filter(Boolean)])].sort((a, b) => a.localeCompare(b, 'zh-CN'))); }, [complete?.version]);
+  useEffect(()=>{const change=()=>{if(['#metrics','#usage'].includes(location.hash.split('?')[0]!)){const next=hashMetrics();setDraft(next);setQuery(next);}};window.addEventListener('hashchange',change);return()=>window.removeEventListener('hashchange',change);},[]);
   function selectScope(next: MetricsQuery) {
+    next={...next,week:undefined};
     setDraft(next);
     setQuery({ ...next, offset: 0, version: undefined });
   }
-  function apply(event: FormEvent) { event.preventDefault(); setQuery({ ...draft, offset: 0, version: undefined }); }
+  function apply(event: FormEvent) { event.preventDefault(); setQuery({ ...draft,week:undefined,offset:0,version:undefined }); }
   async function recompute() {
     setBusy(true); setError(''); setMessage('');
     try {
@@ -96,10 +99,10 @@ export function UsageMetrics({ request }: Props) {
   const hasUsage = page && page.employees.length > 0 && (page.totals.sessions > 0 || page.totals.userTurns > 0 || page.totals.toolCalls > 0 || hasInput || hasOutput);
   const employeeMaximum = Math.max(1, ...people.map(person => person.knownInputTokens));
   return <section className="usage-metrics workspace-page" aria-label="用量指标" aria-busy={busy}>
-    <div className="usage-page-head"><h1>用量与产出</h1>{page && <div className="usage-export-actions"><button disabled={busy} onClick={recompute}>从原件重算</button><button disabled={busy || exporting} onClick={download}>{exporting ? '正在导出…' : '导出当前版本'}</button></div>}</div>
+    <div className="usage-page-head"><h1>用量与产出</h1>{page && <div className="usage-export-actions">{!query.week&&<button disabled={busy} onClick={recompute}>从原件重算</button>}<button disabled={busy || exporting} onClick={download}>{exporting ? '正在导出…' : '导出当前版本'}</button></div>}</div>
     <form className="usage-filters" onSubmit={apply} aria-label="用量筛选"><div className="usage-filter-row">
       <div className="usage-periods" role="group" aria-label="时间范围">
-        {([['this-week', '本周'], ['last-week', '上周'], ['since-enrollment', '接入至今']] as const).map(([period, label]) => <button key={period} type="button" aria-pressed={draft.period === period} onClick={() => selectScope({ ...draft, period })}>{label}</button>)}
+        {([['this-week', '本周'], ['last-week', '上周'], ['since-enrollment', '接入至今']] as const).map(([period, label]) => <button key={period} type="button" aria-pressed={!draft.week&&draft.period === period} onClick={() => selectScope({ ...draft, period })}>{label}</button>)}
       </div>
       <label>员工<select value={draft.employeeId ?? ''} onChange={event => selectScope({ ...draft, employeeId: event.target.value || undefined })}>
         <option value="">全部员工</option>{employees.map(person => <option value={person.employeeId} key={person.employeeId}>{person.employee}</option>)}</select></label>
