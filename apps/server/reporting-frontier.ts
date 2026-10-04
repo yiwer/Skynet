@@ -1,6 +1,6 @@
 import { digest, type Database } from './database.js';
 import { HttpError } from './identities.js';
-import { attributionRevisions } from './qualification.js';
+import { currentMetricInputs } from './metric-current-inputs.js';
 import { inputIntegrityVersion } from './evidence-integrity.js';
 import { beijingDate } from '../../packages/contracts/reports.js';
 import type pg from 'pg';
@@ -13,14 +13,12 @@ async function reportingFrontier(db: Database, clock: () => Date, extra?:(client
   try {
     await client.query('BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY');
     const day = beijingDate(clock());
-    const snapshots = (await client.query(`SELECT id,device_id,source,source_session_id,hash,
-      encode(sha256(convert_to(manifest::text,'UTF8')),'hex') AS manifest,
-      encode(sha256(convert_to(provenance::text,'UTF8')),'hex') AS provenance,committed_at
-      FROM snapshots ORDER BY id LIMIT 20001`)).rows;
-    if (snapshots.length > 20000) throw new HttpError(413, '报告原件数量超过单次计算上限');
-    const revisions = await attributionRevisions(client, snapshots.map(row => row.id));
-    const people = (await client.query('SELECT id,name FROM employees ORDER BY id')).rows;
-    const devices = (await client.query('SELECT id,employee_id,enrolled_at FROM devices ORDER BY id')).rows;
+    // The guard only needs to detect a changed ledger; it does not consume each
+    // carrier's numeric revision. The complete metadata identity plus count AND
+    // maximum of each append-only proof ledger detects even out-of-order
+    // commits without rejoining every event for every composite guard.
+    const originals = await currentMetricInputs(client);
+    if (originals === undefined) throw new HttpError(413, '报告原件数量超过单次计算上限');
     const jobs = (await client.query(`SELECT DISTINCT ON(snapshot_id) snapshot_id,id,state,target_id,target_generation,
       encode(sha256(convert_to(config::text,'UTF8')),'hex') AS config,
       encode(sha256(convert_to(input::text,'UTF8')),'hex') AS input,
@@ -35,8 +33,8 @@ async function reportingFrontier(db: Database, clock: () => Date, extra?:(client
     const corrections=(await client.query('SELECT id,sequence FROM inference_corrections ORDER BY sequence')).rows;
     const additional=extra?await extra(client):undefined;
     await client.query('COMMIT');
-    return digest(JSON.stringify(['reporting-frontier-1', day,
-      snapshots.map(row => [row, revisions.get(row.id)]), people, devices, jobs, targets, integrity, gaps,
+    return digest(JSON.stringify(['reporting-frontier-2', day,
+      originals, jobs, targets, integrity, gaps,
       ...(corrections.length?[['inference-corrections-1',corrections]]:[]),...(extra?[additional]:[])]));
   } catch (error) { await client.query('ROLLBACK'); throw error; } finally { client.release(); }
 }
