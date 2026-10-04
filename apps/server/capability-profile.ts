@@ -8,7 +8,7 @@ import type { activityService } from './activity.js';
 import type { ReportService } from './reports.js';
 import type { workViewService } from './work-views.js';
 import { dailyPath, monday, addDays } from '../../packages/contracts/work-views.js';
-import type { DailyItem } from '../../packages/contracts/reports.js';
+import { beijingDate, type DailyItem } from '../../packages/contracts/reports.js';
 import { profileQuery, profileSections, type CapabilityProfile, type CapabilityProfilePage } from '../../packages/contracts/capability-profile.js';
 
 export async function migrateCapabilityProfiles(db: Database) {
@@ -99,7 +99,11 @@ export function capabilityProfileService(db: Database, assessments: ReturnType<t
         ({ sessionId, snapshotId, source, sourceSessionId, projects, dates, tokens, knownTokens, userTurns, toolCalls, verified, codeChanges, efficiency, rework, taskType, webPath, waitFraction: timing?.waitFraction ?? null }));
       const taskCounts = new Map<CapabilityProfile['taskDistribution'][number]['taskType'], number>();
       for (const session of sessions) taskCounts.set(session.taskType, (taskCounts.get(session.taskType) ?? 0) + 1);
-      const recentActivity: CapabilityProfile['recentActivity'] = { events: [], references: [], hasEarlier: false }, dates = [...activeDates].sort().reverse(), seenActivity = new Set<string>();
+      const receiptDates = (await db.query(`SELECT r.receipt->>'firstDisconnectedAt' AS disconnected,r.receipt->>'acknowledgedAt' AS acknowledged
+        FROM delivery_receipts r JOIN devices d ON d.id=r.device_id WHERE d.employee_id=$1`, [employeeId])).rows
+        .flatMap(row => [row.disconnected, row.acknowledged].filter(Boolean).map(time => beijingDate(new Date(time))))
+        .filter(date => date >= report.scope.from && date <= report.scope.to);
+      const recentActivity: CapabilityProfile['recentActivity'] = { events: [], references: [], hasEarlier: false }, dates = [...new Set([...activeDates, ...receiptDates])].sort().reverse(), seenActivity = new Set<string>();
       for (const [index, date] of dates.entries()) {
         const page = await activity.export({ date, employeeId });
         recentActivity.references.push({ date, version: page.version, path: '#activity?' + new URLSearchParams({ date, employeeId, version: page.version }) });

@@ -36,12 +36,14 @@ test('late delivery observations update the profile source identity without chan
     const path = '/api/capability-profiles/' + owner.employeeId, before = await (await fixture.api(owner, path)).json();
     const time = (ms: number) => new Date(fixture.base.getTime() + ms).toISOString();
     const receipt = await fixture.nativeApi('/api/delivery/receipts', owner.deviceCredential, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({
-      uploadId, snapshotId: session.snapshotId, capturedAt: time(0), acknowledgedAt: time(60000), disconnectedAttempts: 1, firstDisconnectedAt: time(1000), lastDisconnectedAt: time(1000) }) });
+      uploadId, snapshotId: session.snapshotId, capturedAt: time(0), acknowledgedAt: time(86460000), disconnectedAttempts: 1, firstDisconnectedAt: time(1000), lastDisconnectedAt: time(1000) }) });
     assert.equal(receipt.status, 200, await receipt.clone().text());
     const after = await (await fixture.api(owner, path)).json();
     assert.notEqual(after.version, before.version); assert.notEqual(after.frontierVersion, before.frontierVersion, 'delivery changes are part of the frozen source identity');
     assert.deepEqual(after.kpis, before.kpis); assert.equal(after.assessment.version, before.assessment.version);
-    assert.ok(after.recentActivity.events.some((event: any) => event.type === 'backfill'));
+    const backfill = after.recentActivity.events.find((event: any) => event.type === 'backfill');
+    assert.ok(backfill, 'a recorded reconnection remains visible on a day without new prompts');
+    assert.equal(backfill.timestamp, time(86460000));
     assert.deepEqual(await (await fixture.api(owner, path + '?version=' + before.version)).json(), before);
   } finally { await fixture.close(); }
 });
