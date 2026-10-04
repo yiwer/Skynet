@@ -5,7 +5,7 @@ import {pathToFileURL} from 'node:url';
 /** Keep the bounded failing suite's actual reporter output and nonzero result. */
 export async function runTests(files:string[],env:NodeJS.ProcessEnv=process.env){
   const shard=env.SKYNET_TEST_SHARD;
-  if(shard!==undefined&&!['1/2','2/2'].includes(shard))throw new Error('SKYNET_TEST_SHARD must be 1/2 or 2/2; omit it for the complete suite');
+  if(shard!==undefined&&!['1/2','2/2','1/4','2/4','3/4','4/4'].includes(shard))throw new Error('SKYNET_TEST_SHARD must be 1/2 or 2/2, or 1/4 through 4/4; omit it for the complete suite');
   // Each CI job has one active test file; fixtures retain their owned databases.
   // Sharding is not inherited by nested fixtures that invoke this entrypoint.
   try{const result=await ownedCommand(process.execPath,['--import','tsx','--test','--test-concurrency=1',...(shard?[`--test-shard=${shard}`]:[]),...files],
