@@ -1,0 +1,8 @@
+{
+  "name": "skynet-linux-test-runtime",
+  "private": true,
+  "description": "Fixed official Claude runtime for isolated Linux x64 loopback acceptance tests; not a product dependency.",
+  "dependencies": {
+    "@anthropic-ai/claude-code-linux-x64": "2.1.281"
+  }
+}
