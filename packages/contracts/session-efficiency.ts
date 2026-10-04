@@ -10,7 +10,7 @@ export const efficiencyQuerySchema=z.object({
   section:z.enum(['summaries','distributionPoints']).optional(),
   sort:z.enum(['date','tokens','prompts','code','verified','efficiency','rework']).default('date'),direction:z.enum(['asc','desc']).default('desc'),
   reviewOnly:z.enum(['true','false']).default('false'),
-  sessionId:z.string().regex(/^[a-f0-9]{64}$/).optional(),segmentOffset:z.coerce.number().int().min(0).max(100000).default(0),
+  sessionId:z.string().regex(/^[a-f0-9]{64}$/).optional(),segmentOffset:z.coerce.number().int().min(0).max(Number.MAX_SAFE_INTEGER).default(0),
 }).strict().refine(q=>!q.offset||!!q.version,'后续分页必须固定版本')
   .refine(q=>!q.section||!!q.version&&!q.sessionId&&!q.segmentOffset,'分区读取必须固定版本且不混用分段选择')
   .refine(q=>!q.sessionId||!!q.version&&!q.offset,'会话分段必须指定固定版本且不混用会话页码')

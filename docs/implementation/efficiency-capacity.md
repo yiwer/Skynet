@@ -45,6 +45,16 @@ version and cannot mix a session or segment selection. Current/recompute still
 use the original complete calculation; full recomputation rejects fixed or page
 selectors. Small complete results retain their previous shape.
 
+Fixed-session `segmentOffset` accepts safe nonnegative integers: the original
+100,000-message calculation bound is not a bound on the number of resulting
+agent/reply/gap segments. The cursor only addresses the already materialized
+collection; it never allocates or loops in proportion to the supplied number.
+Each response still reads at most 20 segments, with the same byte ceilings.
+The public 100,001 cursor was first rejected (RED), then returned an empty tail
+with the same fixed version and segment total; a missing fixed version and an
+unsafe integer remain invalid. This checks addressing and bounds, not a dynamic
+claim that a 200,000-segment fixture has been exercised.
+
 Web charts and review entries load fixed summary pages, selected conversations
 load their fixed segment pages, and table navigation stores actual preceding
 offsets. Chart rendering does not request a complete export. The explicit export

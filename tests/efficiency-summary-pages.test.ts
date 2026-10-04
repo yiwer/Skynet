@@ -19,5 +19,10 @@ test('efficiency charts read fixed summaries and distribution points without dow
     assert.deepEqual(points.distributions,page.distributions);
     const selected=summary.sessions[0];const detailResponse=await f.api(owner,'/api/session-efficiency?'+fixed+'&sessionId='+selected.sessionId);assert.equal(detailResponse.status,200);
     assert.equal((await detailResponse.json()).sessions[0].timing.segments.length,selected.timing.segmentTotal);
+    const beyond=await f.api(owner,'/api/session-efficiency?'+fixed+'&sessionId='+selected.sessionId+'&segmentOffset=100001');
+    assert.equal(beyond.status,200,await beyond.clone().text());const tail=await beyond.json();assert.equal(tail.version,page.version);
+    assert.deepEqual(tail.sessions[0].timing.segments,[]);assert.equal(tail.sessions[0].timing.segmentTotal,selected.timing.segmentTotal);assert.equal(tail.sessions[0].timing.nextSegmentOffset,null);
+    assert.equal((await f.api(owner,'/api/session-efficiency?'+scope+'&sessionId='+selected.sessionId+'&segmentOffset=100001')).status,400);
+    assert.equal((await f.api(owner,'/api/session-efficiency?'+fixed+'&sessionId='+selected.sessionId+'&segmentOffset=9007199254740992')).status,400);
   }finally{await f.close();}
 });
