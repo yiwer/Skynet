@@ -161,3 +161,11 @@ C:/Users/yiwer/AppData/Local/Packages/OpenAI.Codex_2p2nqsd0c76g0/LocalCache/Roam
 [在平台查看这次真实会话](https://skynet.91boy.cn/#03bf40a8-008d-4dfb-b091-8010372c1f2b?view=conversation)。证据位于接入目录的 `upgrade-0.2.4-evidence.json`、`upgrade-0.2.4-outside-status.json`、`upgrade-0.2.4-msix-status.json`、`upgrade-0.2.4-final-tasks.json`；临时升级任务均已移除，仅正式采集任务保持 Running。独立生产 API 核对结果为 `cli-routing-2026-10-03/production-session-green.json`。本轮修复与回归没有发起额外模型调用。
 
 22:49:50 服务端对话与 Trace 修订上线后，使用同一真实快照再次核验：默认 3 条用户/Agent 消息、4 条可展开上下文、2 次调用与 2 条结果、8 条原生 Trace。对话及工具原文完整一致，原件哈希不变，浏览器可展开工具并跳转结果、查看命令耗时与退出码；8 个生产视口/主题状态均无外层滚动或浏览器错误。完整发布指纹与验证入口见 [部署记录](deployment.md)。此次服务端发布不要求再次升级采集器、重新绑定设备或配置凭据。
+
+## V2 投递回执升级（2026-10-04）
+
+服务端 `v2-ec9b2d3bcd0b-1` 健康后，从同一固定 Git 构建私有 `@skynet/agent` **0.2.5**，支持 #36 的持久投递回执和 #35 的单调时钟拾取→可读 ACK 计时。归档 `E:/GenCode/Skynet-evidence/v2-2026-10-04/local-onboarding-release-0.2.5/skynet-agent-0.2.5.tgz`，SHA-256 `13293eae2d6ec935ddc475c927e71b2e217ae499292b451115643d25ae13242d`。没有发布公共 npm 或 GitHub Release。
+
+通过 Hidden / 当前用户 Limited 一次性任务在包外离线更新标准 npm，执行正常 `upgrade --state`；之后更新 MSIX npm，并独立复核标准入口。MSIX 安装仍导致标准 shim 缺失，按已核实归档仅修复标准 npm 入口，不重复升级后台。最终两个上下文均为 0.2.5 / running / connected，设备 ID、稳定状态目录、正式任务名称及后台实例一致；身份与 hooks 字节不变。所有本次一次性任务均已移除，正式采集任务保留 Running。
+
+旧的未知来源事件仍保留，Desktop 完整来源识别不因这次升级被认定通过；不重放旧原件、不扫描历史、不制造旧耗时。新回执在后续正常拾取与 ACK 后产生，真实数据何时到达取决于宿主新活动。证据在 `E:/GenCode/Skynet-evidence/v2-2026-10-04/` 的 `upgrade-0.2.5-evidence.json`、`upgrade-0.2.5-outside-final.json`、`upgrade-0.2.5-msix-status.json`、`upgrade-0.2.5-final-tasks.json`。

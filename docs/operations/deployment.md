@@ -179,3 +179,9 @@ sudo bash /opt/skynet/current/deploy/ubuntu-release.sh \
 发布后独立读取用户实际快照 `03bf40a8-008d-4dfb-b091-8010372c1f2b`：默认 1 条用户消息与 2 条 Agent 消息，4 条系统/环境上下文可选展开；2 次调用与 2 条结果跨两页逐字拼回，8 条 Trace 正常读取。原件仍为 106,317 bytes，SHA-256 与采集前本机文件及升级后下载一致。浏览器验证实际最终资产，完成上下文切换、工具展开及结果锚点跳转、全部 Trace 与命令耗时/退出码检查；320/768/1199/1280 × 浅深主题共 8 态，外层滚动、双栏重叠、浏览器错误均为 0，8 个内部滚动区的滚轮与到达尾端检查通过。侧栏已移除会把环境封套误计为提示词的旧展示行。
 
 本轮生产证据保存在 `E:/GenCode/Skynet-evidence/cli-routing-2026-10-03/`：`production-conversation.json`、`production-browser.json`；发布子目录 `deploy-v2-1dc46a1e8fb2-1` 含归档、部署日志、备份回执、`remote-verification.json` 和 `production-smoke.json`。隔离 UI 验收 45 态和移动端全展开尾部截图保存在 `conversation-2026-10-03/REPORT.md`，独立 HTTP/OAuth MCP、旧对话/统计及旧 Web 整链回归证据位于 `conversation-trace-2026-10-03/manifest.json` 与其中 `v2-public-compatibility/manifest.json`。本轮没有新增生产合成会话或额外模型调用。
+
+2026-10-04 10:58（北京时间）发布基础指标、对话阅读、组装处理及会话洞察 **`v2-ec9b2d3bcd0b-1`**。固定 Git `ec9b2d3bcd0b7e3b52d08d75b0dd329a69d7a047`，归档 SHA-256 `9eac51ddb1a54c3cc3dd5d85826cf9d313a19325de40063f0cc88a6ac0df45d5`，服务器源码 SHA-256 `e30ffb6ede8b22fa09d2a0aaf0a392d85cbbece0062821b7d70ee7bc26840edd`，镜像 `sha256:aa112e9cc425b028548909a259304a15947922ef6817a01d485a8c12a16807ca`。页面实际资产为 `index-DFiI2I_A.js` / `index-BavFiykW.css`。
+
+切换前一致备份完成，回执 `/opt/skynet/receipts/backup-20261004T025828Z-2082693.json`，备份 ID `457f564f-3f6f-45d6-994b-1abf62478d9a`，仍含 5 个原件对象、132,332 bytes。仅替换应用；数据库持续运行，previous 指向 `v2-1dc46a1e8fb2-1`。四个现有 nginx site 哈希不变，配置检查通过，证书续期 timer active；分析 Worker 仍未启用。
+
+24 项外部只读检查通过：HTTPS/资产/CSP、未认证读取拒绝、权限、指标固定版本导出、v3 对话及显式 v2、Trace、组装固定版本、洞察、处理固定版本和 OAuth issuer。已有真实会话仍是 106,317 bytes，SHA-256 `0efa7692784020f5ea2dead09df32b949e722039d9d32c865ab81583971cc437`；3 条消息、2 次工具调用、8 条 Trace 保留。浏览器在 1280×720 验证处理页和真实会话的工具/Trace 展开，文档尺寸等于视口、内部区域独立滚动、无控制台错误。证据在 `E:/GenCode/Skynet-evidence/v2-2026-10-04/deploy-v2-ec9b2d3bcd0b-1/`。本轮没有新增生产测试会话或模型调用；旧数据的计时/传输观察和未运行的模型分析保持未知，完整性能仍由 #54 跟踪。
