@@ -23,7 +23,7 @@ function Distribution({rows,sessions,onSelect}: {rows:SessionEfficiencyPage['dis
       const column=Math.min(9,Math.floor((90+session.efficiency.value/maximum*550-70)/59)),group=groups.get(column)??[];group.push(session);groups.set(column,group);}
     return [...groups].map(([column,items])=>({key:row.taskType+':'+column,left:70+column*59,top:index*54+9,label:`${taskTypeLabels[row.taskType]} · ${items.length} 个会话`,items}));
   });
-  return <section className="eff-card" aria-label="任务类型分布">
+  return <section className="eff-card eff-distribution-card" aria-label="任务类型分布">
     <header><div><h2>按任务类型的产效分布</h2><p>已验证结果 / 百万 Token · 竖线为中位数</p></div><div className="usage-view-toggle" role="group" aria-label="产效分布显示方式"><button aria-label="产效分布图表" aria-pressed={chart} onClick={()=>{detail.close();setChart(true);}}>图表</button><button aria-label="产效分布表格" aria-pressed={!chart} onClick={()=>{setChart(false);detail.close();}}>表格</button></div></header>
     {chart&&!known?<div className="eff-unknown" role="status" aria-label="产效数据状态"><strong>产效暂未知</strong><span>{unknownCount} 个会话</span></div>:chart?<div className="eff-chart-interaction" {...detail.boundary}><div className="eff-chart-scroll"><div className="eff-distribution-canvas"><svg viewBox={`0 0 760 ${height}`} className="eff-distribution" role="group" aria-label="按任务类型产效分布图">
       {[0,.25,.5,.75,1].map(f=><g key={f}><line x1={90+f*550} x2={90+f*550} y1="8" y2={rows.length*54+8}/><text x={90+f*550} y={rows.length*54+32} textAnchor="middle">{number(f*maximum)}</text></g>)}

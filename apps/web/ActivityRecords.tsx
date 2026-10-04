@@ -22,8 +22,9 @@ function Rhythm({page}:{page:ActivityPage}){
   const cells=Math.max(1,Math.floor(plot/44)),cellWidth=plot/cells,cell=(value:string)=>Math.min(cells-1,Math.floor((px(value)-left)/cellWidth));
   const targets=page.lanes.flatMap((lane,index)=>{
     const identities=new Map(lane.sessions.map((session,n)=>[session.id,`${sourceLabel(session.source)} · ${session.project||'未归类项目'} · 会话 ${n+1}`]));
-    const snapshotSessions=new Map([...lane.sessions.map(session=>[session.evidence.snapshotId,session.id] as const),...lane.points.map(point=>[point.evidence.snapshotId,point.sessionId] as const)]);
-    const identity=(evidence:ActivityEvidence,id=snapshotSessions.get(evidence.snapshotId))=>`${id?identities.get(id)??'会话来源':'会话来源'} · 原件 #${evidence.line}:${evidence.block}`;
+    const origin=(evidence:ActivityEvidence)=>`${evidence.snapshotId}:${evidence.line}:${evidence.block}:${evidence.textOffset}`;
+    const pointSessions=new Map(lane.points.map(point=>[origin(point.evidence),point.sessionId]));
+    const identity=(evidence:ActivityEvidence,id=pointSessions.get(origin(evidence)))=>`${id?identities.get(id)??'会话来源':'会话来源'} · 原件 #${evidence.line}:${evidence.block}`;
     const groups=new Map<number,{id:string;label:string;evidence:ActivityEvidence}[]>();
     const add=(id:string,label:string,evidence:ActivityEvidence,from:string,to=from)=>{for(let n=cell(from);n<=cell(to);n++){const items=groups.get(n)??[];items.push({id,label,evidence});groups.set(n,items);}};
     for(const session of lane.sessions)add('session:'+session.id,`${lane.employee} · 会话记录 · ${time(session.observedFrom)} — ${time(session.observedTo)} · ${identity(session.evidence,session.id)}`,session.evidence,session.observedFrom,session.observedTo);
