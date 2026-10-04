@@ -36,3 +36,8 @@ node --import tsx --test tests/session-efficiency.test.ts tests/session-efficien
 
 
 独立复核补充：截断后追加完整原生轮次曾错误返回总活动时长 168,000ms；公开复现 `independent-truncate-timing.txt` 为 RED。现保留已知 Agent 60,000ms / 回复 108,000ms，同时记录“历史起点无法证明”的无时间缺口，总活动时长为未知。正式两条计时用例 `40-truncate-timing-green.txt` 为 2/2（29.48 秒），包含未截断与截断后追加、固定历史完整导出。合 #45 后构建 `38-assessment-merge-build.txt` 和 HTTP/MCP/Web/实际下载旅程 `39-assessment-merge-public.txt` 1/1（21.52 秒）通过。
+
+
+原生顺序复核：Codex rust-v0.160.0 的 regular task 先发出 `turn_started`，随后记录用户输入。公开复现曾只计 Agent 20,000ms、等待 0ms；现按同轮真实 user 定位归属，并让上一轮完成边界保留到下一条用户消息。修复后 Agent 40,000ms、等待 62,000ms，与同版本等待报表一致；重叠区间求并集为 101,000ms。仍兼容 user-before-start，遇到并发/未知开始或新 Agent 业务事件不会借用旧完成边界。等待算法升级 `recorded-waits-2`，旧固定版本不改写。
+
+最终 `42-native-order-build.txt` 构建通过，`43-native-order-regression.txt` 效率公开回归 8/8（94.26 秒），`44-waits-regression.txt` 原等待公开/边界回归 3/3（28.75 秒）。该次实际八项效率回归不含早期命令误写的不存在 `waits.test.ts`；等待回归以 44 的实际三项为准。官方源与独立复现保存在外部证据目录。
