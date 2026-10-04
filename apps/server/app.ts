@@ -291,7 +291,9 @@ export async function createApp(options: { db: Database; rawDirectory: string; w
     return reply.header('Content-Disposition',`attachment; filename="skynet-session-efficiency-${value.version}.json"`).type('application/json').send(value);
   });
   const prompts=promptReportService(db,usage,insights);
-  const team=teamReportService(db,usage,prompts,waitReport,options.reportClock);
+  const assessments = assessmentService(db, usage, insights, waits, options.reportClock);
+  const people = capabilityPeopleService(db, assessments, options.reportClock);
+  const team=teamReportService(db,usage,prompts,waitReport,people,options.reportClock);
   app.post('/api/team-report/recompute',{onRequest:readerGuard},request=>team.recompute(request.body));
   app.post('/api/team-report/weekly/recompute',{onRequest:readerGuard},request=>team.weeklyRecompute(request.body));
   app.get('/api/team-report/weekly',{onRequest:readerGuard},request=>team.weekly(request.query));
@@ -308,12 +310,12 @@ export async function createApp(options: { db: Database; rawDirectory: string; w
     const data = await usage.export(request.query);
     return reply.header('Content-Disposition', `attachment; filename="skynet-usage-output-${data.version}.json"`).type('application/json').send(data);
   });
-  const assessments = assessmentService(db, usage, insights, waits, options.reportClock);
+
   const reviewNotes = reviewNotesService(db);
   app.get('/api/employees/:id/review-notes', { onRequest: readerGuard }, request => reviewNotes.read(z.uuid().parse((request.params as { id: string }).id), request.query));
   app.post('/api/employees/:id/review-notes', { onRequest: readerGuard }, async (request, reply) => reply.code(201).send(
     await reviewNotes.append(z.uuid().parse((request.params as { id: string }).id), request.headers.authorization, request.body)));
-  const people = capabilityPeopleService(db, assessments, options.reportClock);
+
   app.get('/api/capability-people', { onRequest: readerGuard }, request => people.read(request.query));
   app.post('/api/capability-people/recompute', { onRequest: readerGuard }, request => people.recompute(request.body));
   app.get('/api/capability-people/export', { onRequest: readerGuard }, async (request, reply) => {
