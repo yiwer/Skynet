@@ -11,12 +11,12 @@ const execute = promisify(execFile);
 const lifecycle = { login: 'not-verified', reboot: 'not-verified', sleepResume: 'not-verified', desktopIcon: 'not-verified' };
 type Registration = TaskRegistration;
 function powershell() { return join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe'); }
+function windowsArgument(value: string) { return `"${value.replace(/(\\*)"/g, '$1$1\\"').replace(/(\\+)$/, '$1$1')}"`; }
 function supervisorAction(installation: Installation, canonical: string) {
   const quote = (value: string) => `'${value.replaceAll("'", "''")}'`;
   // .NET Framework ProcessStartInfo has Arguments, not ArgumentList. Preserve
   // each Windows argv element, including trailing backslashes, as one argument.
-  const argument = (value: string) => `"${value.replace(/(\\*)"/g, '$1$1\\"').replace(/(\\+)$/, '$1$1')}"`;
-  const argumentsText = [installation.launcher, 'background', '--state', canonical].map(argument).join(' ');
+  const argumentsText = [installation.launcher, 'background', '--state', canonical].map(windowsArgument).join(' ');
   // Keep the task action alive across a supervisor crash. An authenticated
   // normal stop ends the action; no PID recovered from a file is authority.
   // The task's Hidden setting does not hide a console child. Start the exact
@@ -33,9 +33,17 @@ function legacySupervisorArguments(installation: Installation, canonical: string
   return `-NoProfile -NonInteractive -WindowStyle Hidden -EncodedCommand ${Buffer.from(script, 'utf16le').toString('base64')}`;
 }
 export async function launchCurrentSession(state: string, installation: Installation) {
-  // Node's hidden guardian survives the setup shell without PowerShell console
-  // creation semantics, and retries only the ChildProcess it actually starts.
-  const child = spawn(installation.node, [installation.launcher, process.platform === 'win32' ? 'background-guardian' : 'background', '--state', state],
+  if (process.platform === 'win32') {
+    // PowerShell callers can leave inheritable pipe handles in a detached Node
+    // descendant even with stdio:'ignore'. ShellExecute isolates the hidden
+    // guardian from those handles; it still owns and retries its actual child.
+    const launch = { file: installation.node, arguments: [installation.launcher, 'background-guardian', '--state', state].map(windowsArgument).join(' ') };
+    const script = `$ErrorActionPreference='Stop'; $r=$env:SKYNET_CURRENT_SESSION_LAUNCH | ConvertFrom-Json; Remove-Item Env:SKYNET_CURRENT_SESSION_LAUNCH; $i=New-Object System.Diagnostics.ProcessStartInfo; $i.FileName=$r.file; $i.Arguments=$r.arguments; $i.UseShellExecute=$true; $i.WindowStyle=[System.Diagnostics.ProcessWindowStyle]::Hidden; $p=[System.Diagnostics.Process]::Start($i); if($null -eq $p){throw 'Current-session guardian could not start'}; $p.Dispose()`;
+    await execute(powershell(), ['-NoProfile', '-NonInteractive', '-WindowStyle', 'Hidden', '-EncodedCommand', Buffer.from(script, 'utf16le').toString('base64')],
+      { windowsHide: true, timeout: 15_000, maxBuffer: 8192, env: { ...process.env, SKYNET_KEY: undefined, SKYNET_CURRENT_SESSION_LAUNCH: JSON.stringify(launch) } });
+    return;
+  }
+  const child = spawn(installation.node, [installation.launcher, 'background', '--state', state],
     { detached: true, windowsHide: true, stdio: 'ignore', env: { ...process.env, SKYNET_KEY: undefined } });
   child.on('error', () => undefined); child.unref();
 }
