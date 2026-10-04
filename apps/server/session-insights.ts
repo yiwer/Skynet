@@ -12,6 +12,7 @@ import type { AnalysisRun } from '../../packages/contracts/analysis.js';
 import { readInsightBatch } from './session-insight-batch.js';
 import { readNativeTurnState } from '../../packages/native/turn-state.js';
 import { inputIntegrityVersion } from './evidence-integrity.js';
+import type {MessageFacts} from '../../packages/contracts/message-facts.js';
 
 export async function migrateSessionInsights(db:Database){
   const client=await db.connect();try{
@@ -77,17 +78,25 @@ export function sessionInsightsService(db: Database, archive: ArchiveQuery, anal
     const map=new Map(values.map(row=>[`${row.snapshot_id}/${row.version}`,row.payload as SessionInsights]));
     return requested.map(row=>{const value=map.get(`${row.snapshotId}/${row.version}`);if(!value)throw new HttpError(404,'会话洞察版本不存在');return value;});
   }
-  return { read, readMany: (snapshotIds:string[], options:{full?:boolean}={}) => readInsightBatch(db,raw,snapshotIds,options.full), readVersions };
+  async function readMessageFacts(views:SessionInsights[]):Promise<(MessageFacts&{snapshotId:string;version:string|null})[]> {
+    if(views.length>20000)throw new HttpError(413,'提示词原件数量超过范围上限');
+    const rows=(await db.query('SELECT version,snapshot_id,payload FROM insight_fact_revisions WHERE version=ANY($1::text[])',[views.flatMap(view=>view.messageFactsVersion?[view.messageFactsVersion]:[])])).rows;
+    const values=new Map(rows.map(row=>[`${row.snapshot_id}/${row.version}`,row.payload.messageFacts as MessageFacts]));
+    return views.map(view=>{if(!view.messageFactsVersion)return {snapshotId:view.snapshotId,version:null,complete:false,messages:[]};
+      const value=values.get(`${view.snapshotId}/${view.messageFactsVersion}`);if(!value)throw new HttpError(404,'提示词原件元数据版本不存在');
+      return {...value,snapshotId:view.snapshotId,version:view.messageFactsVersion};});
+  }
+  return { read, readMany: (snapshotIds:string[], options:{full?:boolean}={}) => readInsightBatch(db,raw,snapshotIds,options.full), readVersions,readMessageFacts };
 }
 
-export function projectSessionInsights(snapshotId:string,input:SessionInsights['input'],run:AnalysisRun|undefined,facts:SessionInsights['facts'],sourceState:SessionInsights['sourceState'],historical=false):SessionInsights {
+export function projectSessionInsights(snapshotId:string,input:SessionInsights['input'],run:AnalysisRun|undefined,facts:SessionInsights['facts'],sourceState:SessionInsights['sourceState'],historical=false,messageFactsVersion?:string):SessionInsights {
   const usable=run?.state==='succeeded'&&(historical||run.applicable)&&run.result?.insights;
   const state = !run ? 'unavailable' : run.state === 'failed' ? 'failed' : run.state === 'superseded'||run.state==='succeeded'&&!run.applicable&&!historical ? 'stale' : run.state === 'succeeded' ? !usable?'legacy':usable.complete&&run.result?.processing?.complete?'complete':'partial' : 'pending';
   const analysisVersion = run ? {id:run.id,generation:run.generation,prompt:run.config.promptVersion,configuration:run.config.configurationHash,applicable:run.applicable}:null;
   const complete=!!usable&&usable.complete&&run?.result?.processing?.complete===true;
   const identity = [snapshotId,input.hash,input.parserVersion,input.attributionRevision,analysisVersion ? [analysisVersion.id,analysisVersion.generation,analysisVersion.prompt,analysisVersion.configuration,analysisVersion.applicable] : null,
-    state,outputFactsVersion,inputIntegrityVersion,sourceState ? [sourceState.version,sourceState.turn.state,sourceState.turn.turnId??null,sourceState.turn.line??null,sourceState.turn.timestamp??null] : null,'session-insights-read-2'];
-  return { version:digest(JSON.stringify(identity)),factsVersion:outputFactsVersion,snapshotId,input,state,analysisVersion,sourceState,
+    state,outputFactsVersion,inputIntegrityVersion,sourceState ? [sourceState.version,sourceState.turn.state,sourceState.turn.turnId??null,sourceState.turn.line??null,sourceState.turn.timestamp??null] : null,'session-insights-read-3',messageFactsVersion??null];
+  return { version:digest(JSON.stringify(identity)),factsVersion:outputFactsVersion,snapshotId,input,state,analysisVersion,sourceState,...(messageFactsVersion?{messageFactsVersion}:{}),
     inferences:usable||null,metrics:{verified:complete?usable!.outcomes.filter(v=>v.status==='verified').length:null,claimed:complete?usable!.outcomes.filter(v=>v.status==='claimed').length:null,
       rework:complete&&usable!.prompts.filter(p=>!p.first).every(p=>p.rework!==null)?usable!.prompts.filter(p=>!p.first&&p.rework).length:null,
       clarifications:complete&&usable!.replies.every(r=>r.clarification!==null)?usable!.replies.filter(r=>r.clarification).length:null},facts };

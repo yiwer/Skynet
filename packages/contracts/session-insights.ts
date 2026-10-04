@@ -29,6 +29,7 @@ export type RecordedFact = {value:number|null;complete:boolean;evidence:InsightC
 export const sessionInsightsQuery = z.object({ analysisId: z.uuid().optional(),version:z.string().regex(/^[a-f0-9]{64}$/).optional() }).strict();
 export type SessionInsights = {
   version: string; factsVersion:string; snapshotId: string; state: 'unavailable'|'pending'|'failed'|'legacy'|'stale'|'partial'|'complete';
+  messageFactsVersion?:string;
   analysisVersion: { id: string; generation: number; prompt: string; configuration: string; applicable: boolean } | null;
   input: { hash: string; parserVersion: string; attributionRevision: string };
   metrics: { verified: number|null; claimed: number|null; rework: number|null; clarifications: number|null };
