@@ -95,7 +95,7 @@ export function capabilityProfileService(db: Database, assessments: ReturnType<t
       if (stored) return stored.payload;
     }
     const scope = { period: q.period ?? requested?.selection?.period ?? 'since-enrollment' as const, preset: q.preset ?? requested?.preset ?? '默认' as const };
-    const content = await consistentReportingInputs(db, clock, async () => {
+    const content = await consistentReportingInputs(db, clock, () => assessments.withProfile(full,async () => {
       const head = full ? await assessments.recompute(employeeId, scope) : null;
       const assessment = await assessments.export(employeeId, { ...scope, ...(head ? { version: head.version } : {}) });
       if (requested && assessment.version !== requested.version) throw new HttpError(409, '此历史评估尚无完整画像；仍可读取固定评估');
@@ -131,7 +131,7 @@ export function capabilityProfileService(db: Database, assessments: ReturnType<t
         sessions, taskDistribution: [...taskCounts].sort(([a], [b]) => a.localeCompare(b)).map(([taskType, sessions]) => ({ taskType, sessions })), recentActivity,
         work: await workContent(employeeId, assessment.range.from, assessment.range.to, activeDates),
         references: { efficiency: { version: efficiencyReport.version, metricVersion: efficiencyReport.metricVersion, path: '#efficiency?' + new URLSearchParams({ period: scope.period, employeeId, version: efficiencyReport.version }) } } };
-    }, async client => ({
+    }), async client => ({
       delivery: (await client.query('SELECT device_id,upload_id,snapshot_id,receipt_hash,received_at FROM delivery_receipts ORDER BY device_id,upload_id')).rows,
       devices: (await client.query('SELECT id,name,active FROM devices WHERE employee_id=$1 ORDER BY id', [employeeId])).rows,
       // Source corrections invalidate the composition; derived preparation is
