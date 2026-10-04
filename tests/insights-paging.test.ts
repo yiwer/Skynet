@@ -33,7 +33,7 @@ test('a verified 20-turn session exposes every insight and fact through bounded 
     assert.equal(new Set(collected.testsContributions!.map(row=>row.eventId)).size,20);assert.equal(collected.testsContributions!.reduce((sum,row)=>sum+row.value,0),60);
     for(const prompt of collected.prompts!){const cite=prompt.citations[0];assert.equal(cite.inputSnapshotId,f.record.snapshotId);assert.equal(cite.inputLocation.kind,'event');assert.ok(cite.origin.eventId);}
     assert.deepEqual(await read('?version='+first.version),first);assert.deepEqual(await read('?analysisId='+f.analysisId),first);
-    for(const query of ['?offset=1','?section=prompts&offset=1','?version='+first.version+'&offset=1','?version='+first.version+'&section=prompts&offset=21','?version='+first.version+'&section=invalid'])assert.equal((await f.api(f.owner,f.path+query)).status,400,query);
+    for(const query of ['?offset=1','?section=prompts','?section=prompts&offset=0','?section=prompts&offset=1','?version='+first.version+'&offset=1','?version='+first.version+'&section=prompts&offset=21','?version='+first.version+'&section=invalid'])assert.equal((await f.api(f.owner,f.path+query)).status,400,query);
     assert.equal((await f.api(f.owner,f.path+'?version='+first.version+'&analysisId='+randomUUID())).status,409);
     const last=collected.prompts!.at(-1)!;
     const corrected=await f.api(f.owner,`/api/snapshots/${f.record.snapshotId}/inference-corrections`,{requestId:randomUUID(),expectedVersion:first.version,kind:'rework',promptEvent:last.event,value:true,reason:'核对最后一轮'});

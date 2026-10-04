@@ -30,7 +30,7 @@ export const insightSections=['prompts','replies','outcomes','suggestions','code
 export type InsightSection=typeof insightSections[number];
 export const sessionInsightsQuery = z.object({ analysisId: z.uuid().optional(),version:z.string().regex(/^[a-f0-9]{64}$/).optional(),
   section:z.enum(insightSections).optional(),offset:z.coerce.number().int().min(0).max(200000).default(0)
-}).strict().refine(q=>q.offset===0||!!q.version&&!!q.section,'后续洞察分页必须固定版本与部分');
+}).strict().refine(q=>!q.section&&q.offset===0||!!q.version&&!!q.section,'洞察分区分页必须固定版本与部分');
 export type SessionInsights = {
   sourceAvailability?: { state:'unavailable'; reason:'missing'|'unreadable'|'hash-mismatch' };
   corrections?:{version:string;appliedIds:string[];pendingIds:string[]};
