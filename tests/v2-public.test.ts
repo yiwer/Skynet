@@ -265,7 +265,8 @@ test('V2 public originals → conversation and metrics Web → real HTTPS OAuth 
     await expect(usagePage.getByRole('region', { name: '会话用量', exact: true }).getByRole('cell', { name: '22', exact: true })).toBeVisible();
     const downloadPending = page.waitForEvent('download'); await usagePage.getByRole('button', { name: '导出当前版本', exact: true }).click();
     const download = await downloadPending; const downloadPath = await download.path(); assert.ok(downloadPath);
-    assert.deepEqual(JSON.parse(await readFile(downloadPath!, 'utf8')), await (await api('/api/usage-output?' + params(filteredSelection))).json());
+    const downloadedUsage=JSON.parse(await readFile(downloadPath!, 'utf8'));
+    assert.deepEqual(downloadedUsage, await (await api('/api/usage-output/export?' + params({...filteredSelection,version:downloadedUsage.version}))).json());
     const addedId = randomUUID(); await upload(encoded([native('user', '后续新增会话，不应改变旧指标版本', undefined, addedId)]), addedId);
     await usagePage.getByRole('button', { name: '从原件重算', exact: true }).click();
     await expect(usagePage.getByRole('region', { name: '会话用量', exact: true }).getByRole('link', { name: '查看会话', exact: true })).toHaveCount(2);

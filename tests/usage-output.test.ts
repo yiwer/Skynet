@@ -4,6 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { createSandbox } from './support.js';
 import { createApp } from '../apps/server/app.js';
 import { connect, digest } from '../apps/server/database.js';
+import {collectUsage} from './usage-pages-support.js';
 
 test('Codex 0.160 new sessions count their first native usage while copied or incomplete beginnings stay unknown', { timeout: 120000 }, async () => {
   const sandbox = await createSandbox(), db = connect(sandbox.env.DATABASE_URL!);
@@ -69,8 +70,9 @@ test('Codex 0.160 new sessions count their first native usage while copied or in
       project:'/synthetic/token-only',hash:digest(tokenOnly),byteLength:tokenOnly.length,qualifiedAt:timestamp,capability:'unverified'},device.deviceCredential,'POST');
     const usage=(await api('/api/usage-output?period=since-enrollment')).json();
     const today=new Date(now.getTime()+8*3600000).toISOString().slice(0,10);
-    assert.deepEqual(usage.employees[0].activeDates,[today],'pure Token metadata does not create a business activity day');
-    assert.equal(usage.employees[0].daily.find((day:any)=>day.date!==today).activeSessions,0);
+    const complete=await collectUsage(usage,async(section,offset)=>(await api('/api/usage-output?'+new URLSearchParams({period:'since-enrollment',version:usage.version,section,offset:String(offset)}))).json());
+    assert.deepEqual(complete.employees[0].activeDates,[today],'pure Token metadata does not create a business activity day');
+    assert.equal(complete.employees[0].daily.find((day:any)=>day.date!==today).activeSessions,0);
 
   } finally { await app?.close(); await db.end(); await sandbox.close(); }
 });
@@ -116,7 +118,8 @@ test('usage output groups native outcomes by original employee and date across a
     assert.equal(selected.outputs.tests.known, 2); assert.equal(selected.employees.length, 1);
     assert.equal(selected.sessions.filter((row: any) => row.selected).length, 1);
     assert.ok(selected.sessions.some((row: any) => !row.selected), 'other employees remain available as grey scatter references');
-    assert.deepEqual((await api(`/api/usage-output/export?period=since-enrollment&version=${first.version}`)).json(), first);
+    const completeFirst=await collectUsage(first,async(section,offset)=>(await api('/api/usage-output?'+new URLSearchParams({period:'since-enrollment',version:first.version,section,offset:String(offset)}))).json());
+    assert.deepEqual((await api(`/api/usage-output/export?period=since-enrollment&version=${first.version}`)).json(), completeFirst);
     assert.equal((await api(`/api/usage-output?period=since-enrollment&version=${first.version}&employeeId=${beta.employeeId}`)).statusCode, 409);
     assert.deepEqual((await api('/api/usage-output/recompute', { period: 'since-enrollment' }, alpha.readerCredential, 'POST')).json(), report);
     await app.close(); app = await createApp({ db, rawDirectory: sandbox.env.RAW_DIRECTORY! });

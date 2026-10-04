@@ -12,6 +12,7 @@ import { stop } from './support.js';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { chromium, expect, type Browser } from '@playwright/test';
+import {collectUsage} from './usage-pages-support.js';
 
 const json = (body: unknown): RequestInit => ({ method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
 const hash = (bytes: Buffer) => createHash('sha256').update(bytes).digest('hex');
@@ -85,13 +86,18 @@ test('usage output exposes the same verified contributions over HTTP, OAuth MCP,
     const mcp = await client.callTool({name:'read_usage_output',arguments:{period:'since-enrollment',version:report.version}});
     assert.notEqual(mcp.isError,true);
     assert.deepEqual(JSON.parse((mcp.content as {text:string}[])[0]!.text),report);
-    assert.deepEqual(await(await sandbox.api('/api/usage-output/export?period=since-enrollment&version='+report.version,employee.readerCredential)).json(),report);
+    const complete=await collectUsage(report,async(section,offset)=>{
+      const response=await sandbox.api('/api/usage-output?'+new URLSearchParams({period:'since-enrollment',version:report.version,section,offset:String(offset)}),employee.readerCredential);
+      assert.equal(response.status,200);return response.json();
+    });
+    assert.deepEqual(await(await sandbox.api('/api/usage-output/export?period=since-enrollment&version='+report.version,employee.readerCredential)).json(),complete);
     const peer=await sandbox.provision('参照员工');
     const peerDevice=await(await sandbox.api('/api/devices/enroll',peer.enrollmentCredential,json({installationId:randomUUID(),name:'reference'}))).json();
     const peerBytes=Buffer.from(JSON.stringify({...message('user','另一个合成任务'),timestamp:new Date().toISOString()})+'\n');
     await sandbox.api('/api/chunks/'+hash(peerBytes),peerDevice.deviceCredential,{method:'PUT',headers:{'Content-Type':'application/octet-stream'},body:peerBytes});
     await sandbox.api('/api/snapshots',peerDevice.deviceCredential,json({protocolVersion:1,sourceSessionId:randomUUID(),source:'codex-desktop',sourceVersion:'unsupported-synthetic',sourceOs:'win32',project:'/synthetic/reference',hash:hash(peerBytes),byteLength:peerBytes.length,qualifiedAt:new Date().toISOString(),capability:'unverified'}));
     browser=await chromium.launch({headless:true});const context=await browser.newContext();const page=await context.newPage();
+    const automaticExports:string[]=[];page.on('request',request=>{if(new URL(request.url()).pathname==='/api/usage-output/export')automaticExports.push(request.url());});
     await context.route('**/*',async route=>{
       if(new URL(route.request().url()).origin!==sandbox.origin)return route.abort();
       const response=await sandbox.fetchTls(route.request().url(),{method:route.request().method(),headers:await route.request().allHeaders(),body:route.request().postData()});
@@ -104,6 +110,7 @@ test('usage output exposes the same verified contributions over HTTP, OAuth MCP,
     await expect(panel.getByRole('heading',{name:'每人产出',exact:true})).toBeVisible();
     await expect(panel.getByRole('heading',{name:'会话：Token 与已验证结果',exact:true})).toBeVisible();
     await expect(panel.getByRole('heading',{name:'每日 Token 输入',exact:true})).toBeVisible();
+    assert.deepEqual(automaticExports,[],'charts read fixed sections without automatic full export');
     const outputRow=panel.getByRole('region',{name:'每人产出',exact:true}).getByRole('row').filter({hasText:'真实链合成洞察'});
     await expect(outputRow).toContainText('+2 / −1'); await expect(outputRow).toContainText('2 / 3');
     await panel.getByRole('button',{name:'会话散点切换为表格',exact:true}).click();
