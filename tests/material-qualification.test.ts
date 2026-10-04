@@ -161,8 +161,10 @@ test('material-first → original normal source qualification versions activity 
     const mcpSnapshot=await client.callTool({name:'read_snapshot',arguments:{snapshotId:bSnapshot}});assert.ok(JSON.stringify(mcpSnapshot).includes('after-enrollment'));
     browser=await chromium.launch();const page=await browser.newPage({ignoreHTTPSErrors:true});await page.goto(s.origin+`/#${aSnapshot}`);await page.getByLabel('个人读取凭据').fill(B.readerCredential);await page.getByRole('button',{name:'进入存档',exact:true}).click();
     await expect(page.getByText('甲接入后真正原活动🛰',{exact:true}).first()).toBeVisible();
-    await page.getByRole('link',{name:'查看采集资格原件',exact:true}).nth(1).click();await expect(page.getByRole('region',{name:'命中证据',exact:true})).toContainText('甲接入后真正原活动🛰');
+    await page.getByRole('link',{name:'时间线',exact:true}).click();
+    await page.getByRole('link',{name:'采集来源',exact:true}).nth(1).click();await expect(page.getByRole('region',{name:'命中证据',exact:true})).toContainText('甲接入后真正原活动🛰');
     await page.goto(s.origin+`/#${aSnapshot}`);
+    await page.getByRole('link',{name:'时间线',exact:true}).click();
     await page.getByRole('link',{name:'原始材料第 3 行',exact:true}).first().click();await expect(page.getByRole('region',{name:'命中证据',exact:true})).toContainText('甲接入后真正原活动🛰');
     await writeFile(join(s.directory,'material-qualification-evidence.json'),JSON.stringify({initial,qualified,oldHistory,newer,currentReport,frozenReport,project,weekly,frozenProject,frozenWeek,stats,rawUnchanged:true,provider:'synthetic execution seam; no paid/native model'},null,2));console.log(`Material qualification evidence: ${s.directory}`);
   } finally {clearInterval(lease);await client?.close();await browser?.close();await db.end();await s.close();}

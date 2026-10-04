@@ -9,8 +9,8 @@ import { beijingDate } from '../../packages/contracts/reports.js';
 import { monday, addDays } from '../../packages/contracts/work-views.js';
 import { inputIntegrityVersion } from './evidence-integrity.js';
 import { materialSource } from './material-provenance.js';
-import { materializeMetricInput } from './metric-inputs.js';
-import { attributionRevisionSql } from './qualification.js';
+import { metricInputBatch, type MetricInputFacts } from './metric-inputs.js';
+import { attributionRevisions } from './qualification.js';
 
 const catalogVersion = `recorded-metrics-3/${statisticsExtractorVersion}`;
 const definition = '仅统计已验证原件中接入后、按北京时间来源日期归期的活动。eventId 去重；已验证服务器恢复链归为同一会话，未确认副本保持独立。员工和项目沿用每条活动的原始归属。会话数为所选范围内有业务事件的去重会话数，跨日或多人参与的会话不可直接相加；仅有原生 Token 记录的日期保留用量，不增加会话、轮次或调用。轮次、调用和已知 Token 可相加。Token 未知单列，不当作零或参加比值。';
@@ -134,7 +134,9 @@ export function metricsService(db: Database, raw: RawStore, clock: () => Date = 
       const scope = await resolveScope(q, client), scopeKey = digest(JSON.stringify(scope));
       const lock = (await client.query('SELECT pg_try_advisory_xact_lock(hashtextextended($1,7402138)) AS locked', [scopeKey])).rows[0];
       if (!lock.locked) throw new HttpError(409, '该指标范围正在计算，请稍后重试；固定版本仍可读取');
-      const events = (await client.query(`SELECT o.*,e.name AS employee FROM effective_event_origins o JOIN employees e ON e.id=o.employee_id
+      const events = (await client.query(`SELECT o.event_id,o.snapshot_id,o.employee_id,e.name AS employee,o.device_id,o.source,
+        o.source_session_id,o.project,o.source_date,o.role,o.line,o.block,o.material_id,o.qualification_revision,o.proof_snapshot_id
+        FROM effective_event_origins o JOIN employees e ON e.id=o.employee_id
         WHERE o.context='after-enrollment' AND o.source_date BETWEEN $1 AND $2
         AND ($3::uuid IS NULL OR o.employee_id=$3) AND ($4::text IS NULL OR o.source=$4) AND ($5::text IS NULL OR o.project=$5)
         ORDER BY o.event_id LIMIT ${limits.events + 1}`, [scope.from, scope.to, q.employeeId ?? null, q.source ?? null, q.project ?? null])).rows as Event[];
@@ -163,10 +165,12 @@ export function metricsService(db: Database, raw: RawStore, clock: () => Date = 
         UNION
         SELECT p.id FROM selected x JOIN snapshots s ON s.id=x.id JOIN snapshots p ON p.id=(s.provenance->>'sourceSnapshotId')::uuid
           WHERE s.provenance->>'relation' IN ('verified-restoration','same-device-continuation')
-      ) SELECT s.*,d.employee_id,d.enrolled_at,e.name AS employee,${attributionRevisionSql('s.id')}::text AS attribution_revision FROM selected x JOIN snapshots s ON s.id=x.id
+      ) SELECT s.*,d.employee_id,d.enrolled_at,e.name AS employee FROM selected x JOIN snapshots s ON s.id=x.id
         JOIN devices d ON d.id=s.device_id JOIN employees e ON e.id=d.employee_id ORDER BY s.committed_at,s.id LIMIT ${limits.snapshots + 1}`,
       [JSON.stringify(nativeInputs), [...new Set(events.map(event => event.snapshot_id))]])).rows as Snapshot[];
       if (snapshots.length > limits.snapshots) throw bounded();
+      const revisions = await attributionRevisions(client, snapshots.map(snapshot => snapshot.id));
+      for (const snapshot of snapshots) snapshot.attribution_revision = revisions.get(snapshot.id)!;
       const byId = new Map(snapshots.map(s => [s.id, s]));
       const materialRoots = new Map<string, string>();
       const materialNative = new Map<string, string>();
@@ -240,7 +244,9 @@ export function metricsService(db: Database, raw: RawStore, clock: () => Date = 
       const candidates = relevantSnapshots.filter(s => !subsumed.has(s.id));
       let totalBytes = 0; const rawInputs: unknown[] = [];
       const rawBuffers = new Map<string, Buffer>();
-      const materialized = new Map<string, Awaited<ReturnType<typeof materializeMetricInput>>>();
+      const materialized = new Map<string, MetricInputFacts>();
+      const inputBatch = await metricInputBatch(client, candidates.map(record => ({ snapshotId: record.id, attributionRevision: record.attribution_revision,
+        hash: record.hash, source: record.source, sourceVersion: record.manifest.sourceVersion, manifest: record.manifest })), full);
       const sliceGroups = new Map<string, Slice[]>();
       for (const slice of slices.values()) {
         const key = JSON.stringify([slice.sessionId, slice.employeeId, slice.project]);
@@ -259,11 +265,11 @@ export function metricsService(db: Database, raw: RawStore, clock: () => Date = 
           && (q.project === undefined || record.manifest.project === q.project);
         totalBytes += record.manifest.byteLength; if (totalBytes > limits.rawBytes) throw bounded();
         rawInputs.push([record.id, record.hash, record.manifest.sourceVersion, record.enrolled_at?.toISOString(), record.provenance]);
-        let parsed: Awaited<ReturnType<typeof materializeMetricInput>>, content: Buffer;
+        let parsed: MetricInputFacts, content: Buffer;
         try {
           content = await raw.read(record.device_id, record.hash);
-          parsed = await materializeMetricInput(client, { snapshotId: record.id, attributionRevision: record.attribution_revision,
-            bytes: content, hash: record.hash, source: record.source, sourceVersion: record.manifest.sourceVersion, full });
+          parsed = inputBatch.read({ snapshotId: record.id, attributionRevision: record.attribution_revision,
+            bytes: content, hash: record.hash, source: record.source, sourceVersion: record.manifest.sourceVersion, manifest: record.manifest });
         }
         catch (error) {
           // A competing scope can materialize this same input after our
@@ -336,8 +342,8 @@ export function metricsService(db: Database, raw: RawStore, clock: () => Date = 
         }
         let facts = materialized.get(key);
         if (!facts) {
-          facts = await materializeMetricInput(client, { snapshotId: record.id, attributionRevision: record.attribution_revision,
-            materialId: first.material_id ?? undefined, bytes: content, hash, source: record.source, sourceVersion: record.manifest.sourceVersion, full });
+          facts = inputBatch.read({ snapshotId: record.id, attributionRevision: record.attribution_revision,
+            materialId: first.material_id ?? undefined, bytes: content, hash, source: record.source, sourceVersion: record.manifest.sourceVersion });
           materialized.set(key, facts);
         }
         const excluded = new Set(facts.excludedUserLines);
@@ -345,6 +351,7 @@ export function metricsService(db: Database, raw: RawStore, clock: () => Date = 
           if (excluded.has(event.line)) excludedTurns.add(JSON.stringify([event.snapshot_id, event.material_id, event.line]));
         }
       }
+      await inputBatch.flush();
       for (const slice of slices.values()) for (const turn of slice.turns) if (excludedTurns.has(turn)) slice.turns.delete(turn);
       for (const slice of slices.values()) if (!slice.usage.size) slice.reasons.add('来源未上报可归属的 Token');
       const selected = [...slices.values()], sessions = summarize(selected); if (sessions.length > limits.sessions) throw bounded();
