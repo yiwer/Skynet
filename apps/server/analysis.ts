@@ -12,6 +12,7 @@ import { eventOrigins } from './provenance.js';
 import type { EventOrigin } from '../../packages/contracts/provenance.js';
 import { analysisProjection, analysisTransaction, migrateQueue, sweepQueue } from '../analysis/queue.js';
 import { attributionRevision, attributionRevisionSql } from './qualification.js';
+import { primaryInputCoverage } from './evidence-integrity.js';
 
 export async function migrateAnalysis(db: Database) {
   const client = await db.connect();
@@ -52,7 +53,7 @@ export async function prepareAnalysisInput(db: Database, archive: ArchiveQuery, 
     const attributed = activityFor(parsed.events, record.manifest.enrolledAt, undefined, origins);
     const input: AnalysisInput = { snapshotId, hash: record.hash, parserVersion: parsed.parserVersion, source: record.source,
       sourceVersion: record.manifest.sourceVersion, eventCount: parsed.events.length, attributionRevision: revision, events: attributed.events,
-      coverage: { unrecognizedLines: parsed.unrecognizedLines, partialLine: parsed.partialLine,
+      coverage: { unrecognizedLines: primaryInputCoverage(bytes, record.source, parsed).unrecognizedLines, partialLine: parsed.partialLine,
         excludedMaterials: record.manifest.capture?.materials.length ?? 0, captureGaps: record.manifest.capture?.gaps ?? [],
         scope: '当前不可变主原件的全部已解析事件；未知行、未闭合末行及关联材料未进入本次分析；这不表示这些范围没有活动。' } };
     if (!input.eventCount) throw new HttpError(422, '原件没有可分析的已解析事件；仍可下载完整原件');

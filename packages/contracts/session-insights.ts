@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import type { AnalysisItem } from './analysis.js';
+import type { NativeTurnState } from '../native/turn-state.js';
 export const taskTypes = ['implementation','fix','investigation','refactor','test','operations','documentation','unknown'] as const;
 export const taskTypeLabels: Record<typeof taskTypes[number],string> = { implementation:'实现',fix:'修复',investigation:'排查',refactor:'重构',test:'测试',operations:'运维',documentation:'整理',unknown:'未知' };
 export const promptElementLabels = { goal:'目标',constraints:'约束',context:'上下文',acceptance:'验收标准' };
@@ -32,5 +33,6 @@ export type SessionInsights = {
   input: { hash: string; parserVersion: string; attributionRevision: string };
   metrics: { verified: number|null; claimed: number|null; rework: number|null; clarifications: number|null };
   inferences:SessionInferences|null;
+  sourceState?: { version: 'native-turn-state-1'; turn: NativeTurnState };
   facts: Record<'codeChanges'|'tests'|'commits', RecordedFact>;
 };
