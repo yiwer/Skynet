@@ -25,8 +25,10 @@ import type { sessionInsightsService } from './session-insights.js';
 import { sessionInsightsQuery } from '../../packages/contracts/session-insights.js';
 import { waitsQuerySchema } from '../../packages/contracts/waits.js';
 import type { waitsService } from './waits.js';
+import type { waitReportService } from './wait-report.js';
+import { waitReportQuerySchema } from '../../packages/contracts/wait-report.js';
 
-export async function registerMcp(app: FastifyInstance, db: Database, archive: ArchiveQuery, publicOrigin: string, analysis: AnalysisService, reports: ReportService, coverage: CoverageService, workStatistics: WorkStatisticsService, workViews: WorkViewService,operations:ServerOperationsService, conversation: ReturnType<typeof conversationQuery>, metrics: ReturnType<typeof metricsService>, assembly: ReturnType<typeof assemblyService>, processing: ReturnType<typeof processingService>, insights:ReturnType<typeof sessionInsightsService>, waits:ReturnType<typeof waitsService>) {
+export async function registerMcp(app: FastifyInstance, db: Database, archive: ArchiveQuery, publicOrigin: string, analysis: AnalysisService, reports: ReportService, coverage: CoverageService, workStatistics: WorkStatisticsService, workViews: WorkViewService,operations:ServerOperationsService, conversation: ReturnType<typeof conversationQuery>, metrics: ReturnType<typeof metricsService>, assembly: ReturnType<typeof assemblyService>, processing: ReturnType<typeof processingService>, insights:ReturnType<typeof sessionInsightsService>, waits:ReturnType<typeof waitsService>, waitReport:ReturnType<typeof waitReportService>) {
   const { guard } = await registerMcpAuth(app, db, publicOrigin);
   const offset = z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).default(0);
   const snapshotId = z.uuid().describe('Immutable snapshot ID from list_sessions, never a mutable session ID');
@@ -60,6 +62,7 @@ export async function registerMcp(app: FastifyInstance, db: Database, archive: A
       inputSchema: processingQuery }, input => result(() => processing(input)));
     mcp.registerTool('get_report_summary', { description: '读取来源日期归期、去重且版本化的基础用量。Token 未知单列；会话可下钻原件。后续页传入同一 version 和 nextOffset，不混用新版本。',
       annotations, inputSchema: metricsQuerySchema }, input => result(() => metrics.readMetrics(input)));
+    mcp.registerTool('read_wait_report', { description:'按固定等待来源读取中位数/P90、长等待与并行占比、星期小时热力表和姓名顺序人员分布。保留分子分母，权限未知单列。等待不用于考勤，建议不更改宿主权限。', annotations, inputSchema:waitReportQuerySchema }, input=>result(()=>waitReport.read(input)));
     mcp.registerTool('read_waits', { description: '读取与 Web、导出共用的固定等待记录：原生本轮结束至下一条真实用户，末尾空闲排除，满600秒为长等待；权限未知单列。同员工其他逻辑会话活动含其他项目与Agent。后续页固定version；contextSnapshotId与lines可读取该版本的对话行标签。',
       annotations, inputSchema: waitsQuerySchema }, input => result(() => waits.read(input)));
     mcp.registerTool('list_sessions', { description: '分页列出全体员工的会话快照。nextCursor 保持同一查询时间范围。',
