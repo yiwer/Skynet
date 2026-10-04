@@ -152,7 +152,17 @@ sudo bash /opt/skynet/current/deploy/ubuntu-release.sh \
 
 ## 6. 实际发布记录
 
-最新记录（2026-10-05 03:05，北京时间）：线上运行 **`v2-726e32efc40c-1`**，已于 02:53:15 发布。固定 Git `726e32efc40c988d9a23817c5b2faf5b6f3569a5`；归档 SHA-256 `d4e89b3ea3a723f782fb506c30e176a8867768d4a5a4163eb95e8d5534a3c21a`，服务器源码 SHA-256 `4257244dc365ae3462bac1b161dd558993fe1dd64de79d5befc4199708389833`，镜像 `sha256:f3552d096f0bf5665d679e4b767be5a512eaa551e4d96c8babe542ae233f047f`。从该 Git 对象独立构建并核对实际资产 `index-DTytbFRE.js` / `index-DWTTciwl.css`，上一版本保留为 `v2-298a743fcc89-1`。
+最新记录（2026-10-05 04:38，北京时间）：线上运行 **`v2-5b22d86d2ae4-1`**，已于 04:09:20 发布。固定 Git `5b22d86d2ae48d69b155b7227d40c3408a8e2ea3`；归档 SHA-256 `6297f6decceeb6348ee2e5f950baa9b3629783e201b189fa6ad40400a3e36cbe`，服务器源码 SHA-256 `d76be49eba009211ce5d1f7fd6869e5dc0b74177527a1a52a5bda449a8506aa6`，镜像 `sha256:e0030847db8c8f65a70d064db3ba8c98ff354bdd3b1fc8769c5f33f84beaa8f6`。从该 Git 独立构建并核对资产 `index-BsgT7Dzv.js` / `index-BfJ7RtDv.css`；上一发布保留为 `v2-726e32efc40c-1`。本批含独立接受的用量三图、提示词五图、画像周期资料准备及数据库共享内存修复。
+
+切换前备份 `/opt/skynet/receipts/backup-20261004T200903Z-3445196.json` 为 completed，ID `52859e16-70d7-4f3c-86ed-b53d2830a0f2`，49 个原件对象共 26,043,743 bytes，SQL dump 578,359 bytes；备份完成早于数据库重启。PostgreSQL 共享内存由 64MiB 调为 256MiB，容器 ID 从 `c1a71d28d32f…` 变为 `92505ec007b0…`，固定镜像及实际卷 `skynet-production-database` 的 Name、Source、Destination 均保持相同。数据库、原件和备份卷身份均核对，备份、49 个既有原件重新校验通过；四个 nginx site 哈希不变、配置有效、Certbot timer active。此次迁移明确记录数据库容器重建，不沿用容器 ID 不变断言。
+
+分析 Worker 保留源码 `5aae0eb99ba26cadbffd8430247af344753a68cc` 对应的同一容器、镜像和完整配置。数据库重建时，实际日志记录 `BoundPool` 未处理 `error` / SQL `57P01`，`unless-stopped` 策略重启进程；StartedAt 从 19:06:42 变为次日 04:09:06，04:09:08 再次 ready，实际 restartCount 为 1。迁移专用校验记录 `processRestarted: true`，核对旧 Worker UUID offline、新唯一 UUID online，前后均无活跃队列状态，failed 1 / succeeded 3 和预算预留 20 requests / 0 CNY 相同。这里只证明队列总量与预算一致，不声称进程不间断或逐个 job 内容已比较。首次采集被旧 startedAt 断言拦住的记录保留；独立诊断与专用校验审查通过后，仅重跑采集和最终验证，没有重新部署。
+
+118 项只读生产 API、34 项浏览器检查及 30 张页面截图通过，上一发布 8 个固定版本均可读取。用量 8 区与等待 4 区分页重组等于完整导出；额外用量/提示词 8 图在 320/1280 px 双主题下的 32 种状态及 32 张截图通过。应用内浏览器实看真实对话、展开工具卡片和当前脚本资产；外层无滚动，浏览器写请求及图表自动导出均为 0。已有 22:12 会话保持 3 条消息、2 次工具调用、8 条 Trace，106,317 bytes 原件 SHA-256 `0efa7692784020f5ea2dead09df32b949e722039d9d32c865ab81583971cc437` 不变。
+
+完整收据位于 `E:/GenCode/Skynet-evidence/v2-2026-10-04/deploy-v2-5b22d86d2ae4-1/` 的 `deployment-receipt.json` 与 `production-supplement-verification.json`；Worker 重启的安全日志、原始失败和专用校验见同级外部目录 `54-db-shm-worker-restart-review.md`。新 CI [37230639986](https://github.com/yiwer/Skynet/actions/runs/37230639986) 已成功完成：四片 78/64/65/75 项，合计 282 项、281 通过、0 失败、0 取消、1 项 Windows 专属跳过。四份下载包 SHA-256、大小、来源提交、分片标识、干净工作区与最终测试摘要已核对，汇总为 `ci-5b22d86-verification.json`。原千会话产效用例本轮实际通过，整项用时 358,210.821ms；旧 CI 的无错误码 HTTP 500 仍未分类。千会话画像 21.9 秒/13.0 秒是共享宿主、CPU/SQL 仪器下的诊断，非 P95，仍未满足 3 秒/1 秒。#52/#54 保持开放，不以本次发布或普通 CI 签收完整 AC31/AC32、真实试点或异地恢复。
+
+上一发布记录（2026-10-05 03:05，北京时间）：当时线上运行 **`v2-726e32efc40c-1`**，已于 02:53:15 发布。固定 Git `726e32efc40c988d9a23817c5b2faf5b6f3569a5`；归档 SHA-256 `d4e89b3ea3a723f782fb506c30e176a8867768d4a5a4163eb95e8d5534a3c21a`，服务器源码 SHA-256 `4257244dc365ae3462bac1b161dd558993fe1dd64de79d5befc4199708389833`，镜像 `sha256:f3552d096f0bf5665d679e4b767be5a512eaa551e4d96c8babe542ae233f047f`。从该 Git 对象独立构建并核对实际资产 `index-DTytbFRE.js` / `index-DWTTciwl.css`，上一版本保留为 `v2-298a743fcc89-1`。
 
 切换前同机一致备份 `/opt/skynet/receipts/backup-20261004T185306Z-3344600.json` 为 completed，ID `ac9cd230-7bb5-4676-9b2f-eefabc01e764`，包含 49 个原件对象、26,043,743 bytes，SQL dump 为 577,413 bytes。数据库容器 ID 与启动时间、四个既有 nginx site 哈希不变，配置检查通过，Certbot timer active。分析 Worker 保留协议/配置兼容且 ready 的 Qoder CN 实例，源码 `5aae0eb99ba26cadbffd8430247af344753a68cc`；本批没有发起模型调用。当前运行时见 [Qoder CN 决策](../adr/0005-qoder-cn-analysis-runtime.md)，下方旧发布中的禁用状态是历史记录。
 
