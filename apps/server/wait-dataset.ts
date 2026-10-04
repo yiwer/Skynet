@@ -3,7 +3,7 @@ import { digest } from './database.js';
 import { HttpError } from './identities.js';
 import type { RawStore } from './raw-store.js';
 import { eventOrigins } from './provenance.js';
-import { attributionRevision } from './qualification.js';
+import { attributionRevisions } from './qualification.js';
 import { verifySnapshotIntegrity } from './evidence-integrity.js';
 import { waitInput, type WaitInput } from './wait-inputs.js';
 import { materialSource } from './material-provenance.js';
@@ -21,7 +21,7 @@ const nativeKey = (record: Snapshot) => JSON.stringify([record.device_id, record
 
 /** Read committed originals once, preserving each immutable history. Parallel
  * activity deliberately uses all projects/Agents, independent of report filters. */
-export async function waitDataset(client: pg.PoolClient, raw: RawStore, full: boolean, employees: string[] | null): Promise<WaitOriginal[]> {
+export async function waitDataset(client: pg.PoolClient, raw: RawStore, full: boolean, employees: string[] | null, observe?: (record:Snapshot,bytes:Buffer,facts:WaitInput)=>void): Promise<WaitOriginal[]> {
   const records = (await client.query(`WITH RECURSIVE selected(id) AS (
     SELECT s.id FROM snapshots s JOIN devices d ON d.id=s.device_id WHERE $1::uuid[] IS NULL OR d.employee_id=ANY($1)
       OR EXISTS(SELECT 1 FROM effective_snapshot_events se JOIN effective_event_origins o ON o.event_id=se.event_id
@@ -53,8 +53,11 @@ export async function waitDataset(client: pg.PoolClient, raw: RawStore, full: bo
     const bytes = await raw.read(record.device_id, record.hash);
     const facts = await waitInput(client, { snapshotId: record.id, source: record.source, hash: record.hash, bytes, full });
     if ((events += facts.messages.length) > 100000) throw waitBounded();
-    result.push({ record, sessionId: roots.get(nativeKey(record))!, facts, origins: await eventOrigins(client, record.id), revision: await attributionRevision(client, record.id) });
+    observe?.(record,bytes,facts);
+    result.push({ record, sessionId: roots.get(nativeKey(record))!, facts, origins: await eventOrigins(client, record.id), revision: '' });
   }
+  const revisions=await attributionRevisions(client,records.map(record=>record.id));
+  for(const original of result)original.revision=revisions.get(original.record.id)!;
   return result;
 }
 
