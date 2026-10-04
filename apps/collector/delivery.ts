@@ -10,9 +10,12 @@ import { deliveryFailureSchema, deliveryReceiptSchema, type DeliveryFailure, typ
 const digest = (bytes: Buffer | string) => createHash('sha256').update(bytes).digest('hex');
 const MAX_QUEUE_BYTES = 512 * 1024 * 1024;
 const MAX_QUEUE_SNAPSHOTS = 1024;
+const processClockId = randomUUID();
+const pickupSchema = z.object({ processClockId: z.uuid(), startedAt: z.number().finite().min(0), wallTime: z.iso.datetime() }).strict();
+export const beginNativePickup = () => ({ processClockId, startedAt: performance.now(), wallTime: new Date().toISOString() });
 const payloadSchema = z.object({ hash: hashSchema, byteLength: z.number().int().min(0) }).strict();
 const pendingSchema = z.object({ id: z.uuid(), sequence: z.number().int().positive(), createdAt: z.iso.datetime(), manifest: manifestSchema,
-  fingerprint: hashSchema, payloads: z.array(payloadSchema).max(129) }).strict();
+  fingerprint: hashSchema, payloads: z.array(payloadSchema).max(129), pickup: pickupSchema.optional() }).strict();
 type Pending = z.infer<typeof pendingSchema>;
 const observationSchema = z.object({ disconnectedAttempts: z.number().int().min(0).max(1_000_000_000),
   firstDisconnectedAt: z.iso.datetime().nullable(), lastDisconnectedAt: z.iso.datetime().nullable() }).strict();
@@ -94,7 +97,9 @@ export class DeliveryQueue {
     // Absence cannot become a claim that zero disconnections were observed.
     if (!observation) return;
     const receipt: DeliveryReceipt = { uploadId: entry.id, snapshotId: ack.snapshotId,
-      capturedAt: entry.createdAt, acknowledgedAt: new Date().toISOString(), ...observation };
+      capturedAt: entry.createdAt, acknowledgedAt: new Date().toISOString(), ...observation,
+      ...(entry.pickup ? { timing: { measurement: 'collector-monotonic-pickup-to-readable-ack' as const, pickupStartedAt: entry.pickup.wallTime,
+        elapsedMs: entry.pickup.processClockId === processClockId ? Math.max(0, performance.now() - entry.pickup.startedAt) : null } } : {}) };
     await atomicJson(path, { receipt, attempts: 0, nextAttemptAt: null });
   }
   private async flushReceipts(settings: Settings, errors: string[]) {
@@ -127,7 +132,7 @@ export class DeliveryQueue {
     for (const item of this.pending) for (const payload of item.payloads) refs.set(payload.hash, payload.byteLength);
     return refs;
   }
-  async enqueue(manifest: Manifest, fingerprint: string, buffers: Buffer[]) {
+  async enqueue(manifest: Manifest, fingerprint: string, buffers: Buffer[], pickup?: ReturnType<typeof beginNativePickup>) {
     const additions = new Map(buffers.map(bytes => [digest(bytes), bytes]));
     const payloads = new Map<string, number>();
     for (const artifact of [{ hash: manifest.hash, byteLength: manifest.byteLength }, ...(manifest.capture?.materials ?? [])]) {
@@ -161,7 +166,7 @@ export class DeliveryQueue {
     }
     await syncDirectory(join(this.directory, 'blobs'));
     const entry = pendingSchema.parse({ id: randomUUID(), sequence: (this.pending.at(-1)?.sequence ?? 0) + 1,
-      createdAt: new Date().toISOString(), manifest, fingerprint, payloads: [...payloads].map(([hash, byteLength]) => ({ hash, byteLength })) });
+      createdAt: new Date().toISOString(), manifest, fingerprint, payloads: [...payloads].map(([hash, byteLength]) => ({ hash, byteLength })), pickup });
     await atomicJson(join(this.directory, 'observations', `${entry.id}.json`), {
       disconnectedAttempts: 0, firstDisconnectedAt: null, lastDisconnectedAt: null });
     await atomicJson(join(this.directory, 'pending', `${entry.id}.json`), entry);

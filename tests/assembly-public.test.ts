@@ -1,0 +1,90 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { randomBytes, randomUUID, createHash } from 'node:crypto';
+import { mkdir, writeFile } from 'node:fs/promises';
+import { join, resolve } from 'node:path';
+import { chromium, expect, type Browser } from '@playwright/test';
+import { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
+import { mcpSandbox } from './mcp-support.js';
+import { digest } from '../apps/server/database.js';
+import { beijingDate } from '../packages/contracts/reports.js';
+
+const params = (input: object) => new URLSearchParams(Object.entries(input).map(([key, value]) => [key, String(value)]));
+const json = (input: unknown): RequestInit => ({ method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input) });
+const encoded = (...rows: unknown[]) => Buffer.from(rows.map(row => JSON.stringify(row)).join('\n') + '\n');
+test('assembly explanations, filters, sidebar, processing, exports and OAuth MCP share immutable audit versions', { timeout: 180000 }, async () => {
+  const sandbox = await mcpSandbox(); let browser: Browser | undefined, client: Client | undefined;
+  const evidence = process.env.SKYNET_ASSEMBLY_EVIDENCE ?? join(sandbox.directory, 'assembly-public'); await mkdir(evidence, { recursive: true });
+  try {
+    const employee = await sandbox.provision('组装公开合成员工');
+    const api = (path: string, init: RequestInit = {}) => sandbox.api(path, employee.readerCredential, init);
+    const device = await (await sandbox.api('/api/devices/enroll', employee.enrollmentCredential, json({ installationId: randomUUID(), name: '组装公开设备' }))).json();
+    const timestamp = new Date(Date.now() + 1000).toISOString(), sessionId = randomUUID();
+    const user = (content: string, extras: object = {}) => ({ type: 'user', uuid: randomUUID(), sessionId, timestamp, version: '2.1.281', message: { role: 'user', content }, ...extras });
+    const firstBytes = encoded(user('首条独立提交'));
+    const put = async (bytes: Buffer) => { const response = await sandbox.api(`/api/chunks/${digest(bytes)}`, device.deviceCredential, { method: 'PUT', headers: { 'Content-Type': 'application/octet-stream' }, body: new Uint8Array(bytes) }); assert.equal(response.status, 201); };
+    const upload = async (bytes: Buffer, extras: object = {}) => {
+      await put(bytes); const response = await sandbox.api('/api/snapshots', device.deviceCredential, json({ protocolVersion: 1, sourceSessionId: sessionId, source: 'claude-code-cli', sourceVersion: '2.1.281', sourceOs: process.platform,
+        project: '/synthetic/assembly-public', qualifiedAt: timestamp, capability: 'unverified', hash: digest(bytes), byteLength: bytes.length, ...extras }));
+      assert.equal(response.status, 200, await response.clone().text()); return (await response.json()).snapshotId as string;
+    };
+    const first = await upload(firstBytes);
+    const child = encoded(user('关联子会话上下文', { sessionId: 'synthetic-child' })); await put(child);
+    const material = { id: digest('child'), role: 'child-transcript', name: 'child.jsonl', placement: 'portable', sourceSessionId: 'synthetic-child', mediaType: 'jsonl', hash: digest(child), byteLength: child.length };
+    const continuedBytes = Buffer.concat([firstBytes, encoded(user('压缩摘要', { isCompactSummary: true }), user('继续提交'))]);
+    const capture = { generation: digest('generation'), revision: 2, change: 'append', previousSnapshotId: first, materials: [material], gaps: [], lineage: [{ relation: 'child', sessionId: 'synthetic-child', materialId: material.id }], compacted: true, partialLine: false };
+    const continued = await upload(continuedBytes, { capture });
+    const continuation = await (await api(`/api/snapshots/${continued}/assembly`)).json();
+    assert.equal(continuation.lineage.decision, 'continuation'); assert.equal(continuation.state, 'assembled');
+    assert.equal(continuation.records.inherited, 1); assert.equal(continuation.records.compactSummaries, 1);
+    assert.equal(continuation.sourceCount, 2); assert.equal(continuation.sideLinks[0].relation, 'child');
+    assert.equal(continuation.generation.revision, 2);
+    const metrics = await (await api('/api/metrics?period=since-enrollment')).json(); assert.equal(metrics.totals.userTurns, 2);
+    const rewrite = await upload(encoded(user('身份相同但前缀无法证明的重写')), { capture: { ...capture, revision: 3, change: 'rewrite', materials: [], lineage: [], compacted: false } });
+    const uncertain = await (await api(`/api/snapshots/${rewrite}/assembly`)).json();
+    assert.equal(uncertain.state, 'pending-lineage'); assert.equal(uncertain.records.inherited, 0);
+    const gapId = await upload(encoded(user('伴随原件缺失')), { sourceSessionId: randomUUID(), capture: { ...capture, revision: 1, change: 'initial', materials: [], lineage: [], compacted: false, gaps: [{ code: 'missing', reference: '缺少 child.jsonl' }] } });
+    const filtered = await (await api('/api/assembly?state=pending-lineage')).json(); assert.deepEqual(filtered.rows.map((row: any) => row.snapshotId), [rewrite]);
+    assert.equal((await sandbox.api('/api/assembly')).status, 401);
+    const date = beijingDate(new Date()), processing = await (await api(`/api/processing?date=${date}`)).json();
+    assert.equal(processing.latency.samples, 0); assert.equal(processing.latency.p95Ms, null); assert.equal(processing.latency.unknown, 4);
+    assert.ok(processing.pending.some((row: any) => row.state === 'pending-lineage'));
+    assert.ok(processing.pending.some((row: any) => row.state === 'gap'));
+    const resource = sandbox.origin + '/mcp';
+    const registration = await (await api('/oauth/register', json({ client_name: 'assembly public reader', redirect_uris: ['http://127.0.0.1:47123/callback'], token_endpoint_auth_method: 'none' }))).json();
+    const verifier = randomBytes(48).toString('base64url');
+    const callback = new URL(await sandbox.authorizationPage(sandbox.origin + '/oauth/authorize?' + params({ response_type: 'code', client_id: registration.client_id, redirect_uri: registration.redirect_uris[0], scope: 'archive:read', resource, state: randomUUID(), code_challenge_method: 'S256', code_challenge: createHash('sha256').update(verifier).digest('base64url') }), employee.readerCredential));
+    const token = await (await api('/oauth/token', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: params({ grant_type: 'authorization_code', client_id: registration.client_id, code: callback.searchParams.get('code'), redirect_uri: registration.redirect_uris[0], code_verifier: verifier, resource }).toString() })).json();
+    client = new Client({ name: 'assembly-public', version: '1' }); await client.connect(new StreamableHTTPClientTransport(new URL(resource), { fetch: sandbox.fetchTls, requestInit: { headers: { Authorization: `Bearer ${token.access_token}` } } }));
+    const tool = async (name: string, input: object) => { const response = await client!.callTool({ name, arguments: { ...input } }); assert.notEqual(response.isError, true, JSON.stringify(response)); return JSON.parse((response.content as { text: string }[])[0]!.text); };
+    assert.deepEqual(await tool('read_assembly', { snapshotId: continued, version: continuation.version }), continuation);
+    assert.deepEqual(await tool('list_assembly', { state: 'pending-lineage' }), filtered);
+    assert.deepEqual(await tool('read_processing', { date, version: processing.version }), processing);
+    assert.deepEqual(await (await api(`/api/processing/export?date=${date}&version=${processing.version}`)).json(), processing);
+    browser = await chromium.launch(); const context = await browser.newContext({ ignoreHTTPSErrors: true, reducedMotion: 'reduce', viewport: { width: 1280, height: 900 } });
+    const page = await context.newPage(), errors: string[] = []; page.on('pageerror', error => errors.push(error.message));
+    await page.goto(sandbox.origin + '/#pipeline'); await page.getByLabel('个人读取凭据').fill(employee.readerCredential); await page.getByRole('button', { name: '进入存档', exact: true }).click();
+    await expect(page.getByRole('heading', { name: '数据处理', exact: true })).toBeVisible();
+    await expect(page.getByRole('region', { name: '处理链路' })).toContainText('接收');
+    const table = page.getByRole('region', { name: '会话组装记录', exact: true });
+    await expect(table).toContainText('待确认谱系');
+    await page.getByLabel('组装状态').selectOption('pending-lineage'); await expect(table.locator('tbody tr')).toHaveCount(1);
+    await table.getByRole('link', { name: '查看组装' }).click();
+    const panel = page.getByRole('region', { name: '组装与去重', exact: true }); await expect(panel).toContainText('待确认谱系');
+    await expect(panel).toContainText(uncertain.ruleVersion);
+    await page.goto(sandbox.origin + `/#${continued}`); await expect(panel).toContainText('续聊合并'); await expect(panel).toContainText('压缩摘要');
+    await page.goto(sandbox.origin + '/#pipeline');
+    for (const width of [320, 1280, 1920]) for (const theme of ['light', 'dark']) {
+      await page.setViewportSize({ width, height: 900 }); await page.evaluate(value => { document.documentElement.dataset.theme = value; }, theme);
+      await expect(page.getByRole('heading', { name: '数据处理', exact: true })).toBeVisible();
+      assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth && document.documentElement.scrollHeight <= innerHeight), true, `${width}/${theme}: outer viewport`);
+      await page.screenshot({ path: join(evidence, `processing-${width}-${theme}.png`), fullPage: true });
+    }
+    await page.getByRole('button', { name: 'Token 覆盖切换为表格' }).click(); await expect(page.getByRole('table', { name: 'Token 用量上报覆盖' })).toBeVisible();
+    assert.deepEqual(errors, []);
+    assert.deepEqual(Buffer.from(await (await api(`/api/snapshots/${continued}/raw`)).arrayBuffer()), continuedBytes);
+    await writeFile(join(evidence, 'verified.json'), JSON.stringify({ snapshotIds: [first, continued, rewrite, gapId], continuation, uncertain, processing, screenshots: 6, errors }, null, 2));
+    console.log(`Assembly public evidence: ${resolve(evidence)}`);
+  } finally { await client?.close(); await browser?.close(); await sandbox.close(); }
+});

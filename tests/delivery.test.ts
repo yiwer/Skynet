@@ -100,6 +100,10 @@ test('frozen offline generations survive source loss and process/server restarts
     const observed = await (await api(`/api/snapshots/${aSnapshot.id}/conversation`)).json();
     assert.equal(observed.status.offlineBackfill, 'observed');
     assert.ok(observed.status.delivery.disconnectedAttempts >= 1);
+    const offlineAssembly = await (await api(`/api/snapshots/${aSnapshot.id}/assembly`)).json();
+    assert.equal(offlineAssembly.lineage.decision, 'continuation'); assert.equal(offlineAssembly.delivery.disconnectedAttempts, observed.status.delivery.disconnectedAttempts);
+    assert.ok(offlineAssembly.records.inherited >= 1);
+    assert.equal(JSON.parse(receiptBodies.find(body => JSON.parse(body).snapshotId === aSnapshot.id)!).timing.elapsedMs, null, 'cross-process retries keep monotonic latency unknown');
     assert.equal((await detail(aSnapshot.id)).manifest.capture.previousSnapshotId, firstId);
     const recoveredDetail = await detail(afterLossId); const materialId = recoveredDetail.manifest.capture.materials[0].id;
     assert.equal(recoveredDetail.manifest.capture.previousSnapshotId, aSnapshot.id, 'offline generation resolves its predecessor only after that predecessor is committed');
@@ -117,6 +121,11 @@ test('frozen offline generations survive source loss and process/server restarts
     assert.ok(archiveRequestTimes.slice(requestCount).every(at => at >= Date.parse(limited.delivery.nextAttemptAt)), 'a restarted process respects persisted Retry-After');
     let deviceStatus = (await (await api('/api/devices/status')).json()).devices[0];
     assert.equal(deviceStatus.sources[0].report.pendingSnapshots, 1); assert.equal(deviceStatus.sources[0].report.lastFailure.kind, 'rate-limited');
+    const processingDay = new Date(Date.now() + 8 * 3600000).toISOString().slice(0, 10);
+    const processingBacklog = await (await api(`/api/processing?date=${processingDay}`)).json();
+    assert.equal(processingBacklog.backlog.pendingSnapshots, 1);
+    assert.equal(processingBacklog.backlog.devices, 1);
+    assert.ok(processingBacklog.backlog.observedAt);
     browser = await chromium.launch(); const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
     await page.goto(upstream); await page.getByLabel('个人读取凭据').fill(reader.readerCredential); await page.getByRole('button', { name: '进入存档' }).click();
     await page.getByRole('navigation', { name: '平台页面', exact: true }).getByRole('button', { name: '接入与设备', exact: true }).click();
@@ -147,8 +156,11 @@ test('frozen offline generations survive source loss and process/server restarts
       ids.push(committedResponses.at(-1).snapshotId);
     }
     assert.equal(new Set(ids).size, 1, 'ten deliveries of an unconfirmed immutable manifest return one committed snapshot');
+    const assemblyRetries = await (await api(`/api/snapshots/${ids[0]}/assembly`)).json();
+    assert.equal(assemblyRetries.transport.snapshotReplays, 9);
     assert.equal((await detail(ids[0]!)).activity.today.counts.userTurns, 4);
     mode = 'online'; const confirmed = await run('retry'); assert.equal(confirmed.delivery.pendingSnapshots, 0); assert.deepEqual(await raw(await latest()), lastBytes);
+    assert.equal((await (await api(`/api/snapshots/${ids[0]}/assembly`)).json()).transport.snapshotReplays, 10);
     const allHistory = (await (await api(`/api/snapshots/${await latest()}/history`)).json()).snapshots;
     assert.equal(allHistory.filter((item: any) => item.hash === hash(lastBytes)).length, 1);
     mode = 'server-error'; const failedBytes = Buffer.concat([lastBytes, bytes(record('503 后补传'))]); await writeFile(transcriptPath, failedBytes);

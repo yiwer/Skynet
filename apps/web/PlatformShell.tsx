@@ -55,7 +55,7 @@ const navigation: { label: string; items: NavigationItem[] }[] = [
   ] },
   { label: '存档', items: [{ label: '会话找回', icon: 'restore', view: 'recovery' }] },
   { label: '运行', items: [
-    { label: '数据处理', icon: 'layers' },
+    { label: '数据处理', icon: 'layers', view: 'pipeline' },
     { label: '接入与设备', icon: 'device', view: 'identities', activeViews: ['identities', 'delivery'], managerOnly: true },
     { label: '分析与运行', icon: 'pulse', view: 'analysis', activeViews: ['analysis', 'server'] },
   ] },

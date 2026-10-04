@@ -20,6 +20,8 @@ export const deliveryReceiptSchema = z.object({
   uploadId: z.uuid(), snapshotId: z.uuid(), capturedAt: z.iso.datetime().max(64), acknowledgedAt: z.iso.datetime().max(64),
   disconnectedAttempts: z.number().int().min(0).max(1_000_000_000),
   firstDisconnectedAt: z.iso.datetime().max(64).nullable(), lastDisconnectedAt: z.iso.datetime().max(64).nullable(),
+  timing: z.object({ measurement: z.literal('collector-monotonic-pickup-to-readable-ack'),
+    pickupStartedAt: z.iso.datetime(), elapsedMs: z.number().finite().min(0).max(31_536_000_000).nullable() }).strict().optional(),
 }).strict().refine(value => value.disconnectedAttempts === 0
   ? value.firstDisconnectedAt === null && value.lastDisconnectedAt === null
   : value.firstDisconnectedAt !== null && value.lastDisconnectedAt !== null, 'Disconnect observations must be consistent');

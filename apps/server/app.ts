@@ -35,6 +35,7 @@ import { metricsQuerySchema } from '../../packages/contracts/metrics.js';
 import { migrateSessionInsights,sessionInsightsService } from './session-insights.js';
 import { sessionInsightsQuery } from '../../packages/contracts/session-insights.js';
 import { migrateDeliveryReceipts, saveDeliveryReceipt } from './delivery-receipts.js';
+import { migrateAssembly, assemblyService, processingService, recordAssemblyRecipe } from './assembly.js';
 
 export async function createApp(options: { db: Database; rawDirectory: string; webDirectory?: string; publicOrigin?: string; reportClock?: () => Date }) {
   const { db } = options;
@@ -49,6 +50,7 @@ export async function createApp(options: { db: Database; rawDirectory: string; w
   await migrateWorkViews(db);
   await migrateMetrics(db);
   await migrateDeliveryReceipts(db);
+  await migrateAssembly(db);
   const raw = new RawStore(options.rawDirectory);
   await backfillOrigins(db, raw);
   await reconcileOriginIntegrity(db,raw);
@@ -149,7 +151,8 @@ export async function createApp(options: { db: Database; rawDirectory: string; w
     if (!Buffer.isBuffer(request.body) || request.body.length === 0) throw new HttpError(400, '需要非空原件字节');
     if (digest(request.body) !== hash) throw new HttpError(422, '原件哈希不匹配');
     await raw.write(owner.id, hash, request.body);
-    await db.query('INSERT INTO chunks(device_id,hash,byte_length) VALUES($1,$2,$3) ON CONFLICT DO NOTHING', [owner.id, hash, request.body.length]);
+    await db.query(`WITH stored AS (INSERT INTO chunks(device_id,hash,byte_length) VALUES($1,$2,$3) ON CONFLICT DO NOTHING RETURNING 1)
+      INSERT INTO assembly_transports(device_id,hash,kind,duplicate) SELECT $1,$2,'chunk',NOT EXISTS(SELECT 1 FROM stored)`, [owner.id, hash, request.body.length]);
     return reply.code(201).send({ hash, byteLength: request.body.length, state: 'staged' });
   });
 
@@ -177,6 +180,7 @@ export async function createApp(options: { db: Database; rawDirectory: string; w
     // while the old snapshot stays readable; the final database row is the atomic commit point.
     await raw.write(owner.id, manifest.hash, bytes);
     await db.query('INSERT INTO chunks(device_id,hash,byte_length) VALUES($1,$2,$3) ON CONFLICT DO NOTHING', [owner.id, manifest.hash, bytes.length]);
+    await recordAssemblyRecipe(db, owner.id, manifest.hash, [input.baseHash, input.appendHash]);
     return commitSnapshot(owner, manifest, uploadKey(request.headers));
   });
 
@@ -195,6 +199,7 @@ export async function createApp(options: { db: Database; rawDirectory: string; w
     if (digest(bytes) !== input.hash) throw new HttpError(422, '组装原件哈希不匹配');
     await raw.write(owner.id, input.hash, bytes);
     await db.query('INSERT INTO chunks(device_id,hash,byte_length) VALUES($1,$2,$3) ON CONFLICT DO NOTHING', [owner.id, input.hash, bytes.length]);
+    await recordAssemblyRecipe(db, owner.id, input.hash, input.chunks.map(part => part.hash));
     return { state: 'staged', hash: input.hash, byteLength: bytes.length };
   });
 
@@ -202,6 +207,17 @@ export async function createApp(options: { db: Database; rawDirectory: string; w
   const archive = archiveQuery(db, raw);
   const conversation = conversationQuery(db, raw);
   const metrics = metricsService(db, raw, options.reportClock);
+  const assembly = assemblyService(db, raw);
+  const processing = processingService(db, metrics);
+  app.get('/api/processing', { onRequest: readerGuard }, request => processing(request.query));
+  app.get('/api/processing/export', { onRequest: readerGuard }, async (request, reply) =>
+    reply.header('Content-Disposition', 'attachment; filename="skynet-processing.json"').send(await processing(request.query)));
+  app.get('/api/assembly', { onRequest: readerGuard }, request => assembly.list(request.query));
+  app.get('/api/snapshots/:id/assembly', { onRequest: readerGuard }, request => assembly.read(z.uuid().parse((request.params as { id: string }).id), request.query));
+  app.get('/api/assembly/export', { onRequest: readerGuard }, async (request, reply) => {
+    const { snapshotId, ...query } = z.object({ snapshotId: z.uuid(), version: z.string().optional() }).strict().parse(request.query);
+    return reply.header('Content-Disposition', `attachment; filename="assembly-${snapshotId}.json"`).send(await assembly.export(snapshotId, query));
+  });
   app.get('/api/snapshots/:id/conversation', { onRequest: readerGuard }, async request => {
     const { id } = z.object({ id: z.uuid() }).parse(request.params);
     const q = z.object({ readingVersion: z.enum(['conversation-2', 'conversation-3']).optional(), cursor: z.string().optional(), includeTools: z.enum(['true', 'false']).optional(), includeContext: z.enum(['true', 'false']).optional(),
@@ -359,7 +375,7 @@ export async function createApp(options: { db: Database; rawDirectory: string; w
     const file = await archive.exported((request.params as { id: string }).id, format);
     return reply.header('Content-Disposition', `attachment; filename="${file.filename}"`).type(file.contentType).send(file.bytes);
   });
-  if (options.publicOrigin) await registerMcp(app, db, archive, options.publicOrigin, analysis, reports, coverage, workStatistics, workViews,operations,conversation,metrics,insights);
+  if (options.publicOrigin) await registerMcp(app, db, archive, options.publicOrigin, analysis, reports, coverage, workStatistics, workViews,operations,conversation,metrics,assembly,processing,insights);
   if (options.webDirectory) {
     await app.register(fastifyStatic, { root: resolve(options.webDirectory), wildcard: false });
   }
