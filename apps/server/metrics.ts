@@ -12,6 +12,7 @@ import { materialSource } from './material-provenance.js';
 import { metricInputBatch, type MetricInputFacts } from './metric-inputs.js';
 import { attributionRevisions } from './qualification.js';
 import { currentMetricInputs } from './metric-current-inputs.js';
+import { readMetricEvents, type MetricEvent as Event } from './metric-events.js';
 
 const catalogVersion = `recorded-metrics-3/${statisticsExtractorVersion}`;
 const employeeNames = new Intl.Collator('zh-CN');
@@ -47,9 +48,6 @@ export async function migrateMetrics(db: Database) {
 
 type Snapshot = { id: string; device_id: string; employee_id: string; employee: string; source: Source; source_session_id: string;
   manifest: Manifest; hash: string; committed_at: Date; enrolled_at: Date | null; provenance: Provenance | null; attribution_revision: string };
-type Event = { event_id: string; snapshot_id: string; employee_id: string; employee: string; device_id: string; source: Source;
-  source_session_id: string; project: string; source_date: string; role: string; line: number; block: number; material_id: string | null;
-  qualification_revision: string; proof_snapshot_id: string | null };
 type Slice = { sessionId: string; employeeId: string; employee: string; source: Source; project: string; sourceSessionId: string;
   snapshotId: string; snapshotIds: Set<string>; date: string; businessEvents: boolean; turns: Set<string>; tools: Set<string>; usage: Map<string, TokenComponents | null>; reasons: Set<string> };
 const nativeKey = (device: string, source: Source, session: string) => JSON.stringify([device, source, session]);
@@ -162,13 +160,9 @@ export function metricsService(db: Database, raw: RawStore, clock: () => Date = 
         try { const bytes = await raw.read(device, hash); checkedOriginals.set(`${device}/${hash}`, { device, hash }); return bytes; }
         catch (error) { originalsReadable = false; throw error; }
       };
-      const events = (await client.query(`SELECT o.event_id,o.snapshot_id,o.employee_id,e.name AS employee,o.device_id,o.source,
-        o.source_session_id,o.project,o.source_date,o.role,o.line,o.block,o.material_id,o.qualification_revision,o.proof_snapshot_id
-        FROM effective_event_origins o JOIN employees e ON e.id=o.employee_id
-        WHERE o.context='after-enrollment' AND o.source_date BETWEEN $1 AND $2
-        AND ($3::uuid IS NULL OR o.employee_id=$3) AND ($4::text IS NULL OR o.source=$4) AND ($5::text IS NULL OR o.project=$5)
-        ORDER BY o.event_id LIMIT ${limits.events + 1}`, [scope.from, scope.to, q.employeeId ?? null, q.source ?? null, q.project ?? null])).rows as Event[];
-      if (events.length > limits.events) throw bounded();
+      const eventInputs = await readMetricEvents(client, scope, limits.events);
+      if (!eventInputs) throw bounded();
+      const { events } = eventInputs;
       // Token metadata does not become a business event, so event dates cannot
       // select its originals. Discover scoped native identities independently,
       // then inspect source timestamps within the same bounded raw-read budget.
@@ -463,7 +457,7 @@ export function metricsService(db: Database, raw: RawStore, clock: () => Date = 
       }).sort((a, b) => employeeNames.compare(a.employee, b.employee) || a.employeeId.localeCompare(b.employeeId));
       const unknownReasons = [...new Set([...sessions.flatMap(s => s.unknownReasons), ...discoveryGaps, ...(unscoped.length ? ['存在来源日期不能确定的原件缺口，范围完整性未知'] : [])])].sort();
       const dataAsOf = new Date(Math.max(0, ...candidates.map(s => s.committed_at.getTime()), ...unscoped.map(s => (s.committed_at as Date).getTime()))).toISOString();
-      const inputVersion = digest(JSON.stringify([events, rawInputs, unscoped]));
+      const inputVersion = digest(JSON.stringify(['metric-inputs-2', eventInputs.identity, rawInputs, unscoped]));
       const totals = total(sessions);
       if (unscoped.length || discoveryGaps.size) { totals.inputTokens = null; totals.outputTokens = null; }
       const content = { scope, totals, sessions, daily, employeeDaily, employees, sources, dataAsOf,
