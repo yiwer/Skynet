@@ -36,6 +36,30 @@ test('an employee profile binds real device sync metadata and usage to its exact
   } finally { await fixture.close(); }
 });
 
+test('profile session details and recent activity preserve employee scope and original report versions', { timeout: 120000 }, async () => {
+  const fixture = await assessmentFixture();
+  try {
+    const owner = await fixture.owner('Profile owner'), other = await fixture.owner('Other owner');
+    await fixture.session(owner, { prompts: 3, verified: 2 }); await fixture.session(other, { prompts: 5, verified: 1 });
+    const response = await fixture.api(owner, '/api/capability-profiles/' + owner.employeeId); assert.equal(response.status, 200);
+    const profile = await response.json();
+    assert.equal(profile.sessions.length, 1); assert.equal(profile.sessions[0].userTurns, 3); assert.equal(profile.sessions[0].verified, 2);
+    const efficiency = await (await fixture.api(owner, '/api/session-efficiency/export?period=since-enrollment&employeeId=' + owner.employeeId + '&version=' + profile.references.efficiency.version)).json();
+    assert.equal(profile.references.efficiency.metricVersion, profile.assessment.inputs.metricsVersion);
+    const row = efficiency.sessions[0], shown = profile.sessions[0];
+    for (const key of ['sessionId','snapshotId','tokens','userTurns','verified','rework','taskType','webPath']) assert.equal(shown[key], row[key]);
+    assert.deepEqual(shown.efficiency, row.efficiency); assert.deepEqual(shown.waitFraction, row.timing.waitFraction);
+    assert.deepEqual(profile.taskDistribution, [{ taskType: 'implementation', sessions: 1 }]);
+    assert.ok(profile.recentActivity.events.length > 0);
+    for (const item of profile.recentActivity.events) assert.equal(item.employeeId, owner.employeeId);
+    for (const reference of profile.recentActivity.references) {
+      assert.ok(reference.path.includes('employeeId=' + owner.employeeId)); assert.ok(reference.path.includes('date=' + reference.date));
+      const activity = await (await fixture.api(owner, '/api/activity/export?employeeId=' + owner.employeeId + '&date=' + reference.date + '&version=' + reference.version)).json();
+      for (const event of profile.recentActivity.events.filter((event: any) => event.sourceDate === reference.date)) assert.deepEqual(event, activity.events.find((other: any) => other.id === event.id));
+    }
+  } finally { await fixture.close(); }
+});
+
 test('daily verified output follows the original result date within one continuing session', { timeout: 120000 }, async () => {
   const fixture = await assessmentFixture();
   try {

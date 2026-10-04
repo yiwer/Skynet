@@ -3,12 +3,15 @@ import { HttpError } from './identities.js';
 import { consistentReportingInputs } from './reporting-frontier.js';
 import type { assessmentService } from './assessment.js';
 import type { usageOutputService } from './usage-output.js';
+import type { sessionEfficiencyService } from './session-efficiency.js';
+import type { activityService } from './activity.js';
 import { profileQuery, type CapabilityProfile } from '../../packages/contracts/capability-profile.js';
 
 export async function migrateCapabilityProfiles(db: Database) {
   await db.query('CREATE TABLE IF NOT EXISTS capability_profiles(version text PRIMARY KEY,employee_id uuid NOT NULL REFERENCES employees(id),payload jsonb NOT NULL)');
 }
-export function capabilityProfileService(db: Database, assessments: ReturnType<typeof assessmentService>, usage: ReturnType<typeof usageOutputService>, clock: () => Date = () => new Date()) {
+export function capabilityProfileService(db: Database, assessments: ReturnType<typeof assessmentService>, usage: ReturnType<typeof usageOutputService>,
+  efficiency: ReturnType<typeof sessionEfficiencyService>, activity: ReturnType<typeof activityService>, clock: () => Date = () => new Date()) {
   async function header(employeeId: string): Promise<CapabilityProfile['header']> {
     const rows = (await db.query(`SELECT d.id,d.name,d.active,d.enrolled_at,max(s.committed_at) AS synced_at
       FROM devices d LEFT JOIN snapshots s ON s.device_id=d.id WHERE d.employee_id=$1
@@ -39,8 +42,25 @@ export function capabilityProfileService(db: Database, assessments: ReturnType<t
         employeeId, employee: assessment.employee, daily: [], agents: [], activeDates: [], sessions: 0, userTurns: 0, toolCalls: 0,
         inputTokens: 0, outputTokens: 0, knownInputTokens: 0, knownOutputTokens: 0, unknownTokenSessions: 0, unknownInputSessions: 0, unknownOutputSessions: 0,
         outputs: Object.fromEntries(['verified','claimed','codeChanges','tests','commits'].map(kind => [kind, { value: 0, known: 0, unknownSessions: 0, added: 0, removed: 0, passed: 0, failed: 0 }])) as CapabilityProfile['kpis']['outputs'] };
+      const efficiencyReport = await efficiency.export({ period: scope.period, employeeId });
+      if (efficiencyReport.metricVersion !== assessment.inputs.metricsVersion) throw new HttpError(409, '画像指标正在更新，请重新读取');
+      const sessions = efficiencyReport.sessions.map(({ sessionId, snapshotId, source, sourceSessionId, projects, dates, tokens, knownTokens, userTurns, toolCalls, verified, codeChanges, efficiency, rework, taskType, webPath, timing }) =>
+        ({ sessionId, snapshotId, source, sourceSessionId, projects, dates, tokens, knownTokens, userTurns, toolCalls, verified, codeChanges, efficiency, rework, taskType, webPath, waitFraction: timing?.waitFraction ?? null }));
+      const taskCounts = new Map<CapabilityProfile['taskDistribution'][number]['taskType'], number>();
+      for (const session of sessions) taskCounts.set(session.taskType, (taskCounts.get(session.taskType) ?? 0) + 1);
+      const recentActivity: CapabilityProfile['recentActivity'] = { events: [], references: [], hasEarlier: false }, dates = [...activeDates].sort().reverse();
+      for (const [index, date] of dates.entries()) {
+        const page = await activity.export({ date, employeeId });
+        recentActivity.references.push({ date, version: page.version, path: '#activity?' + new URLSearchParams({ date, employeeId, version: page.version }) });
+        const events = [...page.events].sort((a, b) => (b.timestamp ?? '').localeCompare(a.timestamp ?? '') || a.id.localeCompare(b.id));
+        const remaining = 20 - recentActivity.events.length;
+        recentActivity.events.push(...events.slice(0, remaining));
+        if (recentActivity.events.length >= 20) { recentActivity.hasEarlier = events.length > remaining || index + 1 < dates.length; break; }
+      }
       return { algorithmVersion: 'capability-profile-1', employeeId, employee: assessment.employee, range: assessment.range, assessment,
-        header: await header(employeeId), kpis: { ...totals, activeDays: activeDates.length }, usage: { version: report.version, metricVersion: report.metricVersion, daily, agents } };
+        header: await header(employeeId), kpis: { ...totals, activeDays: activeDates.length }, usage: { version: report.version, metricVersion: report.metricVersion, daily, agents },
+        sessions, taskDistribution: [...taskCounts].sort(([a], [b]) => a.localeCompare(b)).map(([taskType, sessions]) => ({ taskType, sessions })), recentActivity,
+        references: { efficiency: { version: efficiencyReport.version, metricVersion: efficiencyReport.metricVersion, path: '#efficiency?' + new URLSearchParams({ period: scope.period, employeeId, version: efficiencyReport.version }) } } };
     });
     const version = digest(JSON.stringify(content, (_key, value) => value && typeof value === 'object' && !Array.isArray(value)
       ? Object.fromEntries(Object.entries(value).sort(([a], [b]) => a.localeCompare(b))) : value));

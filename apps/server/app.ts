@@ -303,7 +303,7 @@ export async function createApp(options: { db: Database; rawDirectory: string; w
     return reply.header('Content-Disposition', `attachment; filename="skynet-usage-output-${data.version}.json"`).type('application/json').send(data);
   });
   const assessments = assessmentService(db, usage, insights, waits, options.reportClock);
-  const profiles = capabilityProfileService(db, assessments, usage, options.reportClock);
+  const profiles = capabilityProfileService(db, assessments, usage, efficiency, activity, options.reportClock);
   app.get('/api/capability-profiles/:id', { onRequest: readerGuard }, request => profiles.read(z.uuid().parse((request.params as { id: string }).id), request.query));
   app.post('/api/capability-profiles/:id/recompute', { onRequest: readerGuard }, request => profiles.recompute(z.uuid().parse((request.params as { id: string }).id), request.body));
   app.get('/api/capability-profiles/:id/export', { onRequest: readerGuard }, async (request, reply) => {
