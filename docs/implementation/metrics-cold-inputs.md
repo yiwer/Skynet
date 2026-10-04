@@ -20,4 +20,6 @@
 
 扩大旧损坏映射的公开指标覆盖时，还在原查询上复现了既存 500：`userSources` 为严格可读的用户事件重读包含其他非法 UTF-8 行的原件，严格整件解码错误未被处理。该边界现仅将明确的原件不可用或编码错误归为本人来源缺口；数据库、并发和上限错误继续抛出。可读行仍以严格逐行解析排除机器环境或原生 summary/meta；该回退不写正常 Token 事实投影。旧载体的 current/full/fixed 及含机器环境与非法尾行的公开回归 5/5 通过，原件字节和旧固定报告保持相等。RED、调用栈与 GREEN 分别见 `54-metrics-invalid-original-{base-red,stack,green}.txt`。
 
+下一项归属候选保留每个原始 `snapshot_events` 映射，并只额外加入与真实载体行/block 相连的非空 `original-utf8-1` 覆写。有效映射原本就是 `COALESCE(覆写, 原始)`，所以两者并集保持不变；后续三个聚合仅取 MAX，不需要为重复映射排序去重。全部旧证明与覆写修订仍参与计算，字符串修订值不转 JavaScript 数字。旧损坏映射修复、材料先到后独立原件资格、超过 16 MiB 的旧资格回填公开回归 3/3 通过（78.22 秒）；性能收益仍待精确候选诊断，见 `54-metrics-carriers-final-public.txt`。
+
 证据目录：`E:/GenCode/Skynet-evidence/v2-2026-10-04/`。设计与逐轮记录见 `54-metrics-cold-query-design.md`；诊断分别为 `54-metrics-cold-a2a757b-profile.*`、`54-metrics-cold-union-profile.*`、`54-metrics-cold-packed-profile.*`。紧凑身份正式性能为 `54-metrics-cold-compact-performance.{json,txt}`；请求内键复用构建与回归为 `54-metrics-group-keys-{build,public}.txt`。最后切片的正式性能复验待并行负载结束，尚未独立接受，#54 保持开放。
