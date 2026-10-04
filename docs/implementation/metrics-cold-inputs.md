@@ -4,7 +4,7 @@
 
 事件查询返回 80,000 行、15 字段，其 JSON 表示为 42,236,001 字节。查询含传输约 650 ms；首次归属查询约 409 ms。对 `UNION ALL` 的单变量尝试只让后者变为约 396 ms，未形成明确收益，已经撤回。
 
-`metric-events.ts` 仍从 `effective_event_origins` 读取同一组经过验证的事件，沿原员工、项目、Agent 和来源日期筛选。先按原 eventId 顺序取至 100,001 行，再将重复的九个归属/来源字段分组传输。每个事件保留原序号、eventId、角色、行、block、字符串资格修订及可空证明快照；不会聚合掉业务事件或改变计数。原序号来自同一查询的 `row_number`，解包恢复数据库的精确顺序，不依赖姓名或 JavaScript 字符串排序。总事件数在解包前检查，超限返回同一 413。
+`metric-events.ts` 仍从 `effective_event_origins` 读取同一组经过验证的事件，沿原员工、项目、Agent 和来源日期筛选，先按原 eventId 顺序取至 100,001 行。每个事件和原顺序、角色、行、block、字符串资格修订及可空证明快照均保留，不会聚合掉业务事件或改变计数；超过 100,000 行仍返回同一 413。曾尝试在 SQL 中按九个归属/来源字段分组传输，原序号来自同一查询的 `row_number`，没有用姓名或 JavaScript 排序替代数据库顺序。
 
 该传输方式在同规模诊断中返回 1,000 组、JSON 表示 8,432,895 字节；首次仍为 3,456 ms，未达到目标，查询本身也未证明更快。CPU 采样随后将最大自耗时位置定位到重复序列化完整事件列表的输入版本计算。
 
@@ -21,5 +21,7 @@
 扩大旧损坏映射的公开指标覆盖时，还在原查询上复现了既存 500：`userSources` 为严格可读的用户事件重读包含其他非法 UTF-8 行的原件，严格整件解码错误未被处理。该边界现仅将明确的原件不可用或编码错误归为本人来源缺口；数据库、并发和上限错误继续抛出。可读行仍以严格逐行解析排除机器环境或原生 summary/meta；该回退不写正常 Token 事实投影。旧载体的 current/full/fixed 及含机器环境与非法尾行的公开回归 5/5 通过，原件字节和旧固定报告保持相等。RED、调用栈与 GREEN 分别见 `54-metrics-invalid-original-{base-red,stack,green}.txt`。
 
 下一项归属候选保留每个原始 `snapshot_events` 映射，并只额外加入与真实载体行/block 相连的非空 `original-utf8-1` 覆写。有效映射原本就是 `COALESCE(覆写, 原始)`，所以两者并集保持不变；后续三个聚合仅取 MAX，不需要为重复映射排序去重。全部旧证明与覆写修订仍参与计算，字符串修订值不转 JavaScript 数字。旧损坏映射修复、材料先到后独立原件资格、超过 16 MiB 的旧资格回填公开回归 3/3 通过（78.22 秒）；性能收益仍待精确候选诊断，见 `54-metrics-carriers-final-public.txt`。
+
+归属候选在同库 SQL 诊断中将旧查询约 696/798 ms 降为 391/428 ms，1,000 个完整修订值相等；实际首次归属查询为 288 ms。但整条首次仍为 4,647 ms，其中事件 SQL 为 1,554 ms。因其执行计划包含第二次按九个字段的宽行外部排序，当前候选恢复传输原有 15 列，再在本次请求内准备紧凑分组身份与共享键。原 SQL ORDER/LIMIT 不变，每行按数据库返回位置得到原序号；分组仍包含全部九项字段，并按首次出现顺序创建。与冻结 SQL 分组实现对比的公开 Reporting 完整报告及版本相等；再加原指标与事件上限回归共 6/6 通过。此步不声称降低传输体积，也没有提高 `work_mem`、新增接入状态或跨请求缓存。证据 `54-metrics-client-pack-public.txt`；本候选性能待测。
 
 证据目录：`E:/GenCode/Skynet-evidence/v2-2026-10-04/`。设计与逐轮记录见 `54-metrics-cold-query-design.md`；诊断分别为 `54-metrics-cold-a2a757b-profile.*`、`54-metrics-cold-union-profile.*`、`54-metrics-cold-packed-profile.*`。紧凑身份正式性能为 `54-metrics-cold-compact-performance.{json,txt}`；请求内键复用构建与回归为 `54-metrics-group-keys-{build,public}.txt`。最后切片的正式性能复验待并行负载结束，尚未独立接受，#54 保持开放。
