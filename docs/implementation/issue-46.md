@@ -57,3 +57,5 @@ node --import tsx --test --test-concurrency=1 tests/assessment-scope.test.ts tes
 证据在 `E:/GenCode/Skynet-evidence/v2-2026-10-04/46-assessment-scope/`，包含 RED、GREEN、构建日志、浏览器截图和版本清单。全部材料为合成数据；没有调用付费模型或更改生产部署。
 
 最终合入集成 `90a9b8e925f77465d18dc5058a66b457da3d3d79` 后，`npm run build`（含 TypeScript 检查）通过，上述七个公开测试文件共 14/14 通过，耗时 222.27 秒；`git diff --check` 通过。最终浏览器证据位于 `integrated-browser/`，已目视核对 1280 浅色、320 深色及 320 深色参数表，分段选择、历史入口和参数列均可用，文档外层未滚动。
+
+独立审查补充触控命中尺寸验收：六个新分段按钮原为 32px 高，历史展开入口为 29.1875px，低于 PRD 的 44px 要求。修复按钮、历史入口、员工选择和返回当前链接的命中尺寸；正式浏览器旅程增加各控件及历史条目的实际矩形断言，覆盖三种宽度、两种主题。`touch-red.txt` 保留失败尺寸，修复后 build 与旅程 1/1 通过（20.24 秒），截图在 `touch-browser/`，320 深色已重新目视核对。
