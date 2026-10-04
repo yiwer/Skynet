@@ -35,6 +35,10 @@ function SourceStatus({ page }: { page: ConversationPage }) {
 
 function AgentAvatar() { return <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="8" width="12" height="10" rx="2"/><path d="M12 4v4M9 12h.01M15 12h.01M10 15h4"/></svg>; }
 
+export function conversationTitle(page: ConversationPage) {
+  return page.messages.find(message => message.role === 'user' && !message.contextKind)?.text.split('\n')[0]!.slice(0, 64);
+}
+
 export function conversationSelection(hash: string) {
   const params = new URLSearchParams(hash.split('?')[1]);
   const result = conversationAnchorSchema.safeParse({ line: Number(params.get('line')), block: Number(params.get('block') ?? 0),
@@ -131,7 +135,7 @@ export function ConversationReader({ snapshotId, initial, request, navigation, o
         setPage(value);
         if (value.includeTools !== includeTools) setIncludeTools(value.includeTools);
         if (value.includeContext !== includeContext) setIncludeContext(value.includeContext);
-        if (!cursor && !anchor) { const first = value.messages.find(message => message.role === 'user' && !message.contextKind); if (first) onTitle?.(first.text.split('\n')[0]!.slice(0, 64)); }
+        if (!cursor && !anchor) { const title = conversationTitle(value); if (title) onTitle?.(title); }
       }
     }).catch(failure => { if (!abort.signal.aborted) setError(failure.message); })
       .finally(() => { if (!abort.signal.aborted) setBusy(false); });

@@ -11,7 +11,7 @@ html,body,#root{height:100%;width:100%;min-height:0;margin:0;overflow:hidden}
 .platform-main .workspace-scroll{flex:1;min-height:0;min-width:0;overflow:auto;overscroll-behavior:contain;padding:0 6px 16px 0;scrollbar-gutter:stable}
 .platform-shell .platform-rail{min-height:0;overflow:hidden;gap:20px}
 .platform-rail-brand,.platform-shell .platform-search-button,.platform-rail-footer{flex-shrink:0}
-.platform-shell .platform-search-button{height:36px}
+.platform-shell .platform-search-button{height:44px}
 .platform-nav{min-height:0;overflow:auto;align-content:start;overscroll-behavior:contain;flex:1;padding:1px}
 .platform-rail-footer{margin-top:0}
 .platform-shell .platform-main h1{font-size:clamp(24px,1.2vw + 16px,30px);line-height:1.25;text-wrap:pretty}
