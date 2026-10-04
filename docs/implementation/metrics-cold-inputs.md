@@ -46,9 +46,3 @@
 后续归属查询切片保留全部 base 与匹配 override 事件，在一次载体扫描中分别取资格 MAX 和完整性 MAX，再加独立的 override MAX。完整性版本条件保留在 LEFT JOIN 的 ON 中，无证明、零事件和仅覆写的快照仍从原输入 ID 集合得到正确的字符串修订；没有把两个 MAX 变为逐行和的 MAX。去除仅供重复扫描的 MATERIALIZED 是性能候选，其速度需原程序验证，不能由等价性推断。
 
 该归属切片的旧损坏映射、材料先到后独立资格及超过 16 MiB 回填公开回归 3/3 通过（69.20 秒），TypeScript 构建通过；证据 54-metrics-fused-carriers-public.txt。正式性能尚待固定提交测量。
-
-固定 acf9824 正式程序首次 3,271.52 ms、后续 P95 509.37 ms，正确性全部通过，首次继续 RED。精确诊断首次 3,147.07 ms；同库读后资格查询比较旧708为292/247 ms、新融合为157/121 ms，全部1,000修订相等。CPU/SQL带仪器数据只作定位，不替代正式结果。
-
-下一切片使用候选原顺序的4份原件lookahead。每份仍走当前请求的fresh SHA读取；预先检查128 MiB总量不变。producer只由async generator启动，立即把成功/失败变为settled结果；每次yield前至多补一份，实际并发不超过4。失败或提前结束时只等待已开始的读取，不新增任务或遮蔽主错误。原件结果必须通过原typed错误分支才可使用事实缓存，warm当前报告的全依赖fresh-check未动。材料SQL、事实drain和归属均保持。
-
-该切片的120原件并发/缺失/恢复/暖损坏/固定历史、A材料→B原件→C恢复及超过16 MiB资格回填公开3/3通过（75.66秒），TypeScript构建通过。只读独立检查确认并发与错误边界；不宣称对混合大/小原件不存在head-of-line代价。正式性能待固定提交测量。证据54-metrics-lookahead-public.txt、54-metrics-lookahead-build.txt。
