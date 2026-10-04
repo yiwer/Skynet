@@ -117,13 +117,17 @@ export function coverageService(db: Database,clock:()=>Date=()=>new Date()) {
 }
 export type CoverageService = ReturnType<typeof coverageService>;
 
-/** Extra semantic inputs needed only by coverage-bearing composite reports. */
+/** Extra source inputs needed only by coverage-bearing composite reports.
+ * Daily report states are derived observations, read together by matrix's one
+ * report-state SELECT and frozen in the composite payload. Background report
+ * preparation may advance them without changing any source; including that
+ * preparation in this guard makes a live team read invalidate itself forever.
+ * A later read still receives a new team version when those visible states
+ * change, because the complete coverage payload is part of its identity. */
 export async function coverageFrontier(client:pg.PoolClient,clock:()=>Date){
   const result=await client.query(`SELECT jsonb_build_object(
     'people',(SELECT jsonb_agg(jsonb_build_array(id,active) ORDER BY id) FROM employees),
     'devices',(SELECT jsonb_agg(jsonb_build_array(d.id,d.active,h.received_at,h.live_valid,h.received_at>$1::timestamptz-interval '90 seconds') ORDER BY d.id) FROM devices d LEFT JOIN device_health h ON h.device_id=d.id),
     'observations',(SELECT jsonb_agg(to_jsonb(o) ORDER BY device_id,source,date,hour) FROM device_coverage_observations o),
-    'periods',(SELECT jsonb_agg(jsonb_build_array(employee_id,date,refresh_pending) ORDER BY employee_id,date) FROM daily_report_periods),
-    'reports',(SELECT jsonb_agg(jsonb_build_array(employee_id,date,revision,payload->>'state') ORDER BY employee_id,date,revision) FROM daily_report_revisions),
     'schema',(SELECT started_at FROM coverage_schema WHERE id=1)) AS value`,[clock()]);return result.rows[0].value;
 }
