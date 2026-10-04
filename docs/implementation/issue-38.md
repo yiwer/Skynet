@@ -6,7 +6,7 @@
 
 1. 通过既有设备接入、分块上传、快照提交契约保存原件。
 2. 通过 `POST /api/snapshots/:id/analysis` 提交分析；既有独立 Worker 领取有界任务。
-3. `GET /api/snapshots/:id/insights` 与 OAuth MCP `read_session_insights` 调用同一个 `sessionInsightsService.read`。响应含推断、指标、原件计数和版本。后续报表可直接使用该服务和 contribution；不从 Web 反推数值。
+3. `GET /api/snapshots/:id/insights` 与 OAuth MCP `read_session_insights` 调用同一个 `sessionInsightsService.page`。响应含完整汇总、版本和带总数的有界数组页；后续页固定 `version` 与 `section`。内部报表继续使用完整投影和 contribution，不从 Web 反推数值。后续容量修复见[洞察分页](session-insights-pagination.md)。
 4. `?version=<响应 version>` 读取追加式 `session_insight_revisions` 的固定视图；`?analysisId=<任务 ID>` 读取指定分析。版本不跨快照或分析身份，旧任务迟到完成不取代新输入的结论。
 5. 会话侧栏的“会话洞察”显示任务类型、已验证/仅声称、返工、追问及逐提示词的四要素。结果、建议、原件计数与版本按需展开，原文链接定位到不可变输入的精确行/UTF-16 位置。系统已有侧栏单独滚动；没有新建外层滚动区。
 
@@ -25,7 +25,7 @@
 - 代码变更是原件中成功的 apply_patch 增/删行、Claude Edit 的 old/new 实际行差异，以及明确“创建文件”的 Write 文本行。Edit 用有界 Myers 最短编辑距离排除共同上下文，超过 20,000 总行或 200,000 步保持未知。Delete File 缺少旧文本、replace_all、覆盖式 Write、缺工具结果等保留未知或已知部分；不把调用意图当成应用成功。
 - 测试只从执行工具的原生结果摘要解析：Node TAP `# tests/# pass/# fail`、Jest `Tests:`、Vitest `Tests … (N)`、pytest 终结摘要。只认单个一致摘要；未支持、重复/含糊、缺结果、纯自述不填零。
 - 会话内提交需要直接 git commit 执行记录与匹配的原生提交哈希输出；不是通过 Agent 文本或外部仓库查询推测。
-- 完整且受支持、可确认没有该类记录的范围为已知零。未知行、未闭合末行、关联材料、采集缺口或未知归属使完整性降级。每项保留 `complete`、有限原文引用与完整有界 contribution。超大响应明确拒绝，不静默截断计数。
+- 完整且受支持、可确认没有该类记录的范围为已知零。未知行、未闭合末行、关联材料、采集缺口或未知归属使完整性降级。每项保留 `complete`、有限原文引用与完整有界 contribution。公开读取沿固定页取齐，不静默截断计数；单项超过响应预算仍明确拒绝。
 
 ## 验证与复跑
 
