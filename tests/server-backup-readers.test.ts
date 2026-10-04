@@ -4,7 +4,7 @@ import { randomUUID,randomBytes,createHash } from 'node:crypto';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { mcpSandbox } from './mcp-support.js';
-import { chromium,type Browser } from '@playwright/test';
+import { chromium,expect,type Browser } from '@playwright/test';
 import { join } from 'node:path';
 import { writeFile,access } from 'node:fs/promises';
 import { backupHelper } from './backup-support.js';
@@ -36,8 +36,14 @@ test('fresh restore preserves authenticated Web/MCP fixed report history, quotes
     for(const value of [result.storage,http.storage])for(const field of ['filesystemBytes','freeBytes']){assert.ok(value[field]===null||Number.isSafeInteger(value[field])&&value[field]>=0);if(value[field]===null)assert.ok(value.capacityError);}
     assert.equal(result.latestBackup,null);assert.equal(result.latestRestore,null);assert.equal(result.reception,'single-copy');
     browser=await chromium.launch({headless:true});const page=await browser.newPage({ignoreHTTPSErrors:true});await page.goto(s.origin);
-    await page.getByLabel('个人读取凭据').fill(employee.readerCredential);await page.getByRole('button',{name:'进入存档',exact:true}).click();await page.getByRole('button',{name:'运行与备份',exact:true}).click();
-    await page.getByText('尚无成功备份记录。',{exact:true}).waitFor();assert.equal(await page.getByRole('heading',{name:'原件容量',exact:true}).count(),1);assert.equal(await page.getByText('尚无恢复完整性校验记录。',{exact:true}).count(),1);assert.equal(await page.getByText('上传确认仅表示单副本接收。成功备份与恢复演练各自记录范围，原件不自动删除。',{exact:true}).count(),1);
+    await page.getByLabel('个人读取凭据').fill(employee.readerCredential);await page.getByRole('button',{name:'进入存档',exact:true}).click();
+    async function openOperations(target:import('@playwright/test').Page){
+      if(await target.getByRole('button',{name:'打开导航',exact:true}).isVisible())await target.getByRole('button',{name:'打开导航',exact:true}).click();
+      await target.getByRole('navigation',{name:'平台页面',exact:true}).getByRole('button',{name:'分析与运行',exact:true}).click();
+      await target.getByRole('link',{name:'运行与备份',exact:true}).click();
+    }
+    await openOperations(page);
+    await page.getByText('暂无成功备份',{exact:true}).waitFor();await expect(page.getByRole('heading',{name:'原件容量',exact:true})).toBeVisible();await expect(page.getByRole('heading',{name:'恢复完整性校验',exact:true})).toHaveCount(0);
     const screenshots:string[]=[];
     async function capture(page:import('@playwright/test').Page,state:string){for(const colorScheme of ['light','dark'] as const)for(const width of [320,1280]){
       await page.setViewportSize({width,height:900});await page.emulateMedia({colorScheme});
@@ -46,8 +52,8 @@ test('fresh restore preserves authenticated Web/MCP fixed report history, quotes
     }}
     await capture(page,'empty');
     await page.route('**/api/server/operations',route=>route.fulfill({status:503,contentType:'application/json',body:JSON.stringify({error:'合成故障：服务器容量状态暂不可读'})}));
-    await page.getByRole('button',{name:'会话存档',exact:true}).click();await page.getByRole('button',{name:'运行与备份',exact:true}).click();await page.getByRole('alert').getByText('合成故障：服务器容量状态暂不可读',{exact:true}).waitFor();await capture(page,'error');
-    await page.unroute('**/api/server/operations');await page.getByRole('button',{name:'会话存档',exact:true}).click();await page.getByRole('button',{name:'运行与备份',exact:true}).click();await page.getByText('尚无成功备份记录。',{exact:true}).waitFor();
+    await openOperations(page);await page.getByRole('alert').getByText('合成故障：服务器容量状态暂不可读',{exact:true}).waitFor();await capture(page,'error');
+    await page.unroute('**/api/server/operations');await openOperations(page);await page.getByText('暂无成功备份',{exact:true}).waitFor();
     const api=(path:string,init:RequestInit={})=>s.api(path,employee.readerCredential,init);
     const device=await(await s.api('/api/devices/enroll',employee.enrollmentCredential,json({installationId:randomUUID(),name:'report backup source'}))).json();
     const sessionId=randomUUID(),timestamp=new Date(Date.now()+10).toISOString(),quote='灾备后这句原始目标与工具上下文保持逐字可查🛰';
@@ -123,7 +129,7 @@ test('fresh restore preserves authenticated Web/MCP fixed report history, quotes
       assert.deepEqual(await tool('read_report_corrections',{employeeId:employee.employeeId,date}),JSON.parse(history));
       const quoted=daily.items.flatMap((item:any)=>item.citations).find((citation:any)=>citation.quote===quote);assert.ok(quoted?.location);const located=await tool('read_location',{snapshotId:quoted.snapshotId,location:quoted.location});assert.ok(JSON.stringify(located).includes(quote));
       const operations=await tool('read_server_operations',{});assert.equal(operations.latestBackup.id,backup.receipt.id);assert.equal(operations.latestRestore.verification,'integrity-only');assert.equal(operations.reception,'single-copy');
-      const targetPage=await browser.newPage({ignoreHTTPSErrors:true});await targetPage.goto(fresh.origin);await targetPage.getByLabel('个人读取凭据').fill(employee.readerCredential);await targetPage.getByRole('button',{name:'进入存档',exact:true}).click();await targetPage.getByRole('button',{name:'运行与备份',exact:true}).click();await targetPage.getByText('仅完整性校验；尚未验证原生续聊、异机重建和第二维护者操作。',{exact:true}).waitFor();assert.ok((await targetPage.getByRole('region',{name:'服务器运行与备份'}).innerText()).includes(backup.receipt.id));
+      const targetPage=await browser.newPage({ignoreHTTPSErrors:true});await targetPage.goto(fresh.origin);await targetPage.getByLabel('个人读取凭据').fill(employee.readerCredential);await targetPage.getByRole('button',{name:'进入存档',exact:true}).click();await openOperations(targetPage);await expect(targetPage.getByRole('heading',{name:'恢复完整性校验',exact:true})).toBeVisible();assert.ok((await targetPage.getByRole('region',{name:'服务器运行与备份'}).innerText()).includes(backup.receipt.id));
       await capture(targetPage,'populated');
       await writeFile(join(s.directory,'backup-restored-readers-public.json'),JSON.stringify({receipt:backup.receipt,restored,snapshotId:ack.snapshotId,eventIds:detail.events.map((event:any)=>event.origin.eventId),fixedPaths,frozenBodiesExact:true,correctionsExact:true,correctionVersions:{originalFixed:daily.revision,submittedCurrent:current.revision,corrected:corrected.revision},fixedStatistic:{identity:fixedStatistic,path:statisticPath,sourceBodySha256:digest(sourceStatisticBody),sourceInputsComplete:sourceStatistic.sourceInputsComplete,nextOffset:sourceStatistic.nextOffset,httpExact:true,oauthMcpExact:true},exports:Array.from(exports,([format,bytes])=>({format,hash:digest(bytes),byteLength:bytes.length})),operations,outsideBoundary:{snapshotId:outside.snapshotId,sourceReadable:true,restoredStatus:404,restoredChunkAbsent:true},fixtureReportOnly:true,screenshots},null,2));console.log(`Server backup readers/report evidence: ${s.directory}`);
     }finally{await restoredClient?.close();if(fresh)await fresh.close();else await bare.close();}

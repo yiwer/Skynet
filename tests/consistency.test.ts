@@ -180,8 +180,8 @@ test('public upload survives killed processes and lost confirmations with one im
     assert.ok((await (await api(`/api/snapshots/${committed.snapshotId}/readable`)).text()).includes(thirdBytes.toString()));
 
     browser = await chromium.launch(); const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
-    await page.goto(upstream); await page.getByLabel('个人读取凭据').fill(reader.readerCredential); await page.getByRole('button', { name: '进入存档' }).click();
-    await page.getByRole('link').filter({ hasText: '一致性合成员工' }).click();
+    await page.goto(upstream + '/#sessions'); await page.getByLabel('个人读取凭据').fill(reader.readerCredential); await page.getByRole('button', { name: '进入存档' }).click();
+    await page.getByRole('row').filter({ hasText: '一致性合成员工' }).getByRole('link').click();
     await expect(page.getByRole('article', { name: '会话详情' })).toContainText('确认丢失十次只出现一次的活动');
     const downloadReady = page.waitForEvent('download'); await page.getByRole('button', { name: '下载原件', exact: true }).click();
     const downloadPath = await (await downloadReady).path(); assert.ok(downloadPath);

@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash, randomUUID } from 'node:crypto';
-import { appendFile, mkdir, readFile, symlink, truncate, unlink, writeFile } from 'node:fs/promises';
+import { access, appendFile, mkdir, readFile, symlink, truncate, unlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { chromium, expect, type Browser } from '@playwright/test';
@@ -80,11 +80,17 @@ test('three sources retain generations, related bytes, bounded large output and 
       if (source === 'claude-code-cli' && process.env.SKYNET_CLAUDE_RUNTIME) {
         const packagePath = join(home, 'metadata-recovery.json'); const target = join(home, 'metadata-restored');
         await writeFile(packagePath, bundleBytes);
-        await command(process.execPath, ['dist/apps/collector/cli.js', 'restore', '--package', packagePath, '--target', target,
-          '--runtime', process.env.SKYNET_CLAUDE_RUNTIME], sandbox.env);
-        assert.equal(await readFile(join(target, 'projects', 'skynet-restored', sessionId, 'subagents', 'agent-child.meta.json'), 'utf8'), JSON.stringify({ agentType: 'general-purpose' }));
-        assert.deepEqual(await readFile(join(target, 'projects', 'skynet-restored', sessionId, 'subagents', 'agent-child.jsonl')),
-          bundle.materials.find(item => item.material.name === 'subagents/agent-child.jsonl')!.bytes);
+        const restore = () => command(process.execPath, ['dist/apps/collector/cli.js', 'restore', '--package', packagePath, '--target', target,
+          '--runtime', process.env.SKYNET_CLAUDE_RUNTIME!], sandbox.env);
+        if (process.platform === 'win32') {
+          await restore();
+          assert.equal(await readFile(join(target, 'projects', 'skynet-restored', sessionId, 'subagents', 'agent-child.meta.json'), 'utf8'), JSON.stringify({ agentType: 'general-purpose' }));
+          assert.deepEqual(await readFile(join(target, 'projects', 'skynet-restored', sessionId, 'subagents', 'agent-child.jsonl')),
+            bundle.materials.find(item => item.material.name === 'subagents/agent-child.jsonl')!.bytes);
+        } else {
+          await assert.rejects(restore, /Unsupported source\/target Claude CLI, OS or architecture combination; no files were changed/);
+          await assert.rejects(access(target), { code: 'ENOENT' });
+        }
       }
       for (const item of bundle.materials) { assert.equal(hash(item.bytes), item.material.hash); assert.ok(!item.bytes.includes(Buffer.from('NEVER_UPLOAD'))); }
       const bad = JSON.parse(bundleBytes.toString()); bad.materials.pop(); const { packageSha256: _, ...content } = bad; bad.packageSha256 = hash(JSON.stringify(content));

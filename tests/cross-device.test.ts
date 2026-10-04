@@ -96,8 +96,11 @@ test('public capture and verified A→B→C recovery preserve event owners, proj
     browser = await chromium.launch(); const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
     await page.goto(`${origin}/#${third.snapshotId}`); await page.getByLabel('个人读取凭据').fill(beta.readerCredential);
     await page.getByRole('button', { name: '进入存档' }).click();
-    await expect(page.getByRole('region', { name: '历史归属' })).toContainText('服务器已核对恢复来源');
-    await expect(page.getByRole('region', { name: '跨设备去重统计' })).toContainText('谱系员工乙');
+    const assembly = page.getByRole('region', { name: '组装与去重', exact: true });
+    await expect(assembly).toContainText('恢复历史合并');
+    await expect(assembly.getByRole('link', { name: '查看原始归属', exact: true })).toHaveAttribute('href', '#' + second.snapshotId);
+    await page.getByRole('link', { name: '时间线', exact: true }).click();
+    await expect(page.getByRole('link', { name: '时间线', exact: true })).toHaveAttribute('aria-current', 'page');
     await expect(page.getByRole('article', { name: '会话详情' })).toContainText('原始归属：谱系员工乙');
     await page.screenshot({ path: join(sandbox.directory, 'cross-device-desktop.png'), fullPage: true });
     await page.setViewportSize({ width: 375, height: 1000 }); assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true);

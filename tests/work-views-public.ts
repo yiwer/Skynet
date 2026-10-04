@@ -153,12 +153,18 @@ export async function workViewsPublic(native: boolean,extension?:WorkViewsExtens
       const headers: Record<string, string> = {}; response.headers.forEach((value, key) => { headers[key] = value; }); await route.fulfill({ status: response.status, headers, body: Buffer.from(await response.arrayBuffer()) }); });
     await page.goto(`${sandbox.origin}/#work?${new URLSearchParams({ ...fullRange, revision: String(project.revision) })}`);
     await page.getByLabel('个人读取凭据').fill(beta.readerCredential); await page.getByRole('button', { name: '进入存档', exact: true }).click();
-    const panel = page.getByRole('region', { name: '周工作与项目', exact: true }); await expect(panel).toContainText(`不可变版本标识：${project.version}`);
+    const panel = page.getByRole('region', { name: '周工作与项目', exact: true });
+    await panel.locator('summary').filter({ hasText: '版本与来源' }).click();
+    assert.ok(project.version, 'the visible fixed report retains an immutable version');
+    await expect(panel).toContainText(project.version);
+    await expect(panel.getByRole('link', { name: '本版永久链接', exact: true })).toHaveAttribute('href', new RegExp(`revision=${project.revision}$`));
     await expect(panel).toContainText('合成周工作甲'); await expect(panel).toContainText('合成周工作乙'); await expect(panel).toContainText('会话内成果');
-    await panel.getByRole('button', { name: '读取本版更多事项', exact: true }).click(); await expect(panel).toContainText('待继续事项');
-    await panel.getByRole('link', { name: /核查日报 v/ }).first().click();
+    await panel.getByRole('button', { name: '更多事项', exact: true }).click(); await expect(panel).toContainText('待继续事项');
+    await panel.getByRole('link', { name: /日报 v/ }).first().click();
     const daily = page.getByRole('region', { name: '日工作', exact: true }); await expect(daily.getByLabel('历史版本（留空读取最新）')).not.toHaveValue('');
-    await daily.getByRole('link', { name: /核查本日原句/ }).first().click(); await expect(page.getByRole('region', { name: '命中证据', exact: true })).toContainText('共同主题');
+    const evidence = daily.locator('details.report-evidence').first();
+    await evidence.locator('summary').click();
+    await evidence.getByRole('link').first().click(); await expect(page.getByRole('region', { name: '命中证据', exact: true })).toContainText('共同主题');
     assert.deepEqual(Buffer.from(await (await sandbox.api(`/api/snapshots/${original.snapshotId}/raw`, beta.readerCredential)).arrayBuffer()), original.bytes);
     const extensionEvidence=await extension?.({sandbox,alpha,beta,original,sunday,nextMonday,tuesday,week,project,previous,client,page,drain,queue,config,native});
     await writeFile(join(sandbox.directory, 'work-view-public-evidence.json'), JSON.stringify({ native, reportingCalendar: 'trusted synthetic Sunday→Monday→next Monday, not real elapsed weeks', offline, previous, next, project, more, empty,
