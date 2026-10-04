@@ -21,6 +21,7 @@ import { ServerOperations } from './ServerOperations.js';
 import { UsageMetrics } from './UsageMetrics.js';
 import { DataProcessing } from './Assembly.js';
 import { WaitingReport } from './WaitingReport.js';
+import { ActivityRecords } from './ActivityRecords.js';
 import './product-polish.css';
 
 function App() {
@@ -29,8 +30,8 @@ function App() {
   const [name, setName] = useState('');
   const [employeeId, setEmployeeId] = useState('');
   const [canManageIdentities, setCanManageIdentities] = useState(false);
-  type View='archive'|'identities'|'delivery'|'daily'|'analysis'|'work'|'coverage'|'server'|'metrics'|'recovery'|'pipeline'|'waits';
-  const hashView=():View=>{const head=location.hash.slice(1).split('?')[0];const aliases:Record<string,View>={waits:'waits',metrics:'metrics',usage:'metrics',daily:'daily',work:'work',project:'work',team:'coverage',coverage:'coverage',devices:'identities',identities:'identities',pipeline:'pipeline',delivery:'delivery',ops:'analysis',analysis:'analysis',server:'server',recovery:'recovery'};return aliases[head??'']??'archive';};
+  type View='archive'|'identities'|'delivery'|'daily'|'analysis'|'work'|'coverage'|'server'|'metrics'|'recovery'|'pipeline'|'waits'|'activity';
+  const hashView=():View=>{const head=location.hash.slice(1).split('?')[0];const aliases:Record<string,View>={activity:'activity',waits:'waits',metrics:'metrics',usage:'metrics',daily:'daily',work:'work',project:'work',team:'coverage',coverage:'coverage',devices:'identities',identities:'identities',pipeline:'pipeline',delivery:'delivery',ops:'analysis',analysis:'analysis',server:'server',recovery:'recovery'};return aliases[head??'']??'archive';};
   const snapshotFromHash=()=>{const head=location.hash.slice(1).split('?')[0]??'';return /^[a-f0-9-]{36}$/.test(head)?head:'';};
   const searchDialog=useRef<HTMLDialogElement>(null);
   const [searchOpen,setSearchOpen]=useState(false);
@@ -130,6 +131,7 @@ function App() {
   return <PlatformShell authenticated={!!token} name={name} canManageIdentities={canManageIdentities} view={view} onNavigate={navigate} onLogout={()=>logout()} onSearch={openSearch}>
     {!token?<section className="login"><h1>登录 Skynet</h1><form onSubmit={login}><label htmlFor="credential">个人读取凭据</label><input id="credential" type="password" value={credential} onChange={event=>setCredential(event.target.value)} autoComplete="off" required/><button className="primary" disabled={busy||!credential}>{busy?'正在验证…':'进入存档'}</button></form></section>:<>
     {view==='metrics'?<UsageMetrics key={token} request={(path,signal,method,body)=>request(path,token,signal,method,body)}/>
+    :view==='activity'?<ActivityRecords key={token} hash={conversationHash} request={(path,signal,method,body)=>request(path,token,signal,method,body)}/>
     :view==='waits'?<WaitingReport key={token} request={(path,signal,method,body)=>request(path,token,signal,method,body)}/>
     :view==='pipeline'?<DataProcessing request={(path,signal)=>request(path,token,signal)}/>
     :view==='server'?<ServerOperations request={(path,signal)=>request(path,token,signal)}/>
