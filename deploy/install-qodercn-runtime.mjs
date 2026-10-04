@@ -18,6 +18,9 @@ const archivePath=join(directory,'runtime.tar.gz');await writeFile(archivePath,a
 const members=execFileSync('tar',['-tzf',archivePath],{encoding:'utf8',maxBuffer:1048576}).trim().split('\n');
 if(members.some(name=>name.startsWith('/')||name.split('/').includes('..')))throw new Error('Qoder runtime archive path invalid');
 execFileSync('tar',['-xzf',archivePath,'--no-same-owner','-C',directory]);
+// The official archive's root entry is 0700. Restore traversal for the image's
+// non-root worker after extraction, which otherwise replaces mkdir's mode.
+await chmod(directory,0o755);
 const executable=join(directory,'qoderclicn');await chmod(executable,0o755);
 if(execFileSync(executable,['--version'],{encoding:'utf8',timeout:10000}).trim()!=='1.1.64')throw new Error('Qoder runtime version mismatch');
 await rm(archivePath);console.log('Installed verified Qoder CN 1.1.64');
