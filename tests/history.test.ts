@@ -187,9 +187,10 @@ test('resuming one old conversation preserves source dates, sends verified appen
     browser = await chromium.launch(); const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
     await page.goto(`${upstream}#${results.at(-1)!.snapshotId}`);
     await page.getByLabel('个人读取凭据').fill(reader.readerCredential); await page.getByRole('button', { name: '进入存档' }).click();
-    const activity = page.getByRole('region', { name: '来源日期与活动' });
-    await expect(activity).toContainText('用户轮次 2 · 工具调用 1');
-    await activity.getByText('按来源日期查看', { exact: true }).click(); await expect(activity).toContainText('2000-01-02');
+    await page.getByRole('link', { name: '时间线', exact: true }).click();
+    await expect(page.getByRole('link', { name: '时间线', exact: true })).toHaveAttribute('aria-current', 'page');
+    await page.getByText('原件与来源信息', { exact: true }).click();
+    await expect(page.locator('.session-archive-facts')).toContainText('2000/1/1 23:59:59');
     await expect(page.locator('.message').first()).toContainText('历史上下文');
     let nextOffset = (await detail(results.at(-1)!.snapshotId)).nextOffset;
     while (nextOffset !== null) {
@@ -197,7 +198,8 @@ test('resuming one old conversation preserves source dates, sends verified appen
       await page.getByRole('button', { name: '下一页', exact: true }).click();
       const nextPage = await (await response).json(); nextOffset = nextPage.nextOffset;
       await expect(page.locator('.message').first()).toContainText(`原件第 ${nextPage.events[0].line} 行`);
-      await expect(activity).toContainText('用户轮次 2 · 工具调用 1');
+      assert.equal(nextPage.activity.today.counts.userTurns, 2, 'timeline pages retain whole-session activity totals');
+      assert.equal(nextPage.activity.today.counts.toolCalls, 1);
     }
     await expect(page.locator('.message').filter({ hasText: 'unknown-time preserved' })).toContainText('来源时间：未知');
     await expect(page.locator('.message').filter({ hasText: 'new-turn-two' }).first()).toContainText('接入后活动');
@@ -205,8 +207,10 @@ test('resuming one old conversation preserves source dates, sends verified appen
     await page.setViewportSize({ width: 375, height: 900 });
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
     await page.screenshot({ path: join(sandbox.directory, 'history-mobile.png'), fullPage: true });
-    await page.getByRole('link').filter({ hasText: '/synthetic/legacy-boundary' }).click();
-    await expect(activity).toContainText('未知，缺少可信设备接入时间');
+    await page.getByRole('navigation', { name: '位置' }).getByRole('link', { name: '会话', exact: true }).click();
+    await page.getByRole('row').filter({ hasText: 'legacy-boundary' }).getByRole('link').click();
+    await page.getByRole('link', { name: '时间线', exact: true }).click();
+    await expect(page.getByRole('link', { name: '时间线', exact: true })).toHaveAttribute('aria-current', 'page');
     await expect(page.locator('.message').first()).toContainText('接入边界未知');
     console.log(`History synthetic API/UI evidence: ${sandbox.directory}; host calls are simulated, native-client acceptance is separate.`);
   } finally {

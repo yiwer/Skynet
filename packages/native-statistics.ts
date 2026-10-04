@@ -53,6 +53,7 @@ export function nativeStatistics(bytes: Buffer, source: Source, version: string,
     const record = options.prepared?.records[index];
     if (record) { if (!record.parsed) continue; row = record.value; }
     else { try { row = JSON.parse(raw); } catch { continue; } }
+    if (row === null || typeof row !== 'object' || Array.isArray(row)) continue;
     const timestamp = sourceTimestamp(row.timestamp); const line = index + 1;
     if (source !== 'claude-code-cli' && row.type === 'event_msg' && row.payload?.type === 'token_count') {
       const value = row.payload.info?.total_token_usage;
@@ -98,7 +99,7 @@ export function nativeStatistics(bytes: Buffer, source: Source, version: string,
       messages.set(item.key, item);
     }
     if (source === 'claude-code-cli' && row.type === 'assistant' && Array.isArray(row.message?.content)) {
-      for (const [block, item] of row.message.content.entries()) if (item.type === 'tool_use') {
+      for (const [block, item] of row.message.content.entries()) if (item?.type === 'tool_use') {
         const recognized = supported && ['Read', 'Write', 'Edit'].includes(item.name) && path(item.input?.file_path);
         files.push({ line, block, paths: recognized ? [item.input.file_path] : [], supported: recognized });
       }

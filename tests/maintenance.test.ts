@@ -10,7 +10,7 @@ import { chromium, expect, type Browser } from '@playwright/test';
 import { command, createSandbox } from './support.js';
 import { installAgent, stopInstalled } from './installed-support.js';
 
-test('repair → interrupted upgrade rollback → upgrade → uninstall → frozen drain retains identity, user settings and exact archives', { timeout: 240_000 }, async () => {
+test('repair → interrupted upgrade rollback → upgrade → uninstall → frozen drain retains identity, user settings and exact archives', { timeout: process.platform === 'win32' ? 600_000 : 240_000 }, async () => {
   const started = Date.now(); const sandbox = await createSandbox(); let state: string | undefined; let browser: Browser | undefined;
   let stage = 'prepare'; let failed = false;
   const stages: { stage: string; at: string; elapsedMs: number }[] = [];
@@ -188,10 +188,10 @@ test('repair → interrupted upgrade rollback → upgrade → uninstall → froz
     const history = await (await fetch(`${origin}/api/snapshots/${sessions[0].id}/history`, { headers })).json(); assert.equal(history.snapshots.length, 2);
     assert.equal(await readFile(join(state!, 'identity.json'), 'utf8'), identity);
     const finalRepair = JSON.parse(await command(process.execPath, [launcher, 'repair'], env)); assert.equal(finalRepair.background, 'unavailable'); assert.equal(finalRepair.lifecycle, 'uninstalled');
-    await progress('web-archive'); browser = await chromium.launch(); const page = await browser.newPage(); await page.goto(origin);
+    await progress('web-archive'); browser = await chromium.launch(); const page = await browser.newPage(); await page.goto(origin + '/#sessions');
     await page.getByLabel('个人读取凭据').fill(reader.readerCredential); await page.getByRole('button', { name: '进入存档' }).click();
-    await page.getByRole('link', { name: /维护合成员工 Claude Code CLI/ }).click(); await expect(page.getByText('升级中断仍须保留的离线材料', { exact: false })).toBeVisible();
-    await page.getByText('接入设备 · npm / 插件安装说明', { exact: true }).click(); await expect(page.getByText('完整停用先执行', { exact: false })).toBeVisible();
+    await page.getByRole('row').filter({ hasText: '维护合成员工' }).filter({ hasText: 'Claude Code CLI' }).getByRole('link').click(); await expect(page.getByText('升级中断仍须保留的离线材料', { exact: false })).toBeVisible();
+    await page.getByRole('navigation', { name: '平台页面' }).getByRole('button', { name: '接入与设备', exact: true }).click(); await expect(page.getByRole('region', { name: '设备同步状态', exact: true })).toContainText('维护合成员工');
     await page.screenshot({ path: join(sandbox.directory, 'maintenance-archive.png'), fullPage: true });
     await progress('complete'); await writeFile(join(sandbox.directory, 'maintenance-evidence.json'), JSON.stringify({ interruption, identityRetained: true, exactFrozenBytes: true,
       repeatRepairOneDefinition: true, occupiedListenerPreserved: true, userSettingsPreserved: true, rollbackAfterSuccess: true, uninstallStopsCapture: true,

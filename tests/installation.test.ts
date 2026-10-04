@@ -9,7 +9,7 @@ import { chromium, expect, type Browser } from '@playwright/test';
 import { command, createSandbox, syntheticSession } from './support.js';
 import { installAgent, stopInstalled } from './installed-support.js';
 
-test('offline npm package with scripts disabled → one key setup → owned hooks → shared background → archive and status', { timeout: 180_000 }, async () => {
+test('offline npm package with scripts disabled → one key setup → owned hooks → shared background → archive and status', { timeout: process.platform === 'win32' ? 600_000 : 180_000 }, async () => {
   const sandbox = await createSandbox(); let state: string | undefined; let browser: Browser | undefined;
   try {
     const home = join(sandbox.directory, 'isolated user with spaces'); const bin = join(home, 'bin');
@@ -107,8 +107,8 @@ test('offline npm package with scripts disabled → one key setup → owned hook
     assert.ok(recoveries.every(item => item.deviceId === identity.deviceId), 'both adapters commit under one server-owned device');
     const status = JSON.parse(await installed.run('status')); assert.equal(status.clients.find((client: any) => client.source === 'codex-cli').confirmedUploads, 1);
     assert.ok(status.clients.find((client: any) => client.source === 'codex-cli').firstEvent);
-    browser = await chromium.launch(); const page = await browser.newPage(); await page.goto(origin); await page.getByLabel('个人读取凭据').fill(reader.readerCredential); await page.getByRole('button', { name: '进入存档' }).click();
-    await page.getByRole('link').filter({ hasText: '安装合成员工' }).filter({ hasText: 'Codex CLI' }).click(); await expect(page.getByText('会话记录显示测试通过。')).toBeVisible();
+    browser = await chromium.launch(); const page = await browser.newPage(); await page.goto(origin + '/#sessions'); await page.getByLabel('个人读取凭据').fill(reader.readerCredential); await page.getByRole('button', { name: '进入存档' }).click();
+    await page.getByRole('row').filter({ hasText: '安装合成员工' }).filter({ hasText: 'Codex CLI' }).getByRole('link').click(); await expect(page.getByText('会话记录显示测试通过。')).toBeVisible();
     // The setup shell has exited. The background continues without its Key/PATH;
     // a crashed owned worker is restarted by the supervisor, retaining identity.
     if (process.platform === 'win32') {

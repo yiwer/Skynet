@@ -34,7 +34,7 @@ export function SessionAnalysis({ snapshotId, request,onChange }: { snapshotId: 
   </section>;
 }
 function AnalysisResult({ run, retry }: { run: AnalysisRun; retry: () => Promise<void> }) {
-  return <div className="analysis-result"><h4>{analysisStates[run.state]}</h4>
+  return <div className="analysis-result"><h4>{run.state==='succeeded'&&run.result?.processing?.complete===false?'分析部分完成':analysisStates[run.state]}</h4>
     <p className="small muted">版本 {run.generation} · {run.applicable?'当前版本':'历史版本'}</p>
     {['failed','retry-wait'].includes(run.state)&&run.attempts<run.maxAttempts&&<button onClick={retry}>重试</button>}
     {run.error&&<p className="error">{run.error}</p>}

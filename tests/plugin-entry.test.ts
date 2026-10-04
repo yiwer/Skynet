@@ -89,12 +89,12 @@ test('plugin payloads share npm ownership; final entry removal delivers frozen b
     const history = await (await fetch(`${origin}/api/snapshots/${sessions[0].id}/history`, { headers })).json(); assert.equal(history.snapshots.length, 2);
     await rename(packed.directory, `${packed.directory} cache unavailable`);
     assert.equal(JSON.parse(await installed.run('status')).deviceId, registered.deviceId);
-    browser = await chromium.launch(); const page = await browser.newPage(); await page.goto(origin); await page.getByLabel('个人读取凭据').fill(reader.readerCredential);
+    browser = await chromium.launch(); const page = await browser.newPage(); await page.goto(origin + '/#sessions'); await page.getByLabel('个人读取凭据').fill(reader.readerCredential);
     await page.getByRole('button', { name: '进入存档' }).click();
-    await page.getByRole('link', { name: /插件合成员工 Claude Code CLI/ }).click();
+    await page.getByRole('row').filter({ hasText: '插件合成员工' }).filter({ hasText: 'Claude Code CLI' }).getByRole('link').click();
     await expect(page.getByText('离线时已冻结材料', { exact: false })).toBeVisible();
-    await page.getByText('接入设备 · npm / 插件安装说明', { exact: true }).click();
-    await expect(page.getByText('当前插件同样要求 Node 24。', { exact: false })).toBeVisible();
+    await page.getByRole('navigation', { name: '平台页面' }).getByRole('button', { name: '接入与设备', exact: true }).click();
+    await expect(page.getByRole('region', { name: '设备同步状态', exact: true })).toContainText('插件合成员工');
     await page.screenshot({ path: join(sandbox.directory, 'plugin-archive-and-installation.png'), fullPage: true });
     await writeFile(join(sandbox.directory, 'plugin-entry-evidence.json'), JSON.stringify({ deviceId: registered.deviceId, entries: registered.entries,
       nativeHosts: false, oneHookDefinition: true, oldPluginRejected: true, lastOwnerStopsNativeReads: true, frozenPendingDelivered: true,

@@ -45,14 +45,18 @@ test('Codex CLI preserves two projects, native version, tool results and availab
     assert.ok(detail.events.some((item: any) => item.text.includes('export const value = 42;')));
     assert.equal(detail.recovery.desktopUi, 'not-applicable');
     browser = await chromium.launch(); const page = await browser.newPage();
-    await page.goto(origin); await page.getByLabel('个人读取凭据').fill(reader.readerCredential);
+    await page.goto(origin + '/#sessions'); await page.getByLabel('个人读取凭据').fill(reader.readerCredential);
     await page.getByRole('button', { name: '进入存档' }).click();
-    await page.getByRole('link').filter({ hasText: '/synthetic/alpha' }).click();
-    await expect(page.getByRole('article').getByText('合成 CLI 员工 · Codex CLI', { exact: true })).toBeVisible();
+    await page.getByRole('row').filter({ hasText: 'alpha' }).getByRole('link').click();
+    await expect(page.getByRole('article', { name: '会话详情' })).toContainText('合成 CLI 员工 · alpha · Codex CLI');
+    await page.getByRole('link', { name: '时间线', exact: true }).click();
+    await expect(page.getByRole('link', { name: '时间线', exact: true })).toHaveAttribute('aria-current', 'page');
     await expect(page.getByText('Synthetic alpha: 2 tests passed', { exact: true })).toBeVisible();
     await expect(page.getByText('export const value = 42;', { exact: false })).toBeVisible();
-    await expect(page.getByText('1 行未解析', { exact: false })).toBeVisible();
-    await page.getByText('查看 CLI 恢复准备步骤').click();
-    await expect(page.getByText('工具返回值及代码变更仅反映原会话可提供的材料', { exact: false })).toBeVisible();
+    await page.getByText('原件与来源信息', { exact: true }).click();
+    await expect(page.locator('.session-archive-facts').getByText('1 行未解析', { exact: false })).toBeVisible();
+    await page.getByRole('link', { name: '找回此会话', exact: true }).click();
+    await expect(page.getByRole('radio', { name: /完整可读导出/ })).toBeVisible();
+    await expect(page.getByRole('radio', { name: /恢复资料包/ })).toBeVisible();
   } finally { try { await browser?.close(); } finally { await sandbox.close(); } }
 });
