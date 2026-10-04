@@ -31,7 +31,10 @@ import type { usageOutputService } from './usage-output.js';
 import type { sessionEfficiencyService } from './session-efficiency.js';
 import { efficiencyQuerySchema } from '../../packages/contracts/session-efficiency.js';
 
-export async function registerMcp(app: FastifyInstance, db: Database, archive: ArchiveQuery, publicOrigin: string, analysis: AnalysisService, reports: ReportService, coverage: CoverageService, workStatistics: WorkStatisticsService, workViews: WorkViewService,operations:ServerOperationsService, conversation: ReturnType<typeof conversationQuery>, metrics: ReturnType<typeof metricsService>, assembly: ReturnType<typeof assemblyService>, processing: ReturnType<typeof processingService>, insights:ReturnType<typeof sessionInsightsService>, waits:ReturnType<typeof waitsService>, usage:ReturnType<typeof usageOutputService>, waitReport:ReturnType<typeof waitReportService>, efficiency:ReturnType<typeof sessionEfficiencyService>) {
+import type { activityService } from './activity.js';
+import { activityQuerySchema } from '../../packages/contracts/activity.js';
+
+export async function registerMcp(app: FastifyInstance, db: Database, archive: ArchiveQuery, publicOrigin: string, analysis: AnalysisService, reports: ReportService, coverage: CoverageService, workStatistics: WorkStatisticsService, workViews: WorkViewService,operations:ServerOperationsService, conversation: ReturnType<typeof conversationQuery>, metrics: ReturnType<typeof metricsService>, assembly: ReturnType<typeof assemblyService>, processing: ReturnType<typeof processingService>, insights:ReturnType<typeof sessionInsightsService>, waits:ReturnType<typeof waitsService>, usage:ReturnType<typeof usageOutputService>, waitReport:ReturnType<typeof waitReportService>, activity:ReturnType<typeof activityService>, efficiency:ReturnType<typeof sessionEfficiencyService>) {
   const { guard } = await registerMcpAuth(app, db, publicOrigin);
   const offset = z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).default(0);
   const snapshotId = z.uuid().describe('Immutable snapshot ID from list_sessions, never a mutable session ID');
@@ -69,6 +72,7 @@ export async function registerMcp(app: FastifyInstance, db: Database, archive: A
       annotations, inputSchema: metricsQuerySchema }, input => result(() => usage.read(input)));
     mcp.registerTool('read_wait_report', { description:'按固定等待来源读取中位数/P90、长等待与并行占比、星期小时热力表和姓名顺序人员分布。保留分子分母，权限未知单列。等待不用于考勤，建议不更改宿主权限。', annotations, inputSchema:waitReportQuerySchema }, input=>result(()=>waitReport.read(input)));
     mcp.registerTool('read_session_efficiency',{description:'读取固定会话产效、同类任务分布及严格 P75/声称/返工复盘条件。比值保留分子分母，未知与零分母不计算，时间分段绑定同一批原件与等待版本。sort/direction 只排序会话；后续页传同一 version 与 nextOffset。',annotations,inputSchema:efficiencyQuerySchema},input=>result(()=>efficiency.read(input)));
+    mcp.registerTool('list_activity',{description:'按北京时间分页读取同一版本的活动记录与对话节奏。date、employeeId、source、project、type 共同筛选；后续页固定 version。section=events/lanes/inputs 分别按 nextOffset/nextLaneOffset/nextInputOffset 查询事件、泳道及来源，均为最多25项的有界页。返工与追问附分析版本，原生本轮结束不表示永久结束，补传必须有投递记录。',annotations,inputSchema:activityQuerySchema},input=>result(()=>activity.read(input)));
     mcp.registerTool('read_waits', { description: '读取与 Web、导出共用的固定等待记录：原生本轮结束至下一条真实用户，末尾空闲排除，满600秒为长等待；权限未知单列。同员工其他逻辑会话活动含其他项目与Agent。后续页固定version；contextSnapshotId与lines可读取该版本的对话行标签。',
       annotations, inputSchema: waitsQuerySchema }, input => result(() => waits.read(input)));
     mcp.registerTool('list_sessions', { description: '分页列出全体员工的会话快照。nextCursor 保持同一查询时间范围。',
