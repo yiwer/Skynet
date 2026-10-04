@@ -152,6 +152,14 @@ sudo bash /opt/skynet/current/deploy/ubuntu-release.sh \
 
 ## 6. 实际发布记录
 
+最新记录（2026-10-05 03:05，北京时间）：线上运行 **`v2-726e32efc40c-1`**，已于 02:53:15 发布。固定 Git `726e32efc40c988d9a23817c5b2faf5b6f3569a5`；归档 SHA-256 `d4e89b3ea3a723f782fb506c30e176a8867768d4a5a4163eb95e8d5534a3c21a`，服务器源码 SHA-256 `4257244dc365ae3462bac1b161dd558993fe1dd64de79d5befc4199708389833`，镜像 `sha256:f3552d096f0bf5665d679e4b767be5a512eaa551e4d96c8babe542ae233f047f`。从该 Git 对象独立构建并核对实际资产 `index-DTytbFRE.js` / `index-DWTTciwl.css`，上一版本保留为 `v2-298a743fcc89-1`。
+
+切换前同机一致备份 `/opt/skynet/receipts/backup-20261004T185306Z-3344600.json` 为 completed，ID `ac9cd230-7bb5-4676-9b2f-eefabc01e764`，包含 49 个原件对象、26,043,743 bytes，SQL dump 为 577,413 bytes。数据库容器 ID 与启动时间、四个既有 nginx site 哈希不变，配置检查通过，Certbot timer active。分析 Worker 保留协议/配置兼容且 ready 的 Qoder CN 实例，源码 `5aae0eb99ba26cadbffd8430247af344753a68cc`；本批没有发起模型调用。当前运行时见 [Qoder CN 决策](../adr/0005-qoder-cn-analysis-runtime.md)，下方旧发布中的禁用状态是历史记录。
+
+118 项只读生产 API 与 34 项浏览器检查通过，保留 30 张页面截图；上一发布 8 个固定报表版本均可读取。额外产效分页、完整导出及分段重组 5 项 API / 4 种布局通过；六维分数等价表、全部产效未知时的紧凑展示及分段表横滚另有 9 张截图；团队趋势、等待热图与箱线图在 320/1280 px 双主题下的 20 种交互状态通过，12 张截图确认提示区域完整可见、连续两次触屏点击与键盘/Escape正常。生产页面外层固定，内容区域独立滚动；浏览器写请求为 0。已有 22:12 会话仍是 3 条消息、2 次工具调用、8 条 Trace，106,317 bytes 原件 SHA-256 `0efa7692784020f5ea2dead09df32b949e722039d9d32c865ab81583971cc437` 不变。
+
+证据目录 `E:/GenCode/Skynet-evidence/v2-2026-10-04/deploy-v2-726e32efc40c-1/` 内的 `deployment-receipt.json` 汇集源码、镜像、备份、旧固定版本与本批三项补充页面证明。新功能和修复均先独立接受；本批包含[图表交互](../implementation/chart-interactions.md)、[洞察持久化](../implementation/insight-persistence.md)、[用量归属索引](../implementation/usage-membership.md)、[提示词归属索引](../implementation/prompt-membership.md)及[等待资料校验预选](../implementation/wait-integrity-selection.md)。容量正确性通过不代表 P95 通过，千会话诊断仍超过首次 3 秒/后续 1 秒目标；完整 CI [37226046501](https://github.com/yiwer/Skynet/actions/runs/37226046501) 尚在执行。#52 与 #54 保持开放，本记录不构成全员发布或灾备恢复签收。
+
 2026-10-03 首次健康发布 `v2-36a5c5a0e667-1`，Git `36a5c5a0e6670dc0ea681fc8e433037437e12a9d`，源码归档 SHA-256 `d3ef9a2fa0726a69d58e61f3c29d0895fefeb98049c26b9cefd1800ca5160dae`。此前 `v2-5daeda3f5b02-1` 在数据库容器启动前因 Compose tmpfs 未加引号失败；修复三个配置值后，核实数据库未启动、卷为空和归属标记，保留原卷与私有配置，再发布修订版本。没有删除数据库或原件。
 
 初始同机一致备份通过，回执 `/opt/skynet/receipts/backup-20261003T103436Z-800099.json`。外部 HTTPS、主页和资产、未认证接口拒绝、维护账号权限、空存档、Web/API 固定指标导出与 OAuth HTTPS issuer 共 13 项检查通过。生产环境没有注入合成会话；完整 Web/MCP/上传验证在独立测试沙箱完成。
