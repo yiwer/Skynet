@@ -4,6 +4,7 @@ import { conversationAnchorSchema, conversationLink, type ConversationAnchor, ty
 import { evidenceLink } from '../../packages/contracts/search.js';
 import type { WaitsPage } from '../../packages/contracts/waits.js';
 import { WaitMark } from './WaitingReport.js';
+import {ToolCallCard} from './ToolCallCard.js';
 
 type Request = (path: string, signal?: AbortSignal) => Promise<Response>;
 const date = (value: string) => new Date(value).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false });
@@ -183,13 +184,10 @@ export function ConversationReader({ snapshotId, initial, request, navigation, o
           {isAssistant && <span className="conversation-avatar" aria-hidden="true"><AgentAvatar/></span>}
           <div className="conversation-column">
             {isUser && message.textOffset === 0 && waits?.intervals.filter(wait => wait.displayLine === message.line && wait.end.block === message.block).map(wait => <WaitMark wait={wait} key={wait.id}/>)}
-            {isTool ? <details className="conversation-tool-card" open={focused || undefined}>
-              <summary><span className="conversation-tool-kind">{kind === 'request' ? '调用' : '结果'}</span><strong>{toolName ?? '工具'}</strong><SegmentLabel message={message}/></summary>
-              <div className="conversation-tool-content"><pre className="conversation-tool-text">{text}</pre>
-                {peerPath && <a className="conversation-tool-peer" href={peerPath}>{kind === 'request' ? '查看调用结果' : '查看调用参数'}</a>}
-                {message.tool?.association === 'ambiguous' && <p className="conversation-tool-association">调用 ID 存在多个匹配</p>}
-                {message.tool?.association === 'unmatched' && <p className="conversation-tool-association">{kind === 'request' ? '未匹配到结果' : '未匹配到调用'}</p>}
-              </div></details> : contextName ? <details className="conversation-context-card" open={focused || undefined}><summary>{contextName}<SegmentLabel message={message}/></summary><pre className="conversation-tool-text">{text}</pre></details>
+            {isTool ? <ToolCallCard kind={kind} name={toolName} open={focused} trace={message.trace} evidencePath={message.evidencePath}
+              tracePath={message.trace?.traceLine?evidenceLink(snapshotId,{kind:'raw',line:message.trace.traceLine,textOffset:0}):undefined}
+              peerPath={peerPath} association={message.tool?.association} segment={<SegmentLabel message={message}/>}>{text}</ToolCallCard>
+              : contextName ? <details className="conversation-context-card" open={focused || undefined}><summary>{contextName}<SegmentLabel message={message}/></summary><pre className="conversation-tool-text">{text}</pre></details>
               : <><pre className="conversation-bubble">{text}</pre><SegmentLabel message={message}/></>}
             <div className="message-meta"><strong>{roleName}</strong>
               {message.timestamp && <time dateTime={message.timestamp} title={date(message.timestamp)}>{new Date(message.timestamp).toLocaleTimeString('zh-CN', { timeZone: 'Asia/Shanghai', hour: '2-digit', minute: '2-digit', hour12: false })}</time>}
