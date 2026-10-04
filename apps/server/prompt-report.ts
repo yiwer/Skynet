@@ -13,8 +13,8 @@ const selection=({version:_version,usageVersion:_usage,week:_week,...scope}:Prom
 export async function migratePromptReports(db:Database){await db.query('CREATE TABLE IF NOT EXISTS prompt_report_revisions(version text PRIMARY KEY,request jsonb NOT NULL,payload jsonb NOT NULL)');}
 export function promptReportService(db:Database,usage:ReturnType<typeof usageOutputService>,insights:ReturnType<typeof sessionInsightsService>){
   async function compute(q:PromptReportQuery,full=false):Promise<PromptReport>{
-    const scope=selection(q),head=full?await usage.recompute(scope):null;
-    const source=await usage.export({...scope,...(head||q.usageVersion?{version:head?.version??q.usageVersion,...(q.week?{week:q.week}:{})}:{})});
+    const scope=selection(q);
+    const source=await usage.complete({...scope,...(q.usageVersion?{version:q.usageVersion,...(q.week?{week:q.week}:{})}:{})},{full});
     const rows=source.sessions.filter(row=>row.selected),keys=[...new Map(rows.flatMap(row=>row.insightVersions).map(key=>[key.version,key])).values()];
     const views=await insights.readVersions(keys),facts=await insights.readMessageFacts(views);
     const bySnapshot=new Map(facts.map(value=>[value.snapshotId,value])),messages=new Map<string,RecordedMessage>();
