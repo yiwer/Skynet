@@ -1,3 +1,4 @@
+import {ProfileSourceReturn} from './profile-source-navigation.js';
 import {WeeklyUsage} from './TeamUsage.js';
 import { useEffect, useState } from 'react';
 import { analysisLabels, assessmentLabels } from '../../packages/contracts/analysis.js';
@@ -53,7 +54,7 @@ export function WorkViews({ request, currentEmployeeId, onEvidence }: {
   const subjectName = kind === 'weekly' ? employeeName : (projects.find(value => value.project === project)?.label ?? project) || '未归类项目';
   const hasStatistics = !!view?.statistics && (view.statistics.records ?? 0) > 0;
   const sourceDays = view?.kind === 'weekly' ? view.coverage?.days.filter(day => day.revision > 0 && day.workStatistics) ?? [] : [];
-  return <section className="work-report workspace-page" aria-label="周工作与项目">
+  return <section className="work-report workspace-page" aria-label="周工作与项目"><ProfileSourceReturn/>
     {kind === 'weekly' && employees.length > 1 && <nav className="report-people" aria-label="切换员工">{employees.map(employee => <button key={employee.id} aria-pressed={employee.id === employeeId} onClick={() => { setEmployeeId(employee.id); setRevision(''); }}><span className="report-avatar" aria-hidden="true">{Array.from(employee.name)[0]}</span>{employee.name}</button>)}</nav>}
     <header className="report-page-heading"><div>{!browsingProjects && <p className="report-crumbs"><a href={kind === 'weekly' ? '#coverage' : '#work'}>{kind === 'weekly' ? '团队概览' : '项目'}</a><span>/</span>{kind === 'weekly' ? '周视图' : subjectName}</p>}<h1>{!browsingProjects && kind === 'weekly' && <span className="report-avatar report-avatar-large" aria-hidden="true">{Array.from(employeeName)[0]}</span>}{browsingProjects ? '项目' : subjectName}</h1></div><div className="report-actions">{!browsingProjects && <><button disabled={busy} onClick={()=>{reader.retry();setUsageRefresh(value=>value+1);}}>刷新视图</button><button disabled={busy} onClick={generate}>生成报告</button></>}</div></header>
     <div className="report-control-row"><nav className="report-mode" aria-label="工作视图类型"><button aria-pressed={kind === 'project'} onClick={() => { setKind('project'); setBrowsingProjects(true); setRevision(''); }}>项目</button><button aria-pressed={kind === 'weekly'} onClick={() => { setKind('weekly'); setBrowsingProjects(false); setFrom(monday(from)); setTo(addDays(monday(from), 6)); setRevision(''); }}>员工周工作</button></nav>{kind === 'weekly' && <nav className="report-mode" aria-label="查看方式"><a href={`#daily?${new URLSearchParams({ employeeId, date: from })}`}>日报</a><span aria-current="page">周视图</span></nav>}</div>

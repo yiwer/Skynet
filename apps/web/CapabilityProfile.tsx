@@ -6,6 +6,7 @@ import { taskTypeLabels } from '../../packages/contracts/session-insights.js';
 import { CapabilityAssessment } from './CapabilityAssessment.js';
 import type { AppendNote } from './ReviewNotes.js';
 import './capability-profile.css';
+import { ProfileWork, ProfileSessions, ProfileActivity } from './ProfileDetails.js';
 
 type Request=(path:string,signal?:AbortSignal)=>Promise<Response>;
 type Section=typeof profileSections[number];
@@ -54,8 +55,8 @@ export function CapabilityProfile({request,currentEmployeeId,appendNote}:{reques
   return <CapabilityAssessment key={employeeId} request={request} currentEmployeeId={currentEmployeeId} appendNote={appendNote} frozen={data.assessment} additions={{
     metadata:<section className="profile-metadata" aria-label="接入信息"><span>{data.header.deviceCount} 台设备</span><span>接入 {time(data.header.enrolledAt)}</span><span>最近同步 {time(data.header.lastSyncedAt)}</span></section>,
     actions:<button onClick={download}>导出画像</button>,onRefresh:()=>{setQuery(current());setRetry(n=>n+1);},
-    navigation:<nav className="profile-nav" aria-label="画像目录">{[['verdict','结论'],['dimensions','能力维度'],['usage','使用数据'],['notes','复核备注']].map(([id,label])=><button key={id} onClick={()=>jump('profile-'+id)}>{label}</button>)}</nav>,
+    navigation:<nav className="profile-nav" aria-label="画像目录">{[['verdict','结论'],['dimensions','能力维度'],['usage','使用数据'],['work','工作内容'],['sessions','会话'],['activity','最近活动'],['notes','复核备注']].map(([id,label])=><button key={id} onClick={()=>jump('profile-'+id)}>{label}</button>)}</nav>,
     details:<><details className="profile-devices"><summary>设备 · {data.header.deviceCount}</summary><div className="profile-table"><table aria-label="设备同步"><thead><tr><th>设备</th><th>状态</th><th>接入</th><th>最近同步</th></tr></thead><tbody>{data.header.devices.map(device=><tr key={device.id}><th>{device.name}</th><td>{device.active?'启用':'停用'}</td><td>{time(device.enrolledAt)}</td><td>{time(device.lastSyncedAt)}</td></tr>)}</tbody></table></div>{data.pages.devices.nextOffset!==null&&<button disabled={paging} onClick={()=>more('devices')}>更多设备</button>}</details>{error&&<p role="alert">{error}</p>}</>,
-    content:<Usage profile={data} more={more} busy={paging}/>,
+    content:<><Usage profile={data} more={more} busy={paging}/><ProfileWork profile={data} more={more} busy={paging}/><ProfileSessions profile={data} more={more} busy={paging}/><ProfileActivity profile={data} more={more} busy={paging}/><p className="profile-version">画像数据截至 {time(data.generatedAt)} · <a href={location.hash}>此画像固定链接</a></p></>,
   }}/>;
 }
