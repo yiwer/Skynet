@@ -1,6 +1,6 @@
 import type pg from 'pg';
 import {digest,type Database} from './database.js';
-import {RawStore} from './raw-store.js';
+import {RawStore,RawUnavailableError} from './raw-store.js';
 import {decodeOriginalLine,originalByteLines,completeOriginalLines} from '../../packages/native/raw-lines.js';
 import type {Source} from '../../packages/contracts/archive.js';
 import {nativeKey} from '../../packages/native/occurrences.js';
@@ -60,7 +60,7 @@ async function reconcilePrimaryInputs(q:Query,raw:RawStore){
 
 /** Append exact-original validity proofs; never change the immutable ledger.
  * Pending legacy rows cannot contribute current counts until verified. */
-export async function verifyOriginIntegrity(q:Query,raw:RawStore,ids:string[]){
+export async function verifyOriginIntegrity(q:Query,raw:RawStore,ids:string[],unavailable?:(error:RawUnavailableError,eventIds:string[])=>void){
   const cache=new Map<string,Buffer>();let cachedBytes=0;
   const scans=new Map<string,{iterator:ReturnType<typeof originalByteLines>;line:number}>();
   for(let offset=0;offset<ids.length;offset+=1000){
@@ -71,7 +71,7 @@ export async function verifyOriginIntegrity(q:Query,raw:RawStore,ids:string[]){
     for(const row of rows){const material=row.material_id?row.manifest.capture?.materials?.find((item:any)=>item.id===row.material_id):undefined;
       const hash=row.material_id?material?.hash:row.hash;if(typeof hash!=='string')throw new Error('Original integrity material descriptor missing');
       const key=`${row.device_id}:${hash}`;let group=groups.get(key);if(!group){group={device:row.device_id,hash,rows:[]};groups.set(key,group);}group.rows.push(row);}
-    for(const [key,group]of groups){let bytes=cache.get(key);if(!bytes){bytes=await raw.read(group.device,group.hash);if(cachedBytes+bytes.length>128*1024*1024){cache.clear();scans.clear();cachedBytes=0;}cache.set(key,bytes);cachedBytes+=bytes.length;}
+    for(const [key,group]of groups){let bytes=cache.get(key);if(!bytes){try{bytes=await raw.read(group.device,group.hash);}catch(error){if(!(error instanceof RawUnavailableError)||!unavailable)throw error;unavailable(error,group.rows.map(row=>row.event_id));continue;}if(cachedBytes+bytes.length>128*1024*1024){cache.clear();scans.clear();cachedBytes=0;}cache.set(key,bytes);cachedBytes+=bytes.length;}
       const requested=new Set<number>(group.rows.map(row=>row.line)),checked=new Map<number,{valid:boolean;hash:string}>();
       const first=Math.min(...requested),last=Math.max(...requested);let scan=scans.get(key);
       // Normal capture pages are in original line order. Retain only the raw
@@ -98,7 +98,7 @@ export async function verifySnapshotIntegrity(q:Query,raw:RawStore,id:string,mat
  * exact, independently registered normal primary from the same source/device.
  * The old origin and old carrier mappings remain immutable. */
 type SourceScope={deviceId:string;source:string;sessionId:string};
-async function repairCarriers(q:Query,raw:RawStore,snapshotId?:string,scope?:SourceScope){
+async function repairCarriers(q:Query,raw:RawStore,snapshotId?:string,scope?:SourceScope,unavailable?:(error:RawUnavailableError,snapshotIds:string[])=>void){
   // An empty durable repair queue should not join every native occurrence. New
   // invalid proofs remain in the same queue and are picked up on the next pass.
   if(!(await q.query('SELECT EXISTS(SELECT 1 FROM event_integrity WHERE version=$1 AND NOT valid) AS needed',[integrityVersion])).rows[0].needed)return;
@@ -114,7 +114,8 @@ async function repairCarriers(q:Query,raw:RawStore,snapshotId?:string,scope?:Sou
   const groups=new Map<string,typeof rows>();
   for(const row of rows){const object=`${row.device_id}:${row.hash}`;if(!groups.has(object)){if(groups.size===2)continue;groups.set(object,[]);}groups.get(object)!.push(row);}
   for(const group of groups.values()){
-    const bytes=await raw.read(group[0].device_id,group[0].hash),requested=new Set<number>(group.map(row=>row.line)),records=new Map<number,Buffer>();
+    let bytes:Buffer;try{bytes=await raw.read(group[0].device_id,group[0].hash);}catch(error){if(!(error instanceof RawUnavailableError)||!unavailable)throw error;unavailable(error,group.map(row=>row.snapshot_id));continue;}
+    const requested=new Set<number>(group.map(row=>row.line)),records=new Map<number,Buffer>();
     for(const line of originalByteLines(bytes)){if(requested.has(line.line))records.set(line.line,line.bytes);if(line.line%1000===0)await new Promise<void>(resolve=>setImmediate(resolve));}
     for(const row of group){const record=records.get(row.line);
     const text=record?decodeOriginalLine(record):null,key=text===null?null:nativeKey(text,row.manifest.source);
@@ -140,12 +141,12 @@ async function repairCarriers(q:Query,raw:RawStore,snapshotId?:string,scope?:Sou
     }
   }
 }
-export async function repairLegacyCarriers(q:Query,raw:RawStore,snapshotId?:string,scope?:SourceScope){
+export async function repairLegacyCarriers(q:Query,raw:RawStore,snapshotId?:string,scope?:SourceScope,unavailable?:(error:RawUnavailableError,snapshotIds:string[])=>void){
   // PoolClient also has connect(); release identifies an already borrowed
   // transaction connection. Never reconnect it or start a nested transaction.
-  if('connect' in q&&!('release' in q)){const client=await (q as Database).connect();try{await client.query('BEGIN');await client.query('SELECT pg_advisory_xact_lock(7402119)');await repairCarriers(client,raw,snapshotId,scope);await client.query('COMMIT');}
+  if('connect' in q&&!('release' in q)){const client=await (q as Database).connect();try{await client.query('BEGIN');await client.query('SELECT pg_advisory_xact_lock(7402119)');await repairCarriers(client,raw,snapshotId,scope,unavailable);await client.query('COMMIT');}
     catch(error){await client.query('ROLLBACK');throw error;}finally{client.release();}}
-  else await repairCarriers(q,raw,snapshotId,scope);
+  else await repairCarriers(q,raw,snapshotId,scope,unavailable);
 }
 /** Missing proofs are a durable work queue. Two original objects /1000 rows per
  * tick, at most128MiB of raw, no host-directory scan or historical re-upload. */

@@ -105,6 +105,14 @@ export function conversationQuery(db: Database, raw: RawStore) {
     return { manifest, hash: row.hash, employee: row.employee, evidence, ...projection, spans: trace.spans, turn: readNativeTurnState(bytes, manifest.source),
       estimatedBytes: bytes.length * 3 + origins.size * 1536 + projection.messages.length * 2048 + trace.spans.length * 2048 };
   }
+  async function currentReading(snapshotId:string,revision:string){
+    const row=(await db.query('SELECT device_id,hash FROM snapshots WHERE id=$1',[snapshotId])).rows[0];
+    if(!row)throw new HttpError(404,'未找到已提交存档');
+    // A parsed rendering can be cached; each current page/trace must still
+    // observe missing or altered source bytes after an earlier warm read.
+    await raw.read(row.device_id,row.hash);
+    return cache.get(`${snapshotId}:${revision}`,()=>load(snapshotId,revision));
+  }
   async function page(snapshotId: string, value: ConversationInput = {}): Promise<ConversationPage> {
     if (!z.uuid().safeParse(snapshotId).success) throw new HttpError(404, '未找到存档');
     const parsed = conversationInputSchema.safeParse(value);
@@ -126,7 +134,7 @@ export function conversationQuery(db: Database, raw: RawStore) {
     await verifySnapshotIntegrity(db, raw, snapshotId);
     const revision = await attributionRevision(db, snapshotId);
     if (cursor && cursor.attributionRevision !== revision) throw new HttpError(409, '原件归属版本已更新，请重新读取对话');
-    const reading = await cache.get(`${snapshotId}:${revision}`, () => load(snapshotId, revision));
+    const reading = await currentReading(snapshotId,revision);
     const { evidence, manifest, messages } = reading;
     if (cursor && (cursor.hash !== reading.hash || cursor.parserVersion !== evidence.parserVersion)) {
       throw new HttpError(409, '对话原件或解析版本已更新，请重新读取');
@@ -203,7 +211,7 @@ export function conversationQuery(db: Database, raw: RawStore) {
     }
     await verifySnapshotIntegrity(db, raw, snapshotId);
     const revision = await attributionRevision(db, snapshotId);
-    const reading = await cache.get(`${snapshotId}:${revision}`, () => load(snapshotId, revision));
+    const reading = await currentReading(snapshotId,revision);
     if (cursor && (cursor.hash !== reading.hash || cursor.parserVersion !== reading.evidence.parserVersion || cursor.attributionRevision !== revision)) throw new HttpError(409, 'Trace 原件或归属版本已更新，请重新读取');
     const source = reading.spans.filter(span => !input.turnId || span.turnId === input.turnId);
     let offset = cursor?.offset ?? 0; let remaining = 2048;

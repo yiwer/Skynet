@@ -1,7 +1,7 @@
 import { digest } from './database.js';
 import { readEvidence } from './evidence.js';
 import { waitIntervals } from './wait-intervals.js';
-import type { WaitOriginal } from './wait-dataset.js';
+import { unavailableOwners,type WaitOriginal } from './wait-dataset.js';
 import { sourceTimestamp,type Source } from '../../packages/contracts/archive.js';
 import { completeOriginalLines } from '../../packages/native/raw-lines.js';
 import { readNativeTurnState } from '../../packages/native/turn-state.js';
@@ -39,6 +39,7 @@ export function activityRecords(originals:WaitOriginal[],details:Map<string,Acti
   const events=new Map<string,ActivityEvent>();
   const latest=new Set([...new Map(originals.map(original=>[original.sessionId,original.record.id])).values()]);
   const unknownTimes=new Set<string>();
+  const unavailableSources=new Set<string>();
   const dayStart=Date.parse(scope.date+'T00:00:00+08:00'),dayEnd=Date.parse(addDays(scope.date,1)+'T00:00:00+08:00');
   const inDay=(timestamp:string|null)=>timestamp!==null&&Date.parse(timestamp)>=dayStart&&Date.parse(timestamp)<dayEnd;
   const matches=(origin:Pick<WaitOriginal['origins'][number],'context'|'employeeId'|'project'>)=>origin.context==='after-enrollment'&&(!scope.employeeId||origin.employeeId===scope.employeeId)&&(scope.project===undefined||origin.project===scope.project);
@@ -47,6 +48,14 @@ export function activityRecords(originals:WaitOriginal[],details:Map<string,Acti
   for(const original of originals){
     const {record,facts,sessionId}=original,detail=details.get(record.id)!;
     if(scope.source&&scope.source!==record.source)continue;
+    if(original.unavailable){
+      const owners=unavailableOwners(original,scope);if(owners.length)unavailableSources.add(record.id);
+      for(const owner of owners)add({employeeId:owner.employeeId,employee:owner.employee,project:owner.project,source:record.source,sessionId,snapshotId:record.id,
+        id:digest(JSON.stringify([record.id,'source-unavailable',owner.employeeId,owner.project,original.unavailable])),type:'gap',timestamp:null,sourceDate:null,
+        excerpt:'原件不可读取；活动内容与来源日期未知',truncated:false,basis:'recorded',backfill:backfill(record.id),analysisVersion:null,
+        evidence:{...activityEvidence(original,1,0,true),kind:'manifest',webPath:`#${record.id}?view=timeline`}});
+      continue;
+    }
     const origins=new Map(original.origins.map(origin=>[`${origin.line}/${origin.block}`,origin]));
     const content=new Map(detail.evidence.events.map(event=>[`${event.line}/${event.block??0}`,event]));
     const owned=original.origins.filter(matches);
@@ -120,9 +129,9 @@ export function activityRecords(originals:WaitOriginal[],details:Map<string,Acti
     if(!event.timestamp||!inDay(event.timestamp)||['offline','backfill','long-wait'].includes(event.type))continue;
     let session=lane.sessions.find(session=>session.id===event.sessionId);
     if(!session){const latest=originals.filter(original=>original.sessionId===event.sessionId).at(-1)!;
-      session={id:event.sessionId,source:event.source,project:event.project,observedFrom:event.timestamp,observedTo:event.timestamp,startBoundary:'unknown',endBoundary:'unknown',state:details.get(latest.record.id)!.turn.state,evidence:event.evidence};lane.sessions.push(session);}
+      session={id:event.sessionId,source:event.source,project:event.project,observedFrom:event.timestamp,observedTo:event.timestamp,startBoundary:'unknown',endBoundary:'unknown',state:details.get(latest.record.id)?.turn.state??'unknown',evidence:event.evidence};lane.sessions.push(session);}
     if(event.timestamp<session.observedFrom)session.observedFrom=event.timestamp;if(event.timestamp>session.observedTo)session.observedTo=event.timestamp;
     if(event.type==='session-start')session.startBoundary='observed';
   }
-  return {events:list,lanes:[...lanes.values()].sort((a,b)=>a.employee.localeCompare(b.employee,'zh-CN')||a.employeeId.localeCompare(b.employeeId)),coverage:{permission:'unknown' as const,sessionEnd:'unknown' as const,unknownTime:unknownTimes.size}};
+  return {events:list,lanes:[...lanes.values()].sort((a,b)=>a.employee.localeCompare(b.employee,'zh-CN')||a.employeeId.localeCompare(b.employeeId)),coverage:{permission:'unknown' as const,sessionEnd:'unknown' as const,unknownTime:unknownTimes.size,unavailableSources:unavailableSources.size}};
 }

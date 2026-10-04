@@ -5,7 +5,7 @@ import { conversationContext } from './conversation-trace.js';
 import { nativeTurnBoundaries, type TurnBoundary } from '../../packages/native/waits.js';
 import type { EvidenceLine, Source } from '../../packages/contracts/archive.js';
 
-export const waitAlgorithmVersion = 'recorded-waits-2';
+export const waitAlgorithmVersion = 'recorded-waits-3';
 export interface WaitInput {
   parserVersion: string; boundaries: TurnBoundary[]; messages: EvidenceLine[];
   pairs: { start: TurnBoundary | null; end: EvidenceLine; beforeLine: number | null }[];

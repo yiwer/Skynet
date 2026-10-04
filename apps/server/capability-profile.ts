@@ -93,7 +93,7 @@ export function capabilityProfileService(db: Database, assessments: ReturnType<t
         employeeId, employee: assessment.employee, daily: [], agents: [], activeDates: [], sessions: 0, userTurns: 0, toolCalls: 0,
         inputTokens: 0, outputTokens: 0, knownInputTokens: 0, knownOutputTokens: 0, unknownTokenSessions: 0, unknownInputSessions: 0, unknownOutputSessions: 0,
         outputs: Object.fromEntries(['verified','claimed','codeChanges','tests','commits'].map(kind => [kind, { value: 0, known: 0, unknownSessions: 0, added: 0, removed: 0, passed: 0, failed: 0 }])) as CapabilityProfile['kpis']['outputs'] };
-      const efficiencyReport = await efficiency.export({ period: scope.period, employeeId });
+      const efficiencyReport = await efficiency.exportFromMetric({ period: scope.period, employeeId }, report.metricVersion, full);
       if (efficiencyReport.metricVersion !== assessment.inputs.metricsVersion) throw new HttpError(409, '画像指标正在更新，请重新读取');
       const sessions = efficiencyReport.sessions.map(({ sessionId, snapshotId, source, sourceSessionId, projects, dates, tokens, knownTokens, userTurns, toolCalls, verified, codeChanges, efficiency, rework, taskType, webPath, timing }) =>
         ({ sessionId, snapshotId, source, sourceSessionId, projects, dates, tokens, knownTokens, userTurns, toolCalls, verified, codeChanges, efficiency, rework, taskType, webPath, waitFraction: timing?.waitFraction ?? null }));

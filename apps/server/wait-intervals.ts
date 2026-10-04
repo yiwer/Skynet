@@ -1,5 +1,5 @@
 import { digest } from './database.js';
-import { waitEvidence,type WaitOriginal } from './wait-dataset.js';
+import { waitEvidence,unavailableOwners,type WaitOriginal } from './wait-dataset.js';
 import type { ReplyWait,WaitsScope } from '../../packages/contracts/waits.js';
 import { addDays } from '../../packages/contracts/work-views.js';
 
@@ -46,6 +46,7 @@ for (const original of originals) {
     }
   }
   if (scope.snapshotId && record.id !== scope.snapshotId || scope.source && record.source !== scope.source) continue;
+  if(original.unavailable){if(unavailableOwners(original,scope).length||scope.snapshotId)selected.add(original);continue;}
   const owned = original.origins.filter(origin => origin.context === 'after-enrollment' && (!scope.employeeId || origin.employeeId === scope.employeeId)
     && (scope.project === undefined || origin.project === scope.project) && (scope.snapshotId || origin.sourceDate! >= scope.from! && origin.sourceDate! <= scope.to!));
   if (scope.snapshotId || owned.length) selected.add(original);
@@ -81,7 +82,7 @@ const intervals = [...candidates.values()].sort((a, b) => (a.endedAt ?? '').loca
 const parallelFor = parallelLookup([...activity.values()]);
 for (const interval of intervals) if (interval.durationMs !== null) {
   const parallel = parallelFor(interval);
-  interval.parallel = parallel.length ? 'observed' : 'not-observed'; interval.parallelEvidence = parallel;
+  interval.parallel = parallel.length ? 'observed' : originals.some(original=>original.sessionId!==interval.sessionId&&unavailableOwners(original,{employeeId:interval.employeeId}).length)?'unknown':'not-observed'; interval.parallelEvidence = parallel;
 }
 return {intervals,selected,rangeStart,rangeEnd};
 }
