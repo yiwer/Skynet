@@ -122,6 +122,7 @@ test('session efficiency keeps OAuth MCP, export, review, sorting, fixed evidenc
       await page.setViewportSize({width,height:900});await page.evaluate(value=>document.documentElement.dataset.theme=value,theme);
       await panel.locator('.workspace-scroll').evaluate(el=>{el.scrollTop=0;});
       assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth||document.documentElement.scrollHeight>innerHeight),false,width+' '+theme+' no outer scroll');
+      assert.deepEqual(await panel.getByRole('button').evaluateAll(nodes=>nodes.filter(node=>{const r=node.getBoundingClientRect();return r.width>0&&r.height>0&&(r.width<43.9||r.height<43.9);}).map(node=>node.getAttribute('aria-label')??node.textContent)),[],width+' '+theme+' 44px targets');
       await page.screenshot({path:join(sandbox.directory,'efficiency-'+width+'-'+theme+'.png'),animations:'disabled'});
       await panel.getByRole('region',{name:'选中会话',exact:true}).scrollIntoViewIfNeeded();
       await page.screenshot({path:join(sandbox.directory,'efficiency-detail-'+width+'-'+theme+'.png'),animations:'disabled'});

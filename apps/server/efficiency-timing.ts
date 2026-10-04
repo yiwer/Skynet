@@ -71,7 +71,7 @@ export async function efficiencyTiming(db:Database,raw:RawStore,sessions:Efficie
       segments.sort((a,b)=>(a.startedAt??'9999').localeCompare(b.startedAt??'9999')||a.kind.localeCompare(b.kind));
       const activeMs=segments.some(s=>s.durationMs===null)?null:unionDuration(segments);
       row.timing={waitVersion:waiting.version,knownAgentMs:unionDuration(segments.filter(s=>s.kind==='agent')),knownReplyMs:replies.reduce((n,w)=>n+(w.durationInScopeMs??0),0),activeMs,permissionMs:null,
-        waitFraction:{numerator:null,denominator:activeMs,value:null},segments};
+        waitFraction:{numerator:null,denominator:activeMs,value:null},segments,segmentTotal:segments.length,nextSegmentOffset:null};
       row.webPath+=(row.webPath.includes('?')?'&':'?')+'waitVersion='+waiting.version;
       for(const segment of segments)for(const evidence of segment.evidence)if(evidence.conversationPath&&!evidence.conversationPath.includes('waitVersion='))evidence.conversationPath+='&waitVersion='+waiting.version;
     }

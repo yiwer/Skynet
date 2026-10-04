@@ -21,7 +21,7 @@ function Distribution({rows,sessions,onSelect}: {rows:SessionEfficiencyPage['dis
       {[0,.25,.5,.75,1].map(f=><g key={f}><line x1={90+f*550} x2={90+f*550} y1="8" y2={rows.length*54+8}/><text x={90+f*550} y={rows.length*54+32} textAnchor="middle">{number(f*maximum)}</text></g>)}
       {rows.map((row,i)=><g key={row.taskType}><text x="75" y={35+i*54} textAnchor="end">{taskTypeLabels[row.taskType]}</text><line x1="90" x2="640" y1={30+i*54} y2={30+i*54}/>
         {row.median!==null&&<line className="eff-median" x1={90+row.median/maximum*550} x2={90+row.median/maximum*550} y1={14+i*54} y2={46+i*54}/>}
-        {(sessions??[]).filter(s=>s.taskType===row.taskType&&s.taskType!=='unknown'&&s.efficiency.value!==null).map((session,j)=>{const label=`${taskTypeLabels[row.taskType]} · ${number(session.efficiency.value)} · ${number(session.efficiency.numerator)} / ${number(session.efficiency.denominator)} Token`,tip=`${session.employees.map(e=>e.employee).join('、')} · ${label}`;return <circle key={session.sessionId} role="button" tabIndex={0} aria-label={label} cx={90+session.efficiency.value!/maximum*550} cy={30+i*54+(j%3-1)*7} r="5" onClick={()=>onSelect(session.sessionId)} onKeyDown={e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();onSelect(session.sessionId);}}} onFocus={()=>setTooltip(tip)} onBlur={()=>setTooltip('')} onMouseEnter={()=>setTooltip(tip)} onMouseLeave={()=>setTooltip('')}/>;})}
+        {(sessions??[]).filter(s=>s.taskType===row.taskType&&s.taskType!=='unknown'&&s.efficiency.value!==null).map((session,j)=>{const label=`${taskTypeLabels[row.taskType]} · ${number(session.efficiency.value)} · ${number(session.efficiency.numerator)} / ${number(session.efficiency.denominator)} Token`,tip=`${session.employees.map(e=>e.employee).join('、')} · ${label}`;return <g key={session.sessionId} role="button" tabIndex={0} aria-label={label} transform={`translate(${90+session.efficiency.value!/maximum*550},${35+i*54+(j%3-1)*6})`} onClick={()=>onSelect(session.sessionId)} onKeyDown={e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();onSelect(session.sessionId);}}} onFocus={()=>setTooltip(tip)} onBlur={()=>setTooltip('')} onMouseEnter={()=>setTooltip(tip)} onMouseLeave={()=>setTooltip('')}><rect x="-26" y="-26" width="52" height="52" rx="5" className="eff-point-target"/><circle r="5"/></g>;})}
         <text x="660" y={35+i*54}>{row.count?`n=${row.count}`:'未知'}{row.unknownCount>0&&row.count>0?` · 未知 ${row.unknownCount}`:''}</text>
       </g>)}
     </svg></div>:<div className="eff-table-scroll"><table aria-label="任务类型产效"><thead><tr><th>任务类型</th><th>已知会话</th><th>未知</th><th>中位数</th><th>范围</th></tr></thead><tbody>{rows.map(r=><tr key={r.taskType}><th>{taskTypeLabels[r.taskType]}</th><td>{r.count}</td><td>{r.unknownCount}</td><td>{number(r.median)}</td><td>{r.minimum===null?'未知':`${number(r.minimum)} — ${number(r.maximum)}`}</td></tr>)}</tbody></table></div>}
@@ -49,9 +49,10 @@ function SelectedSession({row,onClose}: {row:EfficiencySession;onClose:()=>void}
 }
 
 export function SessionEfficiency({request}:Props){
-  const [query,setQuery]=useState<EfficiencyQuery>({period:'this-week',offset:0,sort:'date',direction:'desc',reviewOnly:'false'});
+  const [query,setQuery]=useState<EfficiencyQuery>({period:'this-week',offset:0,sort:'date',direction:'desc',reviewOnly:'false',segmentOffset:0});
   const [page,setPage]=useState<SessionEfficiencyPage|null>(null),[full,setFull]=useState<SessionEfficiencyPage|null>(null),[busy,setBusy]=useState(false),[error,setError]=useState(''),[retry,setRetry]=useState(0);
   const [selected,setSelected]=useState(''),[project,setProject]=useState(''),[employees,setEmployees]=useState<EfficiencySession['employees']>([]),[exporting,setExporting]=useState(false);
+  const [detail,setDetail]=useState<EfficiencySession|null>(null),[detailBusy,setDetailBusy]=useState(false),[detailError,setDetailError]=useState(''),[detailRetry,setDetailRetry]=useState(0);
   useEffect(()=>{const abort=new AbortController();setBusy(true);setError('');setPage(null);
     request('/api/session-efficiency?'+params(query),abort.signal).then(r=>r.json()).then(async(data:SessionEfficiencyPage)=>{
       if(abort.signal.aborted)return;setPage(data);
@@ -65,6 +66,15 @@ export function SessionEfficiency({request}:Props){
   async function download(){if(!page)return;setExporting(true);try{const response=await request('/api/session-efficiency/export?'+params({...query,offset:0,version:page.version}));const url=URL.createObjectURL(await response.blob()),link=document.createElement('a');link.href=url;link.download='skynet-session-efficiency-'+page.version+'.json';link.click();setTimeout(()=>URL.revokeObjectURL(url),1000);}catch(e){setError((e as Error).message);}finally{setExporting(false);}}
   async function recompute(){setBusy(true);try{const data=await(await request('/api/session-efficiency/recompute',undefined,'POST',{...query,offset:0,version:undefined})).json();setSelected('');setQuery({...query,offset:0,version:data.version});}catch(e){setError((e as Error).message);}finally{setBusy(false);}}
   const complete=full?.version===page?.version?full:null,selection=complete?.sessions.find(s=>s.sessionId===selected),reviews=complete?.sessions.filter(s=>s.reviewReasons.length)??[];
+  useEffect(()=>{const abort=new AbortController();setDetail(null);setDetailError('');setDetailBusy(false);
+    if(!selection?.timing?.nextSegmentOffset||!page)return;
+    setDetailBusy(true);const version=page.version,original=selection;
+    void(async()=>{try{const segments=[...original.timing!.segments];let offset=original.timing!.nextSegmentOffset;
+      while(offset!==null){const data:SessionEfficiencyPage=await(await request('/api/session-efficiency?'+params({...query,offset:0,version,sessionId:original.sessionId,segmentOffset:offset}),abort.signal)).json();
+        const next=data.sessions[0]!.timing!;segments.push(...next.segments);offset=next.nextSegmentOffset;}
+      if(!abort.signal.aborted)setDetail({...original,timing:{...original.timing!,segments,nextSegmentOffset:null}});
+    }catch(e){if(!abort.signal.aborted)setDetailError((e as Error).message);}finally{if(!abort.signal.aborted)setDetailBusy(false);}})();return()=>abort.abort();
+  },[selected,page?.version,selection,detailRetry]);
   const columns: {key:EfficiencyQuery['sort'];label:string}[]=[{key:'date',label:'日期'},{key:'tokens',label:'Token'},{key:'prompts',label:'提示词'},{key:'code',label:'代码变更'},{key:'verified',label:'已验证'},{key:'efficiency',label:'产效比'},{key:'rework',label:'返工'}];
   return <section className="usage-metrics efficiency-page workspace-page" aria-label="会话产效" aria-busy={busy}>
     <div className="usage-page-head"><h1>会话产效</h1><div className="usage-export-actions"><button disabled={busy||!page} onClick={recompute}>从原件重算</button><button disabled={busy||!page||exporting} onClick={download}>导出当前版本</button></div></div>
@@ -84,7 +94,7 @@ export function SessionEfficiency({request}:Props){
           <div className="eff-table-scroll"><table aria-label="会话明细"><thead><tr><th>员工 / 项目</th>{columns.map(c=><th key={c.key} aria-sort={query.sort===c.key?query.direction==='asc'?'ascending':'descending':'none'}><button onClick={()=>sort(c.key)} aria-label={`按 ${c.label} 排序`}>{c.label}{query.sort===c.key?query.direction==='asc'?' ↑':' ↓':''}</button></th>)}<th>详情</th></tr></thead>
             <tbody>{page.sessions.map(row=><tr key={row.sessionId} data-selected={row.sessionId===selected}><th><strong>{row.employees.map(e=>e.employee).join('、')}</strong><span>{row.projects.join(' · ')}</span><small>{sourceLabel(row.source)} · {taskTypeLabels[row.taskType]}</small></th><td>{row.dates.at(-1)??'未知'}</td><td>{number(row.tokens)}</td><td>{number(row.userTurns)}</td><td>{number(row.codeChanges)}</td><td>{number(row.verified)}</td><td><strong>{number(row.efficiency.value)}</strong><small>{number(row.efficiency.numerator)} / {number(row.efficiency.denominator)} Token</small></td><td>{number(row.rework)}</td><td><button onClick={()=>setSelected(row.sessionId)} aria-label="查看会话分段">分段</button></td></tr>)}</tbody></table></div>
           <nav className="eff-pagination" aria-label="产效会话分页"><button disabled={busy||query.offset===0} onClick={()=>setQuery({...query,version:page.version,offset:Math.max(0,query.offset-20)})}>上一页会话</button><span>第 {Math.floor(query.offset/20)+1} 页</span><button disabled={busy||page.nextOffset===null} onClick={()=>setQuery({...query,version:page.version,offset:page.nextOffset!})}>下一页会话</button></nav>
-        </section>{selection&&<SelectedSession row={selection} onClose={()=>setSelected('')}/>}</div>
+        </section>{selection&&<div>{detailBusy&&<p role="status">正在读取固定会话分段…</p>}{detailError&&<p role="alert">{detailError}<button onClick={()=>setDetailRetry(v=>v+1)}>重试分段</button></p>}<SelectedSession row={detail??selection} onClose={()=>setSelected('')}/></div>}</div>
       </>}
     </div>
   </section>;

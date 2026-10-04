@@ -83,6 +83,29 @@ test('session timing clips cross-week intervals and preserves an unrecognized so
   }finally{await app?.close();await db.end();await sandbox.close();}
 });
 
+test('a long recorded conversation remains readable with fixed-version segment pagination', {timeout:120000},async()=>{
+  const sandbox=await createSandbox(),db=connect(sandbox.env.DATABASE_URL!);let app:Awaited<ReturnType<typeof createApp>>|undefined;
+  try{
+    const person=await sandbox.provision('长会话合成员工'),base=Date.now()+60000,stamp=(n:number)=>new Date(base+n*1000).toISOString();
+    app=await createApp({db,rawDirectory:sandbox.env.RAW_DIRECTORY!,reportClock:()=>new Date(base+2000000)});
+    const api=(url:string,payload?:unknown,credential=person.readerCredential,method:'GET'|'POST'|'PUT'='GET')=>app!.inject({url,method,headers:{Authorization:`Bearer ${credential}`,...(Buffer.isBuffer(payload)?{'Content-Type':'application/octet-stream'}:{})},...(payload===undefined?{}:{payload:payload as object})});
+    const device=(await api('/api/devices/enroll',{installationId:randomUUID(),name:'长会话设备'},person.enrollmentCredential,'POST')).json(),id=randomUUID(),rows:unknown[]=[{type:'session_meta',timestamp:stamp(0),payload:{id}}];
+    for(let i=0;i<100;i++)rows.push({type:'response_item',timestamp:stamp(i*10),payload:{type:'message',role:'user',content:[{type:'input_text',text:'检查第'+i+'轮'}]}},
+      {type:'event_msg',timestamp:stamp(i*10+1),payload:{type:'task_started',turn_id:'turn-'+i}},
+      {type:'response_item',timestamp:stamp(i*10+2),payload:{type:'message',role:'assistant',content:[{type:'output_text',text:'完成第'+i+'轮'}]}},
+      {type:'event_msg',timestamp:stamp(i*10+4),payload:{type:'task_complete',turn_id:'turn-'+i}});
+    const bytes=Buffer.from(rows.map(row=>JSON.stringify(row)).join('\n')+'\n');await api('/api/chunks/'+digest(bytes),bytes,device.deviceCredential,'PUT');
+    const upload=await api('/api/snapshots',{protocolVersion:1,sourceSessionId:id,source:'codex-cli',sourceVersion:'0.160.0',sourceOs:process.platform,project:'/synthetic/long-efficiency',hash:digest(bytes),byteLength:bytes.length,qualifiedAt:stamp(0),capability:'unverified'},device.deviceCredential,'POST');assert.equal(upload.statusCode,200,upload.body);
+    const response=await api('/api/session-efficiency?period=since-enrollment');assert.equal(response.statusCode,200,response.body);const report=response.json(),row=report.sessions[0];
+    assert.equal(row.timing.segmentTotal,199);assert.equal(row.timing.segments.length,5);assert.equal(row.timing.nextSegmentOffset,5);
+    const segments=[...row.timing.segments];let offset=row.timing.nextSegmentOffset;
+    while(offset!==null){const response=await api('/api/session-efficiency?period=since-enrollment&version='+report.version+'&sessionId='+row.sessionId+'&segmentOffset='+offset);assert.equal(response.statusCode,200,response.body);const detail=response.json();assert.equal(detail.sessions.length,1);segments.push(...detail.sessions[0].timing.segments);offset=detail.sessions[0].timing.nextSegmentOffset;}
+    assert.equal(segments.length,199);assert.equal(new Set(segments.map((s:any)=>s.kind+'/'+s.startedAt)).size,199);
+    const all=(await api('/api/session-efficiency/export?period=since-enrollment&version='+report.version)).json();assert.deepEqual(all.sessions[0].timing.segments,segments);
+    assert.equal((await api('/api/session-efficiency?period=since-enrollment&sessionId='+row.sessionId+'&segmentOffset=5')).statusCode,400);
+  }finally{await app?.close();await db.end();await sandbox.close();}
+});
+
 test('review selection uses scoped strict P75, evidenced claims and original nonfirst rework with task-type medians', {timeout:120000},async()=>{
   const sandbox=await createSandbox(),db=connect(sandbox.env.DATABASE_URL!);let app:Awaited<ReturnType<typeof createApp>>|undefined;
   try{
@@ -94,7 +117,7 @@ test('review selection uses scoped strict P75, evidenced claims and original non
     await writeFile(configPath,JSON.stringify({mode:'fixture',executable:process.execPath,runtimeVersion:'2.1.281',model:'deterministic',workDirectory:join(sandbox.directory,'jobs'),fixtureOrigin:'http://127.0.0.1:12345',budgetId:'efficiency-synthetic',budgetCny:0,inputCnyPerMillion:0,outputCnyPerMillion:0,maxInputBytes:32768,maxSessionBytes:131072,maxRequests:4,maxAttempts:1,timeoutSeconds:60}));
     const config=await readAnalysisConfig(configPath),queue=analysisQueue(db,config,'efficiency-synthetic');
     await db.query('INSERT INTO analysis_workers(id,config) VALUES($1,$2)',['efficiency-synthetic',publicConfig(config)]);
-    async function analyze(key:string,cost:number,verified:boolean,claims:boolean,rework:boolean,task:'implementation'|'fix'){
+    async function analyze(key:string,cost:number,verified:boolean,claims:boolean,rework:boolean,task:'implementation'|'fix',truncated=false){
       const id=randomUUID(),counter=(n:number,at:number)=>({type:'event_msg',timestamp:stamp(at),payload:{type:'token_count',info:{total_token_usage:{input_tokens:n,cached_input_tokens:0,output_tokens:0,reasoning_output_tokens:0,total_tokens:n}}}});
       const message=(role:string,text:string,n:number)=>({type:'response_item',timestamp:stamp(n),payload:{type:'message',role,content:[{type:role==='user'?'input_text':'output_text',text}]}});
       const rows=[{type:'session_meta',timestamp:stamp(-86400),payload:{id}},counter(0,-86400),message('user',key+'：检查接口',1),
@@ -102,7 +125,7 @@ test('review selection uses scoped strict P75, evidenced claims and original non
         {type:'response_item',timestamp:stamp(3),payload:{type:'function_call_output',call_id:'tests',output:'# tests 1\n# pass 1\n# fail 0'}},
         message('assistant','已完成改动',4),message('user','请保留旧接口',5),message('assistant','已部署服务',6),message('user','请补充检查',7),message('assistant','记录检查过程',8),counter(cost,9)];
       const bytes=Buffer.from(rows.map(row=>JSON.stringify(row)).join('\n')+'\n');await api('/api/chunks/'+digest(bytes),bytes,device.deviceCredential,'PUT');
-      const upload=await api('/api/snapshots',{protocolVersion:1,sourceSessionId:id,source:'codex-cli',sourceVersion:'0.157.1',sourceOs:process.platform,project:'/synthetic/efficiency-review',hash:digest(bytes),byteLength:bytes.length,qualifiedAt:stamp(0),capability:'unverified'},device.deviceCredential,'POST');assert.equal(upload.statusCode,200,upload.body);
+      const upload=await api('/api/snapshots',{protocolVersion:1,sourceSessionId:id,source:'codex-cli',sourceVersion:'0.157.1',sourceOs:process.platform,project:'/synthetic/efficiency-review',hash:digest(bytes),byteLength:bytes.length,qualifiedAt:stamp(0),capability:'unverified',...(truncated?{capture:{generation:digest('efficiency-truncate'),revision:2,change:'truncate',materials:[],lineage:[],gaps:[],compacted:false,partialLine:false}}:{})},device.deviceCredential,'POST');assert.equal(upload.statusCode,200,upload.body);
       const snapshotId=upload.json().snapshotId;
       const job=await api('/api/snapshots/'+snapshotId+'/analysis',{},person.readerCredential,'POST');assert.equal(job.statusCode,202,job.body);
       const claim=await queue.claim();assert.equal(claim?.id,job.json().id);
@@ -133,6 +156,9 @@ test('review selection uses scoped strict P75, evidenced claims and original non
     const newer=(await api('/api/session-efficiency?period=since-enrollment')).json();assert.equal(newer.tokenP75,1000);
     assert.ok(newer.sessions.filter((row:any)=>row.tokens===1000).every((row:any)=>row.reviewReasons.length===0),'equal P75 does not pass the strictly-higher rule');
     assert.deepEqual((await api('/api/session-efficiency/export?period=since-enrollment&version='+report.version)).json(),report);
+    const truncated=await analyze('truncated prefix',100,true,false,false,'fix',true);
+    const incomplete=(await api('/api/session-efficiency?period=since-enrollment')).json().sessions.find((row:any)=>row.snapshotId===truncated);
+    assert.equal(incomplete.rework,null,'a model cannot establish the first prompt after a truncated native prefix');
   }finally{await app?.close();await db.end();await sandbox.close();}
 });
 

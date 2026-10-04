@@ -50,7 +50,7 @@ export async function migrateSessionEfficiency(db:Database){await db.query('CREA
 export function sessionEfficiencyService(db:Database,usage:ReturnType<typeof usageOutputService>,insights:ReturnType<typeof sessionInsightsService>,raw:RawStore,clock:()=>Date=()=>new Date()){
   async function load(input:unknown,full=false):Promise<{q:EfficiencyQuery;value:SessionEfficiencyPage}>{
     const q=efficiencyQuerySchema.parse(input),request=selection(q);
-    if(full&&(q.version||q.offset))throw new HttpError(400,'重算不能指定固定版本或分页');
+    if(full&&(q.version||q.offset||q.sessionId||q.segmentOffset))throw new HttpError(400,'重算不能指定固定版本或分页');
     if(q.version){const row=(await db.query('SELECT request,payload FROM session_efficiency_revisions WHERE version=$1',[q.version])).rows[0];if(!row)throw new HttpError(404,'会话产效版本不存在');
       if(Object.keys(row.request).length!==Object.keys(request).length||Object.entries(request).some(([key,value])=>row.request[key]!==value))throw new HttpError(409,'会话产效版本与筛选不一致');return{q,value:row.payload};}
     const head=full?await usage.recompute(request):null,source=await usage.export({...request,...(head?{version:head.version}:{})});
@@ -79,7 +79,11 @@ export function sessionEfficiencyService(db:Database,usage:ReturnType<typeof usa
   async function read(input:unknown,full=false){const {q,value}=await load(input,full);let sessions=value.sessions.filter(row=>q.reviewOnly!=='true'||row.reviewReasons.length);
     const get=(row:EfficiencySession)=>q.sort==='date'?row.dates.at(-1)??'':q.sort==='prompts'?row.userTurns:q.sort==='code'?row.codeChanges:q.sort==='efficiency'?row.efficiency.value:row[q.sort];
     sessions=[...sessions].sort((a,b)=>{const x=get(a),y=get(b);if(x===null)return y===null?a.sessionId.localeCompare(b.sessionId):1;if(y===null)return-1;return(x<y?-1:x>y?1:0)*(q.direction==='asc'?1:-1)||a.sessionId.localeCompare(b.sessionId);});
-    const result={...value,sessions:sessions.slice(q.offset,q.offset+20),filteredTotal:sessions.length,nextOffset:sessions.length>q.offset+20?q.offset+20:null};
+    const selected=q.sessionId?value.sessions.filter(row=>row.sessionId===q.sessionId):sessions.slice(q.offset,q.offset+20);
+    if(q.sessionId&&!selected.length)throw new HttpError(404,'该固定版本没有所选会话');
+    const result={...value,sessions:selected.map(row=>{if(!row.timing)return row;const offset=q.sessionId?q.segmentOffset:0,limit=q.sessionId?20:5;
+      return {...row,timing:{...row.timing,segments:row.timing.segments.slice(offset,offset+limit),segmentTotal:row.timing.segments.length,nextSegmentOffset:row.timing.segments.length>offset+limit?offset+limit:null}};}),
+      filteredTotal:q.sessionId?1:sessions.length,nextOffset:!q.sessionId&&sessions.length>q.offset+20?q.offset+20:null};
     if(Buffer.byteLength(JSON.stringify(result))>80*1024)throw new HttpError(413,'会话产效响应超过范围上限，请缩小筛选');return result;}
   return{read,recompute:(input:unknown)=>read(input,true),export:async(input:unknown)=>(await load(input)).value};
 }
