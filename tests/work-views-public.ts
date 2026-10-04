@@ -136,7 +136,7 @@ export async function workViewsPublic(native: boolean,extension?:WorkViewsExtens
     // The shared refresh lock may leave even an empty selection queued initially.
     // Verify its durable public result through the same bounded wait as populated views.
     const absentView = await wait(absent, null);
-    assert.equal(absentView.state, 'partial'); assert.equal(absentView.statistics.records, null); assert.deepEqual(absentView.participants, []); assert.deepEqual(absentView.items, []);
+    assert.equal(absentView.state, 'partial'); assert.ok(absentView.statistics); assert.equal(absentView.statistics.records, null); assert.deepEqual(absentView.participants, []); assert.deepEqual(absentView.items, []);
     await sandbox.restart();
     assert.deepEqual(await (await sandbox.api(path(weekly(week), `&revision=${previous.revision}`), beta.readerCredential)).json(), previousFixed);
     assert.deepEqual(await (await sandbox.api(path(fullRange, `&revision=${project.revision}`), beta.readerCredential)).json(), { ...project, refreshPending: false });
