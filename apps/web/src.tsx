@@ -134,7 +134,7 @@ function App() {
   return <PlatformShell authenticated={!!token} name={name} canManageIdentities={canManageIdentities} view={view} onNavigate={navigate} onLogout={()=>logout()} onSearch={openSearch}>
     {!token?<section className="login"><h1>登录 Skynet</h1><form onSubmit={login}><label htmlFor="credential">个人读取凭据</label><input id="credential" type="password" value={credential} onChange={event=>setCredential(event.target.value)} autoComplete="off" required/><button className="primary" disabled={busy||!credential}>{busy?'正在验证…':'进入存档'}</button></form></section>:<>
     {view==='metrics'?<UsageMetrics key={token} request={(path,signal,method,body)=>request(path,token,signal,method,body)}/>
-    :view==='profile'?<CapabilityAssessment currentEmployeeId={employeeId} request={(path,signal)=>request(path,token,signal)}/>
+    :view==='profile'?<CapabilityAssessment currentEmployeeId={employeeId} request={(path,signal)=>request(path,token,signal)} appendNote={(path,body)=>request(path,token,undefined,'POST',body)}/>
     :view==='activity'?<ActivityRecords key={token} hash={conversationHash} request={(path,signal,method,body)=>request(path,token,signal,method,body)}/>
     :view==='waits'?<WaitingReport key={token} request={(path,signal,method,body)=>request(path,token,signal,method,body)}/>
     :view==='efficiency'?<SessionEfficiency key={token} request={(path,signal,method,body)=>request(path,token,signal,method,body)}/>
