@@ -24,6 +24,14 @@ used the decorative accent at 2.2277:1 against their card. Only that chart now
 uses the existing `--viz-1` token: 3.4219:1 in light and 4.4513:1 in dark. Theme
 tokens and unrelated charts are unchanged.
 
+The final viewport check also reproduced a heat status below the visible scroll
+area after a real tap. Its existing status now sticks to the bottom of its own
+figure, with the entire status rectangle asserted visible. Moving a mouse from
+the team detail button into its long tooltip reproduced premature dismissal;
+mouse exit now closes only when leaving their shared container. The test enters
+from a real button hover, scrolls the tooltip to its final date, and exits it.
+Both failures and their fixes have separate public RED and GREEN logs.
+
 `tests/chart-interactions.test.ts` checks exact source values and denominators,
 not just target dimensions: waits of 60/120/600/1200 seconds produce a 360-second
 median, Q1 105 seconds, Q3 750 seconds, P90 1200 seconds, 4 known/1 unknown, and
@@ -57,3 +65,10 @@ node --import tsx --test --test-concurrency=1 tests/chart-interactions.test.ts t
 The evidence directory can be retained with `SKYNET_CHART_INTERACTIONS_EVIDENCE`.
 The final author receipt records the exact tested commit, integration base,
 logs and image hashes. No deployment or issue closure is part of this slice.
+
+The integrated build and original waiting HTTP/Web/OAuth/download journey plus
+the four chart cases passed 5/5 (72.291 seconds). After the final two visibility
+fixes, the build and all four chart cases passed again, 4/4 (57.665 seconds), with
+no skips. Current screenshots are in `visibility-green`; the older `final`
+screenshots predate the heat-status visibility fix and are not its acceptance
+evidence. This limited chart slice does not complete AC31 or AC32.

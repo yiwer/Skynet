@@ -81,6 +81,7 @@ test('team daily trend details open on the first touch and preserve known and un
     await page.keyboard.press('Enter');await expect(panel.getByRole('tooltip')).toHaveCount(1);await page.keyboard.press('Space');await expect(panel.getByRole('tooltip')).toHaveCount(0);
     const verified=panel.getByRole('button',{name:'每日已验证结果详情',exact:true});await verified.tap();await expect(panel.getByRole('tooltip')).toContainText(date+'：未知');
     await page.keyboard.press('Escape');await panel.getByRole('button',{name:'每日代码变更详情',exact:true}).tap();await expect(panel.getByRole('tooltip')).toContainText(date+'：0');
+    await page.keyboard.press('Escape');await detail.hover();await expect(panel.getByRole('tooltip')).toHaveCount(1);await panel.getByRole('tooltip').hover();await expect(panel.getByRole('tooltip')).toBeVisible();await page.mouse.wheel(0,1000);await expect(panel.getByRole('tooltip').locator('span').last()).toBeInViewport();await page.mouse.move(0,0);await expect(panel.getByRole('tooltip')).toHaveCount(0);
     await page.keyboard.press('Escape');await panel.getByRole('button',{name:'每日趋势切换为表格',exact:true}).tap();
     const row=panel.getByRole('row').filter({has:page.getByRole('rowheader',{name:date,exact:true})});await expect(row).toContainText('1000');await expect(row).toContainText('未知');
     await page.screenshot({path:join(directory,'team-table-390.png'),animations:'disabled'});
@@ -96,7 +97,7 @@ test('waiting heat cells support touch dismissal, keyboard escape and equivalent
     browser=await chromium.launch();const page=await browser.newPage({ignoreHTTPSErrors:true,hasTouch:true,viewport:{width:390,height:900},reducedMotion:'reduce'});
     await page.goto(f.origin+'/#waits?period=since-enrollment&version='+report.waitVersion);await page.getByLabel('个人读取凭据').fill(owner.readerCredential);await page.getByRole('button',{name:'进入存档',exact:true}).click();
     const heat=page.getByRole('region',{name:'星期与小时',exact:true}),cell=heat.getByRole('button',{name:/4 条等待/});
-    await cell.tap();await expect(heat.getByRole('status')).toContainText('4 条等待 · 中位数 6 分 0 秒');
+    await cell.tap();await expect(heat.getByRole('status')).toContainText('4 条等待 · 中位数 6 分 0 秒');await expect(heat.getByRole('status')).toBeInViewport({ratio:1});
     await page.keyboard.press('Escape');
     await writeFile(join(directory,'heat-escape.json'),JSON.stringify({version:report.version,known:4,unknown:1,statusCount:await heat.getByRole('status').count()},null,2));
     await page.screenshot({path:join(directory,'heat-escape.png'),animations:'disabled'});
@@ -122,7 +123,7 @@ test('waiting box plots expose all quartiles on touch and keyboard and dismiss w
     browser=await chromium.launch();const page=await browser.newPage({ignoreHTTPSErrors:true,hasTouch:true,viewport:{width:390,height:900},reducedMotion:'reduce'});
     await page.goto(f.origin+'/#waits?period=since-enrollment&version='+report.waitVersion);await page.getByLabel('个人读取凭据').fill(owner.readerCredential);await page.getByRole('button',{name:'进入存档',exact:true}).click();
     const people=page.getByRole('region',{name:'按人等待分布',exact:true}),plot=people.getByLabel(/等待图交互合成员工 · 4 段已知，1 段未知/);
-    await plot.tap();const tip=people.getByRole('status');await expect(tip).toContainText('最短 1 分 0 秒 · Q1 1 分 45 秒 · 中位数 6 分 0 秒 · Q3 12 分 30 秒 · 最长 20 分 0 秒 · P90 20 分 0 秒');
+    await plot.tap();const tip=people.getByRole('status');await expect(tip).toBeInViewport({ratio:1});await expect(tip).toContainText('最短 1 分 0 秒 · Q1 1 分 45 秒 · 中位数 6 分 0 秒 · Q3 12 分 30 秒 · 最长 20 分 0 秒 · P90 20 分 0 秒');
     await page.keyboard.press('Escape');
     await writeFile(join(directory,'box-escape.json'),JSON.stringify({version:report.version,known:4,unknown:1,statusCount:await tip.count()},null,2));
     await page.screenshot({path:join(directory,'box-escape.png'),animations:'disabled'});

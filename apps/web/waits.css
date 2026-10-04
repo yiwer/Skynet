@@ -53,3 +53,5 @@
 .platform-main .waiting-report .wait-heat-cell{height:44px;min-height:44px}
 
 .platform-main button.wait-person-plot{display:block;width:100%;border:0;padding:0;background:transparent;text-align:left}
+
+.platform-main .wait-heat-tooltip{position:sticky;bottom:0;z-index:2}
