@@ -4,3 +4,4 @@
 .efficiency-page .usage-view-toggle button{height:44px;min-height:44px;min-width:44px}
 .eff-unknown{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;padding:20px 16px;background:var(--color-paper-2);border-radius:var(--radius-sm);font-size:13px}
 .eff-unknown strong{font-weight:500}.eff-unknown span{color:var(--color-muted);font-variant-numeric:tabular-nums}
+.eff-segment-toggle{margin-bottom:14px;width:max-content}.efficiency-page .eff-segment-table{min-width:640px}.efficiency-page .eff-segment-table td:last-child{min-width:150px;max-width:220px;white-space:normal}

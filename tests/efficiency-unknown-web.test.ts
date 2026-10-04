@@ -9,7 +9,7 @@ test('unknown efficiency keeps a compact state and evidence while known zero rem
   const f=await assessmentFixture();let browser:Browser|undefined;
   const directory=process.env.SKYNET_EFFICIENCY_UNKNOWN_EVIDENCE??join(f.directory,'efficiency-unknown');await mkdir(directory,{recursive:true});
   try{
-    const owner=await f.owner('产效未知员工'),native=f.rows({prompts:3,tokens:1000});await f.upload(owner,native.rows,native.sessionId);
+    const owner=await f.owner('产效未知员工'),native=f.rows({prompts:3,tokens:1000,active:true});await f.upload(owner,native.rows,native.sessionId);
     const unknown=await(await f.api(owner,'/api/session-efficiency?period=since-enrollment')).json();assert.equal(unknown.total,1);assert.equal(unknown.sessions[0].efficiency.value,null);
     browser=await chromium.launch();const context=await browser.newContext({ignoreHTTPSErrors:true,reducedMotion:'reduce',viewport:{width:1280,height:900}}),page=await context.newPage();
     const errors:string[]=[];page.on('pageerror',error=>errors.push(error.message));
@@ -28,6 +28,21 @@ test('unknown efficiency keeps a compact state and evidence while known zero rem
     const cells=await table.locator('tbody tr').all();assert.equal(cells.length,unknown.distributions.length);
     for(let i=0;i<cells.length;i++){const values=cells[i]!.getByRole('cell'),expected=unknown.distributions[i];await expect(values.nth(0)).toHaveText(String(expected.count));await expect(values.nth(1)).toHaveText(String(expected.unknownCount));await expect(values.nth(2)).toHaveText('未知');}
     await panel.getByRole('button',{name:'查看会话分段',exact:true}).click();await expect(panel.getByRole('link',{name:'阅读原始对话',exact:true})).toHaveAttribute('href',unknown.sessions[0].webPath);
+    const selected=panel.getByRole('region',{name:'选中会话',exact:true});
+    await selected.getByRole('button',{name:'会话分段表格',exact:true}).focus();await page.keyboard.press('Space');
+    const segments=selected.getByRole('table',{name:'会话分段明细',exact:true});await expect(segments).toBeVisible();
+    await expect(segments.locator('tbody tr')).toHaveCount(unknown.sessions[0].timing.segmentTotal);
+    assert.ok(unknown.sessions[0].timing.segments.some((segment:any)=>segment.durationMs===null));
+    for(let index=0;index<unknown.sessions[0].timing.segments.length;index++){
+      const expected=unknown.sessions[0].timing.segments[index],row=segments.locator('tbody tr').nth(index);
+      if(expected.durationMs===null)await expect(row.getByRole('cell').nth(2)).toHaveText('未知');
+      const timestamps=await row.locator('time').evaluateAll(nodes=>nodes.map(node=>node.getAttribute('datetime')));assert.deepEqual(timestamps,[expected.startedAt,expected.endedAt].filter(Boolean));
+    }
+    const tableLinks=await segments.getByRole('link').evaluateAll(nodes=>nodes.map(node=>node.getAttribute('href')));
+    assert.deepEqual(tableLinks,unknown.sessions[0].timing.segments.flatMap((segment:any)=>segment.evidence.map((item:any)=>item.conversationPath??item.webPath)));
+    await page.setViewportSize({width:320,height:900});await segments.scrollIntoViewIfNeeded();assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth||document.documentElement.scrollHeight>innerHeight),false);
+    await page.screenshot({path:join(directory,'segment-table-320-dark.png'),animations:'disabled'});screenshots.push('segment-table-320-dark.png');
+    await selected.getByRole('button',{name:'会话分段图表',exact:true}).click();await expect(segments).toHaveCount(0);await expect(selected.getByRole('img',{name:/已确认分段/})).toBeVisible();
     const knownOwner=await f.owner('产效零值员工');await f.session(knownOwner,{prompts:3,tokens:1000,verified:0,claimed:0});
     const mixed=await(await f.api(owner,'/api/session-efficiency?period=since-enrollment')).json();assert.equal(mixed.total,2);assert.equal(mixed.sessions.find((item:any)=>item.employees.some((person:any)=>person.employeeId===knownOwner.employeeId)).efficiency.value,0);
     await panel.getByRole('button',{name:'接入至今',exact:true}).click();await expect(panel).toHaveAttribute('aria-busy','false');await panel.getByRole('button',{name:'产效分布图表',exact:true}).click();
