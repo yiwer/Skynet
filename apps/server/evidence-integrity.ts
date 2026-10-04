@@ -88,10 +88,27 @@ export async function verifyOriginIntegrity(q:Query,raw:RawStore,ids:string[],un
   }
 }
 export async function verifySnapshotIntegrity(q:Query,raw:RawStore,id:string,materialId?:string){
-  const ids=(await q.query(`SELECT DISTINCT event_id FROM ${materialId?'material_events':'snapshot_events'} WHERE snapshot_id=$1 ${materialId?'AND material_id=$2':''}`,
-    materialId?[id,materialId]:[id])).rows.map(row=>row.event_id as string);
+  if(!materialId)return verifySnapshotsIntegrity(q,raw,[id]);
+  const ids=(await q.query('SELECT DISTINCT event_id FROM material_events WHERE snapshot_id=$1 AND material_id=$2',[id,materialId])).rows.map(row=>row.event_id as string);
   await verifyOriginIntegrity(q,raw,ids);
-  if(!materialId)await repairLegacyCarriers(q,raw,id);
+}
+
+/** One selected source set; failures retain every affected carrier identity.
+ * Existing per-target legacy repair bounds and the global repair entry remain
+ * unchanged. No stored proof substitutes for callers' fresh raw verification. */
+export async function verifySnapshotsIntegrity(q:Query,raw:RawStore,snapshotIds:string[],unavailable?:(error:RawUnavailableError,snapshotIds:string[])=>void){
+  if(!snapshotIds.length)return;
+  const rows=(await q.query('SELECT DISTINCT snapshot_id,event_id FROM snapshot_events WHERE snapshot_id=ANY($1::uuid[])',[snapshotIds])).rows;
+  const carriers=new Map<string,string[]>();for(const row of rows){let ids=carriers.get(row.event_id);if(!ids){ids=[];carriers.set(row.event_id,ids);}ids.push(row.snapshot_id);}
+  const failed=new Set<string>();
+  await verifyOriginIntegrity(q,raw,[...carriers.keys()],unavailable?(error,eventIds)=>{
+    const affected=[...new Set(eventIds.flatMap(id=>carriers.get(id)??[]))];for(const id of affected)failed.add(id);unavailable(error,affected);
+  }:undefined);
+  if(!(await q.query('SELECT EXISTS(SELECT 1 FROM event_integrity WHERE version=$1 AND NOT valid) AS needed',[integrityVersion])).rows[0].needed)return;
+  for(const id of snapshotIds)if(!failed.has(id)){
+    try{await repairLegacyCarriers(q,raw,id);}
+    catch(error){if(!(error instanceof RawUnavailableError)||!unavailable)throw error;unavailable(error,[id]);}
+  }
 }
 
 /** A confirmed legacy decoded-byte collision may be repaired only using an
