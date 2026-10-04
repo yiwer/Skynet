@@ -1,5 +1,5 @@
 import { digest } from './database.js';
-import { dimKeys, type CapabilityAssessment, type DimKey, type MetricScore } from '../../packages/contracts/assessment.js';
+import { dimKeys, type AssessmentPreset, type CapabilityAssessment, type DimKey, type MetricScore } from '../../packages/contracts/assessment.js';
 
 type MetricDefinition = Pick<MetricScore, 'key' | 'label' | 'anchor' | 'minimum' | 'unit'>;
 const metric = (key: string, label: string, zero: number, full: number, minimum: number, unit: MetricScore['unit'] = 'ratio'): MetricDefinition => ({ key, label, anchor: [zero, full], minimum, unit });
@@ -22,10 +22,10 @@ export const assessmentModel = {
   promptTips: { goal: '第一句写清要达成的目标', constraints: '写明不能改动的文件、接口或环境', context: '附上文件路径、报错日志或复现步骤', acceptance: '写明怎样算完成，例如要跑哪些测试' },
 };
 export const assessmentModelVersion = digest(JSON.stringify(assessmentModel));
-export function emptyDimensions(): CapabilityAssessment['dims'] {
+export function emptyDimensions(preset: AssessmentPreset = '默认'): CapabilityAssessment['dims'] {
   const dims = {} as CapabilityAssessment['dims'];
   for (const key of dimKeys) dims[key] = { label: assessmentModel.dimensions[key].label, score: null,
-    weight: assessmentModel.presets['默认'][key], effectiveWeight: 0, teamMedian: null,
+    weight: assessmentModel.presets[preset][key], effectiveWeight: 0, teamMedian: null,
     metrics: assessmentModel.dimensions[key].metrics.map(def => ({ ...def, value: null, score: null, samples: 0,
       state: def.key === 'permMed' ? 'unknown' : 'insufficient', evidence: [], evidenceCount: 0,
       reason: def.key === 'permMed' ? '来源未记录可核对的权限请求与决定时刻' : '样本不足' })) };
