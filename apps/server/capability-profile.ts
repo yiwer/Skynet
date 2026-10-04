@@ -88,7 +88,7 @@ export function capabilityProfileService(db: Database, assessments: ReturnType<t
       const head = full ? await assessments.recompute(employeeId, scope) : null;
       const assessment = await assessments.export(employeeId, { ...scope, ...(head ? { version: head.version } : {}) });
       if (requested && assessment.version !== requested.version) throw new HttpError(409, '此历史评估尚无完整画像；仍可读取固定评估');
-      const report = await usage.export({ period: scope.period, version: assessment.inputs.usageVersion });
+      const report = await usage.complete({ period: scope.period, version: assessment.inputs.usageVersion });
       const mine = report.employees.find(person => person.employeeId === employeeId);
       const { employeeId: _id, employee: _name, daily, agents, activeDates, ...totals } = mine ?? {
         employeeId, employee: assessment.employee, daily: [], agents: [], activeDates: [], sessions: 0, userTurns: 0, toolCalls: 0,

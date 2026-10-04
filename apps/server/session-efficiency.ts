@@ -51,8 +51,7 @@ export function sessionEfficiencyService(db:Database,usage:ReturnType<typeof usa
     if(full&&(q.version||q.offset||q.sessionId||q.segmentOffset))throw new HttpError(400,'重算不能指定固定版本或分页');
     if(q.version){const row=(await db.query('SELECT request,payload FROM session_efficiency_revisions WHERE version=$1',[q.version])).rows[0];if(!row)throw new HttpError(404,'会话产效版本不存在');
       if(Object.keys(row.request).length!==Object.keys(request).length||Object.entries(request).some(([key,value])=>row.request[key]!==value))throw new HttpError(409,'会话产效版本与筛选不一致');return{q,value:row.payload};}
-    const head=metricVersion===undefined&&full?await usage.recompute(request):null;
-    const source=metricVersion===undefined?await usage.export({...request,...(head?{version:head.version}:{})}):await usage.forMetric(request,metricVersion,full);
+    const source=metricVersion===undefined?await usage.complete(request,{full}):await usage.forMetric(request,metricVersion,full);
     const grouped=new Map<string,UsageSession[]>();for(const row of source.sessions.filter(row=>row.selected&&row.sessions)){if(!grouped.has(row.sessionId))grouped.set(row.sessionId,[]);grouped.get(row.sessionId)!.push(row);}
     const sessions=[...grouped.values()].map(combine).sort((a,b)=>(b.dates.at(-1)??'').localeCompare(a.dates.at(-1)??'')||a.sessionId.localeCompare(b.sessionId)),tokenP75=quantile(sessions.flatMap(row=>row.tokens===null?[]:[row.tokens]),.75);
     const inputs=[...new Map(sessions.flatMap(row=>row.inputVersions).map(input=>[input.snapshotId+'/'+input.version,input])).values()];

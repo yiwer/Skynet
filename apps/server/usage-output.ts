@@ -184,6 +184,13 @@ export function usageOutputService(db: Database, metrics: MetricsService, insigh
     if (Buffer.byteLength(JSON.stringify(result)) > 80 * 1024) throw new HttpError(413, '产出响应超过范围上限，请缩小筛选');
     return result;
   }
+  /** Internal full revision, with the same source checks and calculation bounds.
+   * Composed reports must not obtain it via a bounded first-page response. */
+  async function complete(input:unknown={},options:{full?:boolean}={}) {
+    const q=metricsQuerySchema.parse(input);
+    if(q.offset)throw new HttpError(400,'完整产出输入不能指定分页');
+    return (await load(q,options.full??false)).payload;
+  }
   async function readWeek(week:string, filters:{employeeId?:string;source?:MetricsQuery['source'];project?:string},full=false) {
     fixedWeek.parse(week);const {employeeId,...teamFilters}=filters;
     const head=await metrics.readCoverageMetrics({date:addDays(week,6),view:'week',...teamFilters},full);
@@ -202,5 +209,5 @@ export function usageOutputService(db: Database, metrics: MetricsService, insigh
     const fixed=await metrics.exportMetrics({...q,employeeId:undefined,offset:0,version:metricVersion});
     return compute(q,full,fixed);
   }
-  return {readWeek, forMetric, read, recompute: (input: unknown) => read(input, true), export: async (input: unknown) => (await load(input)).payload };
+  return {complete,readWeek, forMetric, read, recompute: (input: unknown) => read(input, true), export: async (input: unknown) => (await load(input)).payload };
 }

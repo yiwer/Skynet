@@ -49,8 +49,9 @@ export function waitsService(db: Database, raw: RawStore, clock: () => Date = ()
       if (attempt >= 2) throw new HttpError(409, '等待来源正在更新，请稍后重试');
     }
   }
-  async function read(input: unknown, full = false, exporting = false) {
+  async function load(input: unknown, full = false) {
     const q = waitsQuerySchema.parse(input); let result: WaitsPage;
+    if(full&&(q.version||q.offset||q.lines||q.contextSnapshotId))throw new HttpError(400,'重算不能指定旧版本、分页或对话行');
     if (q.version) {
       if (full) throw new HttpError(400, '重算请使用当前范围，固定版本保持不变');
       const row = (await db.query('SELECT payload FROM wait_revisions WHERE version=$1', [q.version])).rows[0];
@@ -61,6 +62,17 @@ export function waitsService(db: Database, raw: RawStore, clock: () => Date = ()
       const requested = selection(q);
       if (!q.contextSnapshotId) for (const key of ['snapshotId', 'period', 'employeeId', 'source', 'project'] as const) if (requested[key] !== result.scope[key]) throw new HttpError(400, '等待记录版本不属于当前范围');
     } else result = await compute(q, full);
+    return {q,result};
+  }
+  /** Complete immutable input for composed reports; transport budgets belong
+   * to read/export, while compute retains all original-input resource guards. */
+  async function complete(input:unknown,options:{full?:boolean}={}) {
+    const q=waitsQuerySchema.parse(input);
+    if(q.offset||q.lines||q.contextSnapshotId)throw new HttpError(400,'完整等待输入不能指定分页或对话行');
+    return (await load(q,options.full??false)).result;
+  }
+  async function read(input: unknown, full = false, exporting = false) {
+    const {q,result}=await load(input,full);
     const lines = q.lines ? new Set(q.lines.split(',').map(Number)) : null;
     const page = exporting ? result : { ...result,
       intervals: lines ? result.intervals.filter(interval => lines.has(interval.displayLine) && (!q.contextSnapshotId || interval.snapshotId === q.contextSnapshotId)) : result.intervals.slice(q.offset, q.offset + 25),
@@ -68,5 +80,5 @@ export function waitsService(db: Database, raw: RawStore, clock: () => Date = ()
     if (Buffer.byteLength(JSON.stringify(page)) > (exporting ? 16 * 1024 * 1024 : 80 * 1024)) throw waitBounded();
     return page;
   }
-  return {forScope:(input:unknown,range:{from:string;to:string},full=false)=>compute(waitsQuerySchema.parse(input),full,range), read, recompute: (input: unknown) => read(input, true), export: (input: unknown) => read(input, false, true) };
+  return {complete,forScope:(input:unknown,range:{from:string;to:string},full=false)=>compute(waitsQuerySchema.parse(input),full,range), read, recompute: (input: unknown) => read(input, true), export: (input: unknown) => read(input, false, true) };
 }

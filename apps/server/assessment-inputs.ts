@@ -12,11 +12,9 @@ import { dimKeys } from '../../packages/contracts/assessment.js';
 const weekday = (date: string) => ![0, 6].includes(new Date(date + 'T00:00:00Z').getUTCDay());
 export async function assessmentInputs(db: Database, usage: ReturnType<typeof usageOutputService>, insights: ReturnType<typeof sessionInsightsService>, waits: ReturnType<typeof waitsService>, clock: () => Date, full = false, preset: AssessmentPreset = '默认', period: AssessmentPeriod = 'since-enrollment') {
   const selection = { period };
-  const usageHead = full ? await usage.recompute(selection) : null, waitHead = full ? await waits.recompute(selection) : null;
-  const report = await usage.export({ ...selection, ...(usageHead ? { version: usageHead.version } : {}) });
-  const waitReport = await waits.export({ ...selection, ...(waitHead ? { version: waitHead.version } : {}) });
-  const baselineHead = period !== 'since-enrollment' && full ? await usage.recompute({ period: 'since-enrollment' }) : null;
-  const baselineReport = period === 'since-enrollment' ? report : await usage.export({ period: 'since-enrollment', ...(baselineHead ? { version: baselineHead.version } : {}) });
+  const report = await usage.complete(selection, { full });
+  const waitReport = await waits.complete(selection, { full });
+  const baselineReport = period === 'since-enrollment' ? report : await usage.complete({ period: 'since-enrollment' }, { full });
   const baselineReferences = [...new Map(baselineReport.sessions.flatMap(row => row.insightVersions).map(ref => [ref.version, ref])).values()];
   const references = [...new Map([...report.sessions.flatMap(row => row.insightVersions), ...baselineReferences].map(ref => [ref.version, ref])).values()];
   const views = await insights.readVersions(references), messages=[...new Map((await insights.readMessageFacts(views)).flatMap(fact=>fact.messages).map(message=>[message.id,message])).values()];
