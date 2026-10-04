@@ -48,5 +48,5 @@ export function capabilityPeopleService(db: Database, assessments: ReturnType<ty
     if (Buffer.byteLength(JSON.stringify(result)) > 80 * 1024) throw new HttpError(413, '员工一览响应超过范围上限');
     return result;
   }
-  return { read, export: (input: unknown) => load(input), recompute: (input: unknown) => read(input, true) };
+  return { read, export: (input: unknown,full=false) => load(input,full), recompute: (input: unknown) => read(input, true) };
 }
