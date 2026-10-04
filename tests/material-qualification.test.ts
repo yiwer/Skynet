@@ -91,7 +91,8 @@ test('material-first → original normal source qualification versions activity 
     const readGate=new Promise<void>(resolve=>{originsRead=resolve;});const released=new Promise<void>(resolve=>{releaseOrigins=resolve;});
     s.testDatabase.query=((sql:unknown,values:unknown[])=>{
       const result=(originalQuery as (sql:string,values:unknown[])=>Promise<import('pg').QueryResult>).call(s.testDatabase,sql as string,values);
-      if(reads<3&&typeof sql==='string'&&sql.includes('FROM effective_snapshot_events s JOIN effective_event_origins')&&values?.[0]===bSnapshot) {
+      if(reads<3&&typeof sql==='string'&&sql.includes('FROM effective_snapshot_events s JOIN effective_event_origins')&&
+        (Array.isArray(values?.[0])?values[0].includes(bSnapshot):values?.[0]===bSnapshot)) {
         reads++;return Promise.resolve(result).then(async value=>{if(reads===3)originsRead();await released;return value;});
       }
       return result;
