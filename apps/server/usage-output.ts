@@ -190,5 +190,17 @@ export function usageOutputService(db: Database, metrics: MetricsService, insigh
     const fixed=await metrics.exportMetrics({period:'custom',from:week,to:addDays(week,6),...teamFilters,version:head.version});
     return compute({period:'this-week',offset:0,...filters},full,fixed);
   }
-  return {readWeek, read, recompute: (input: unknown) => read(input, true), export: async (input: unknown) => (await load(input)).payload };
+  /** A composite current read has already freshly prepared this exact metric
+   * version. Keep the employee projection and every current insight check; only
+   * skip repeating metric preparation. The caller retains its outer frontier
+   * guard and, for full mode, must have recomputed the upstream metric first. */
+  async function forMetric(input:unknown,metricVersion:string,full=false) {
+    const q=metricsQuerySchema.parse(input);
+    if(q.version||q.offset)throw new HttpError(400,'复用指标输入不能混用产出版本或分页');
+    // Usage retains team carriers even for an employee selection. The fixed
+    // metric reader validates period/source/project and excludes scope widening.
+    const fixed=await metrics.exportMetrics({...q,employeeId:undefined,offset:0,version:metricVersion});
+    return compute(q,full,fixed);
+  }
+  return {readWeek, forMetric, read, recompute: (input: unknown) => read(input, true), export: async (input: unknown) => (await load(input)).payload };
 }
