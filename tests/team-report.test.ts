@@ -38,29 +38,35 @@ test('team overview freezes shared report values, includes inactive samples and 
 
 test('four-week team view pages frozen coverage dates while keeping period totals and bounded HTTP payloads',{timeout:120000},async()=>{
   const sandbox=await createSandbox(),db=connect(sandbox.env.DATABASE_URL!);let app:Awaited<ReturnType<typeof createApp>>|undefined;
+  const schedule=await db.connect();await schedule.query('SELECT pg_advisory_lock(7402129)');
   try{
     const owner=await sandbox.provision('范围成员01');for(let n=2;n<=10;n++)await sandbox.provision('范围成员'+String(n).padStart(2,'0'));
-    const now=new Date(Date.now()+60000),clock=new Date(now.getTime()+27*86400000);
+    const now=new Date(Date.now()+60000),clock=new Date(beijingDate(new Date(now.getTime()+27*86400000))+'T12:00:00+08:00');
     app=await createApp({db,rawDirectory:sandbox.env.RAW_DIRECTORY!,reportClock:()=>clock});
     const enrollment=await app.inject({url:'/api/devices/enroll',method:'POST',headers:{Authorization:`Bearer ${owner.enrollmentCredential}`},payload:{installationId:randomUUID(),name:'four-week-device'}});assert.equal(enrollment.statusCode,200,enrollment.body);
     const api=(url:string)=>app!.inject({url,headers:{Authorization:`Bearer ${owner.readerCredential}`}});
+    // Real scheduler/enrollment race: release initial scheduling only after the
+    // public device enrollment. Its derived daily reports must not starve reads.
+    await schedule.query('SELECT pg_advisory_unlock(7402129)');
     const path='/api/team-report?period=since-enrollment',response=await api(path);assert.equal(response.statusCode,200,response.body);const report=response.json();
     assert.equal(report.coverage.totalDates,28);assert.equal(report.coverage.dates.length,7);assert.equal(report.coverage.dateOffset,0);assert.equal(report.coverage.nextDateOffset,7);assert.equal(report.coverage.dates.at(-1),beijingDate(clock));assert.equal(report.people.length,10);assert.equal(report.daily.length,28);assert.ok(Buffer.byteLength(response.body)<=80*1024);
     const previous=await api(path+'&version='+report.version+'&coverageOffset=21');assert.equal(previous.statusCode,200,previous.body);const old=previous.json();assert.equal(old.version,report.version);assert.equal(old.coverage.dates[0],beijingDate(now));assert.equal(old.coverage.nextDateOffset,null);assert.deepEqual(old.totals,report.totals);assert.deepEqual(old.daily,report.daily);assert.equal(old.people[0].daily.length,7);assert.equal(old.people[0].daily[0].date,old.coverage.dates[0]);assert.ok(Buffer.byteLength(previous.body)<=80*1024);
     assert.deepEqual((await api('/api/team-report/export?period=since-enrollment&version='+report.version+'&coverageOffset=21')).json(),old);
     assert.equal((await api(path+'&coverageOffset=7')).statusCode,400,'later coverage pages require the frozen version');
     assert.equal((await api(path+'&version='+report.version+'&coverageOffset=28')).statusCode,400,'outside coverage window is rejected');
-  }finally{await app?.close();await db.end();await sandbox.close();}
+  }finally{await schedule.query('SELECT pg_advisory_unlock(7402129)');schedule.release();await app?.close();await db.end();await sandbox.close();}
 });
 
 test('weekly profile pins its selected historical week and employee filters without exposing arbitrary live report ranges',{timeout:120000},async()=>{
   const sandbox=await createSandbox(),db=connect(sandbox.env.DATABASE_URL!);let app:Awaited<ReturnType<typeof createApp>>|undefined;
+  const schedule=await db.connect();await schedule.query('SELECT pg_advisory_lock(7402129)');
   try{
-    const owner=await sandbox.provision('历史周成员'),now=new Date(Date.now()+60000),timestamp=now.toISOString(),week=monday(beijingDate(now));let clock=new Date(now.getTime()+15*86400000);
+    const owner=await sandbox.provision('历史周成员'),now=new Date(Date.now()+60000),timestamp=now.toISOString(),week=monday(beijingDate(now));let clock=new Date(beijingDate(new Date(now.getTime()+15*86400000))+'T12:00:00+08:00');
     app=await createApp({db,rawDirectory:sandbox.env.RAW_DIRECTORY!,reportClock:()=>clock});
     const api=(url:string,payload?:object|Buffer,credential=owner.readerCredential,method:'GET'|'POST'|'PUT'='GET')=>app!.inject({url,method,headers:{Authorization:`Bearer ${credential}`,...(Buffer.isBuffer(payload)?{'Content-Type':'application/octet-stream'}:{})},...(payload===undefined?{}:{payload})});
     const device=(await api('/api/devices/enroll',{installationId:randomUUID(),name:'weekly-device'},owner.enrollmentCredential,'POST')).json();
     for(const project of ['/synthetic/week','/synthetic/other']){const bytes=Buffer.from(JSON.stringify({timestamp,type:'response_item',payload:{type:'message',role:'user',content:[{type:'input_text',text:'完成所选项目'}]}})+'\n');await api('/api/chunks/'+digest(bytes),bytes,device.deviceCredential,'PUT');await api('/api/snapshots',{protocolVersion:1,sourceSessionId:randomUUID(),source:'codex-cli',sourceVersion:'0.160.0',sourceOs:process.platform,project,hash:digest(bytes),byteLength:bytes.length,qualifiedAt:timestamp,capability:'unverified'},device.deviceCredential,'POST');}
+    await schedule.query('SELECT pg_advisory_unlock(7402129)');
     const query=new URLSearchParams({week,employeeId:owner.employeeId,source:'codex-cli',project:'/synthetic/week'}),path='/api/team-report/weekly?'+query;
     const response=await api(path);assert.equal(response.statusCode,200,response.body);const report=response.json();assert.equal(report.scope.from,week);assert.equal(report.scope.to,addDays(week,6));assert.equal(report.prompts.prompts,1);assert.equal(report.totals.inputTokens,null);assert.equal(report.totals.unknownInputSessions,1);assert.equal(report.daily.find((day:any)=>day.date===beijingDate(now)).inputTokens,null);
     for(const link of Object.values(report.links) as {api:string}[]){const response=await api(link.api);assert.equal(response.statusCode,200,response.body);assert.equal(response.json().scope.from,week);assert.equal(response.json().scope.employeeId,owner.employeeId);assert.equal(response.json().scope.project,'/synthetic/week');assert.equal(response.json().scope.source,'codex-cli');assert.ok([400,409].includes((await api(link.api+'&week='+addDays(week,7))).statusCode),'duplicate or mismatching fixed week cannot select a different range');}
@@ -70,5 +76,26 @@ test('weekly profile pins its selected historical week and employee filters with
     assert.equal((await api('/api/team-report/weekly?'+new URLSearchParams({week:addDays(week,1),employeeId:owner.employeeId}))).statusCode,400);
     clock=new Date(clock.getTime()+8*86400000);assert.deepEqual((await api(fixed)).json(),report);assert.equal((await api('/api/team-report?period=this-week&employeeId='+owner.employeeId)).json().prompts.prompts,0);
     assert.deepEqual((await api(path)).json().totals,report.totals,'historical weekly live materialization retains original source dates');
-  }finally{await app?.close();await db.end();await sandbox.close();}
+  }finally{await schedule.query('SELECT pg_advisory_unlock(7402129)');schedule.release();await app?.close();await db.end();await sandbox.close();}
+});
+
+test('team coverage freezes observed daily preparation state without treating it as a new original',{timeout:120000},async()=>{
+  const sandbox=await createSandbox(),db=connect(sandbox.env.DATABASE_URL!),schedule=await db.connect();
+  let app:Awaited<ReturnType<typeof createApp>>|undefined;
+  await schedule.query('SELECT pg_advisory_lock(7402129)');
+  try{
+    const owner=await sandbox.provision('日报状态成员'),now=new Date(Date.now()+60000),date=beijingDate(now);
+    app=await createApp({db,rawDirectory:sandbox.env.RAW_DIRECTORY!,reportClock:()=>now});
+    const api=(url:string,payload?:object,credential=owner.readerCredential)=>app!.inject({url,method:payload?'POST':'GET',headers:{Authorization:`Bearer ${credential}`},...(payload?{payload}:{})});
+    const enrolled=await api('/api/devices/enroll',{installationId:randomUUID(),name:'state-device'},owner.enrollmentCredential);assert.equal(enrolled.statusCode,200,enrolled.body);
+    const path='/api/team-report?period=since-enrollment',beforeResponse=await api(path);assert.equal(beforeResponse.statusCode,200,beforeResponse.body);const before=beforeResponse.json();
+    const state=(report:any)=>report.coverage.rows.find((row:any)=>row.employeeId===owner.employeeId).cells.find((cell:any)=>cell.date===date).analysis;
+    assert.equal(state(before),'unknown');assert.equal(before.totals.sessions,0);
+    const requested=await api(`/api/daily-reports/${owner.employeeId}/${date}`,{});assert.equal(requested.statusCode,202,requested.body);assert.equal(requested.json().state,'ready');
+    const afterResponse=await api(path);assert.equal(afterResponse.statusCode,200,afterResponse.body);const after=afterResponse.json();
+    assert.equal(state(after),'ready');assert.notEqual(after.version,before.version,'visible preparation state belongs to the frozen team identity');
+    assert.deepEqual(after.totals,before.totals);assert.equal(after.usageVersion,before.usageVersion,'a daily projection is not a new original');
+    assert.deepEqual((await api(path+'&version='+before.version)).json(),before,'an old coverage snapshot stays immutable after preparation');
+    assert.deepEqual((await api(path+'&version='+after.version)).json(),after);
+  }finally{await schedule.query('SELECT pg_advisory_unlock(7402129)');schedule.release();await app?.close();await db.end();await sandbox.close();}
 });

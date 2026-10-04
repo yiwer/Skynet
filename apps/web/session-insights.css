@@ -34,3 +34,11 @@
 .inference-audit-author{color:var(--color-muted);font-size:11px}
 .inference-audit-links{display:flex;gap:14px;flex-wrap:wrap}
 .inference-audit-links a,.inference-current{display:inline-flex;align-items:center;min-height:44px;font-size:12px}
+.platform-main .session-side .session-insights :is(button,summary){min-height:44px;min-width:44px}
+.platform-main .session-side .session-insights summary{display:list-item;box-sizing:border-box;padding:12px 0;line-height:20px}
+.platform-main .session-side .session-insights a{display:inline-flex;align-items:center;min-height:44px;min-width:44px;overflow-wrap:anywhere}
+.session-insights .insight-more{display:block;max-width:100%;margin:10px 0;padding:10px 12px;font-size:var(--text-xs);border:1px solid var(--color-rule-soft);border-radius:var(--radius-sm);background:var(--color-paper-2);color:var(--color-ink)}
+.session-insights .insight-more:disabled{opacity:.55;cursor:wait}
+.session-insights .insight-more:focus-visible{outline:2px solid var(--color-focus);outline-offset:2px}
+.insight-contributions>div{display:flex;align-items:center;justify-content:space-between;gap:8px;min-width:0;font-size:var(--text-xs)}
+.insight-contributions code{font-size:10px;color:var(--color-muted);overflow-wrap:anywhere}
