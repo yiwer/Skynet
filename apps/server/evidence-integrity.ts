@@ -98,6 +98,9 @@ export async function verifySnapshotIntegrity(q:Query,raw:RawStore,id:string,mat
  * The old origin and old carrier mappings remain immutable. */
 type SourceScope={deviceId:string;source:string;sessionId:string};
 async function repairCarriers(q:Query,raw:RawStore,snapshotId?:string,scope?:SourceScope){
+  // An empty durable repair queue should not join every native occurrence. New
+  // invalid proofs remain in the same queue and are picked up on the next pass.
+  if(!(await q.query('SELECT EXISTS(SELECT 1 FROM event_integrity WHERE version=$1 AND NOT valid) AS needed',[integrityVersion])).rows[0].needed)return;
   const rows=(await q.query(`SELECT se.snapshot_id,se.line,se.block,se.event_id,s.device_id,s.hash,s.manifest,s.committed_at,
     o.device_id AS original_device,o.source AS original_source,o.source_session_id AS original_session,o.material_id,
     d.employee_id,d.enrolled_at,n.occurrence_hash FROM snapshot_events se

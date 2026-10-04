@@ -119,6 +119,8 @@ export async function migrate(db: Database) {
       version text NOT NULL,event_id text REFERENCES archive_event_origins(event_id),record_hash text,reason text,
       created_at timestamptz NOT NULL DEFAULT now(),UNIQUE(snapshot_id,line,block,version)
     );
+    CREATE INDEX IF NOT EXISTS event_integrity_invalid ON event_integrity(event_id)
+      WHERE version='original-utf8-1' AND NOT valid;
     CREATE OR REPLACE VIEW effective_snapshot_events AS SELECT s.snapshot_id,s.line,s.block,COALESCE(v.event_id,s.event_id) AS event_id
       FROM snapshot_events s LEFT JOIN event_origin_overrides v ON v.snapshot_id=s.snapshot_id AND v.line=s.line AND v.block=s.block AND v.version='original-utf8-1';
     CREATE TABLE IF NOT EXISTS qualification_reconcile (
