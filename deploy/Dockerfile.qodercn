@@ -1,4 +1,3 @@
-# Same verified Node 24.21.0 image as the existing backup helper.
 FROM node:24-bookworm-slim@sha256:0e0ff40c39bc087845bfb27465a0df4ea419520094bc35842ff83dd8cbe6f9b6 AS build
 WORKDIR /app
 COPY package.json package-lock.json ./
@@ -9,17 +8,13 @@ COPY apps ./apps
 RUN npm run build && npm prune --omit=dev
 
 FROM node:24-bookworm-slim@sha256:0e0ff40c39bc087845bfb27465a0df4ea419520094bc35842ff83dd8cbe6f9b6
-ARG SKYNET_RELEASE
-ARG SKYNET_SOURCE_SHA256
-LABEL org.opencontainers.image.title="Skynet" \
-      org.opencontainers.image.version=$SKYNET_RELEASE \
-      com.skynet.source-sha256=$SKYNET_SOURCE_SHA256
-ENV NODE_ENV=production HOST=0.0.0.0 PORT=3000 RAW_DIRECTORY=/data/raw
+ENV NODE_ENV=production SKYNET_ANALYSIS_CONFIG=/run/analysis/config.json
 WORKDIR /app
 COPY --from=build --chown=node:node /app/package.json ./
 COPY --from=build --chown=node:node /app/node_modules ./node_modules
 COPY --from=build --chown=node:node /app/dist ./dist
-RUN mkdir -p /data/raw && chown node:node /data/raw && chmod 0700 /data/raw
+COPY deploy/install-qodercn-runtime.mjs /opt/install-qodercn-runtime.mjs
+RUN node /opt/install-qodercn-runtime.mjs /opt/qodercn \
+    && mkdir -p /data/analysis && chown node:node /data/analysis
 USER node
-EXPOSE 3000
-CMD ["node", "dist/apps/server/main.js"]
+CMD ["node", "dist/apps/analysis/worker.js"]

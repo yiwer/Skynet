@@ -1,0 +1,29 @@
+# Explicit worker opt-in after ubuntu-release.sh has deployed the matching app.
+# Use with compose.production.yml and the existing-proxy overlay when applicable.
+services:
+  analysis:
+    image: ${SKYNET_QODERCN_IMAGE:?select the verified Qoder release image}
+    environment:
+      DATABASE_URL: postgresql://skynet:${POSTGRES_PASSWORD:?preserve the private password}@db:5432/skynet
+      SKYNET_ANALYSIS_CONFIG: /run/analysis/config.json
+    volumes:
+      - ${SKYNET_ANALYSIS_CONFIG_FILE:?set private configuration path}:/run/analysis/config.json:ro
+      - ${SKYNET_ANALYSIS_CREDENTIAL_FILE:?set private credential path}:/run/analysis/credential:ro
+      - analysis-work:/data/analysis
+    labels:
+      com.skynet.deployment-root: ${SKYNET_ROOT:?set the dedicated deployment root}
+    read_only: true
+    tmpfs: ["/tmp:size=16m,mode=1777"]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    pids_limit: 64
+    mem_limit: 1g
+    cpus: 1
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options: {max-size: 10m, max-file: "3"}
+volumes:
+  analysis-work:
+    external: true
+    name: ${SKYNET_PROJECT:?set the dedicated Compose project}-analysis-work

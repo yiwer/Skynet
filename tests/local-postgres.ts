@@ -1,13 +1,13 @@
 import { createServer } from 'node:net';
 import { join, resolve, isAbsolute } from 'node:path';
-import { writeFile, readFile, unlink } from 'node:fs/promises';
+import { writeFile, readFile, unlink, cp } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import pg from 'pg';
 import { ownedCommand } from './owned-command.js';
 
 /** Explicit portable PostgreSQL adapter for hosts without Docker. Each run owns a fresh cluster. */
-export async function localPostgres(directory: string, password: string, database: string, binaries: string) {
+export async function localPostgres(directory: string, password: string, database: string, binaries: string, stoppedSnapshot?:string) {
   if (!isAbsolute(binaries)) throw new Error('SKYNET_TEST_POSTGRES_BIN must be an absolute binary directory');
   const binary = (name: string) => join(binaries, name + (process.platform === 'win32' ? '.exe' : ''));
   const data = resolve(directory, 'postgres');
@@ -26,7 +26,14 @@ export async function localPostgres(directory: string, password: string, databas
     started = false;
   }
   try {
-    await run('initdb', ['-D', data, '-U', 'postgres', '--pwfile', passwordFile, '--auth=scram-sha-256', '--encoding=UTF8', '--locale=C']);
+    if(stoppedSnapshot){
+      if(!isAbsolute(stoppedSnapshot))throw new Error('Stopped fixture snapshot must use an absolute directory');
+      const major=(await readFile(join(stoppedSnapshot,'PG_VERSION'),'utf8')).trim(),version=(await run('postgres',['--version'])).stdout;
+      if(!version.includes(` ${major}.`))throw new Error('Stopped fixture snapshot PostgreSQL major differs from this runtime');
+      try{await readFile(join(stoppedSnapshot,'postmaster.pid'));throw new Error('Refusing a running PostgreSQL snapshot');}
+      catch(error){if((error as NodeJS.ErrnoException).code!=='ENOENT')throw error;}
+      await cp(stoppedSnapshot,data,{recursive:true,errorOnExist:true,force:false});
+    }else await run('initdb', ['-D', data, '-U', 'postgres', '--pwfile', passwordFile, '--auth=scram-sha-256', '--encoding=UTF8', '--locale=C']);
     const port = await new Promise<number>((resolvePort, reject) => {
       const socket = createServer(); socket.once('error', reject);
       socket.listen(0, '127.0.0.1', () => {
@@ -50,7 +57,7 @@ export async function localPostgres(directory: string, password: string, databas
     try {
       await client.connect();
       if (!/^[a-z_]+$/.test(database)) throw new Error('Invalid isolated database name');
-      await client.query(`CREATE DATABASE "${database}"`);
+      if(!stoppedSnapshot)await client.query(`CREATE DATABASE "${database}"`);
     } finally { await client.end(); }
     return { url: `${base}/${database}`, close };
   } catch (error) {

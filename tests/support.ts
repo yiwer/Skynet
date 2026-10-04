@@ -18,10 +18,10 @@ export async function crash(child?: ChildProcess) {
   await stopOwnedChild(child,true);
 }
 
-export async function createSandbox() {
+export async function createSandbox(options:{stoppedNativeSnapshot?:{directory:string;password:string}}={}) {
   const directory = await mkdtemp(join(tmpdir(), 'skynet-test-'));
   const name = `skynet-test-${randomUUID()}`;
-  const password = randomBytes(24).toString('hex');
+  const password = options.stoppedNativeSnapshot?.password??randomBytes(24).toString('hex');
   const database = 'skynet_test';
   const owner=randomUUID();
   let server: ChildProcess | undefined;
@@ -32,9 +32,10 @@ export async function createSandbox() {
   try {
     let databaseUrl: string;
     if (nativeBinaries) {
-      native = await localPostgres(directory, password, database, nativeBinaries);
+      native = await localPostgres(directory, password, database, nativeBinaries,options.stoppedNativeSnapshot?.directory);
       databaseUrl = native.url;
     } else {
+      if(options.stoppedNativeSnapshot)throw new Error('A native fixture snapshot requires SKYNET_TEST_POSTGRES_BIN');
       await ownedCommand('docker', ['run', '--detach', '--name', name,'--label',`org.skynet.test-owner=${owner}`, '--publish', '127.0.0.1::5432',
       '--env','POSTGRES_PASSWORD','--env', `POSTGRES_DB=${database}`, 'postgres:17-alpine'],{...process.env,POSTGRES_PASSWORD:password},'',{timeoutMs:60000});
       const { stdout } = await execute('docker', ['port', name, '5432/tcp']);
@@ -69,7 +70,7 @@ export async function createSandbox() {
     }
     const inspected = native ? null : await execute('docker', ['inspect', '--format', '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}', name]);
     const containerDatabaseUrl = native ? databaseUrl : `postgresql://postgres:${password}@${inspected!.stdout.trim()}:5432/${database}`;
-    return { directory, env, name, containerDatabaseUrl, startServer, stopServer: () => stop(server), crashServer: () => crash(server), startCollector, stopCollector: () => stop(collector),
+    return { directory, env, name, testOwner:owner, containerDatabaseUrl, startServer, stopServer: () => stop(server), crashServer: () => crash(server), startCollector, stopCollector: () => stop(collector),
       provision, collectorCommand, close };
   } catch (error) {
     const cleanup=await Promise.allSettled([stop(collector),stop(server),closeDatabase()]);

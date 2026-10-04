@@ -70,8 +70,8 @@ export function analysisService(db: Database, archive: ArchiveQuery) {
   async function availability() {
     const config = await worker();
     const mixed = (await db.query("SELECT count(DISTINCT config->>'configurationHash')::int AS count FROM analysis_workers WHERE updated_at>now()-interval '15 seconds'")).rows[0].count > 1;
-    return config ? { ready: true, reason: config.mode === 'fixture' ? '合成演示运行时；未调用真实千问，不作为正式分析验收' : 'Claude Code 分析运行时可用',
-      mode: config.mode, model: config.model, runtimeVersion: config.runtimeVersion }
+    return config ? { ready: true, reason: config.mode === 'fixture' ? '合成演示运行时；未调用真实千问，不作为正式分析验收' : config.mode==='qoder-cn'?'Qoder CN 分析运行时可用':'Claude Code 分析运行时可用',
+      mode: config.mode, model: config.model, runtimeVersion: config.runtimeVersion,...(config.mode==='qoder-cn'?{sdkVersion:config.sdkVersion}:{}) }
       : { ready: false, reason: mixed ? '检测到不同身份的运行时配置，暂停分析领取；请统一模型、凭据、预算和版本。原件仍可同步、查询和导出。'
         : '分析未配置或运行时离线；需部署专用 Claude Code、千问按量模型、凭据与预算。原件仍可同步、查询和导出。' };
   }
@@ -179,7 +179,8 @@ export function analysisService(db: Database, archive: ArchiveQuery) {
     const workers = (await db.query(`SELECT id,config,updated_at AS "updatedAt",updated_at>now()-interval '15 seconds' AS online
       FROM analysis_workers ORDER BY updated_at DESC LIMIT 10`)).rows;
     const counts = (await db.query('SELECT state,count(*)::integer AS count FROM analysis_jobs GROUP BY state')).rows;
-    const budgets = (await db.query('SELECT id,reserved_cny AS "reservedCny" FROM analysis_budgets ORDER BY id LIMIT 20')).rows;
+    const budgets = (await db.query('SELECT id,reserved_cny AS "reservedCny",reserved_requests AS "reservedRequests" FROM analysis_budgets ORDER BY id LIMIT 20')).rows
+      .map(({reservedRequests,...row})=>({...row,...(reservedRequests!=='0'?{reservedRequests}:{})}));
     const targets = (await db.query(`SELECT id,desired_snapshot_id AS "desiredSnapshotId",generation,config_hash AS "configurationHash",applicable_job_id AS "applicableJobId",error
       FROM analysis_targets ORDER BY updated_at DESC,id DESC LIMIT 10 OFFSET $1`, [offset])).rows;
     const metadataProjection = runProjection.replace('j.result', '(j.result IS NOT NULL) AS "resultAvailable",NULL::jsonb AS result');
