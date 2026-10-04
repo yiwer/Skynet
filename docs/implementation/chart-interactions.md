@@ -40,8 +40,23 @@ The team tooltip now measures the viewport and every clipping ancestor only
 while open, chooses the upper or lower available space, and keeps its existing
 180px maximum height with internal scrolling. Its content width is bounded to
 the same reading area. Resize and scroll reposition it, with listeners removed
-when closed. This does not move the page or its activation button. Box status
-uses the same figure-local sticky behavior as heat status.
+when closed. This does not move the page or its activation button.
+
+The first box fix used the same sticky status as heat. Independent review of
+`b8ebcbc` exposed a second issue: after using the heat chart, sticky box details
+overlapped the trigger and the next real tap did not close them. The event probe
+showed the tap ultimately still reached the button SVG after an automatic
+scroll; it was not simply swallowed by the status element. A direct-to-box
+author fixture initially passed, but adding the actual preceding heat interaction
+reproduced the same 1-versus-0 status failure in `box-second-tap-red-02`.
+
+Box details now position next to the expanded plot, above or below as space
+allows, without contributing height to the surrounding layout or overlapping
+the trigger. They retain bounded internal scrolling and mouse reachability.
+The focused regression covers the original interaction order, two real taps,
+Escape, Enter, Space, full intersection visibility and disjoint trigger/details
+rectangles at 320/390px in both themes. The independent original fixture is also
+replayed unchanged except for its output directory.
 
 Every width/theme appearance case now starts with an actual tap and asserts an
 IntersectionObserver ratio of 1 before keyboard focus and color checks; checking
@@ -87,5 +102,8 @@ fixes, the build and all four chart cases passed again, 4/4 (57.665 seconds), wi
 no skips. The independent viewport fixes then passed all four chart cases again
 (54.114 seconds). Screenshots from `final` and `visibility-green` predate the
 independent narrow-screen fixes; the final author receipt identifies the current
-`readable-viewport-green` screenshots and final run. This limited chart slice
-does not complete AC31 or AC32.
+`box-anchor-final` screenshots and final run. The original independent fixture
+replay passed 1/1 (19.358 seconds) after the non-overlapping box fix. This limited
+chart slice does not complete AC31 or AC32. The final build and all five formal
+chart tests passed, 5/5 with no skips (73.564 seconds), on the integration base
+`1d2d926` plus this chart slice.

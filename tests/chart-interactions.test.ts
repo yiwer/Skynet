@@ -7,10 +7,10 @@ import {assessmentFixture} from './assessment-fixture.js';
 import {beijingDate} from '../packages/contracts/reports.js';
 import {randomUUID} from 'node:crypto';
 
-async function waitingFixture(){
+async function waitingFixture(employee='等待图交互合成员工'){
   const f=await assessmentFixture();
   try{
-    const owner=await f.owner('等待图交互合成员工'),id=randomUUID(),time=(ms:number)=>new Date(f.base.getTime()+ms).toISOString();let cursor=0;
+    const owner=await f.owner(employee),id=randomUUID(),time=(ms:number)=>new Date(f.base.getTime()+ms).toISOString();let cursor=0;
     const message=(role:string,text:string,ms:number)=>({type:'response_item',timestamp:time(ms),payload:{type:'message',role,content:[{type:role==='user'?'input_text':'output_text',text}]}});
     const rows:object[]=[{type:'session_meta',payload:{id}},message('user','核查等待来源',0)];
     for(const [index,seconds] of [60,120,600,1200].entries()){
@@ -138,6 +138,32 @@ test('waiting box plots expose all quartiles on touch and keyboard and dismiss w
     assert.deepEqual(await table.locator('tbody tr').first().locator('th,td').allTextContents(),['等待图交互合成员工','4 / 1','1 分 0 秒','1 分 45 秒','6 分 0 秒','12 分 30 秒','20 分 0 秒','20 分 0 秒','0% · 0/4']);
     await page.screenshot({path:join(directory,'box-table-320.png'),animations:'disabled'});
     assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth||document.documentElement.scrollHeight>innerHeight),false);
+  }finally{await browser?.close();await f.close();}
+});
+
+test('narrow box details remain visible without intercepting the second tap',{timeout:120000},async()=>{
+  const {f,owner}=await waitingFixture('独立等待');let browser:Browser|undefined;
+  const directory=process.env.SKYNET_CHART_INTERACTIONS_EVIDENCE??join(f.directory,'chart-interactions');await mkdir(directory,{recursive:true});
+  try{
+    const response=await f.api(owner,'/api/wait-report?period=since-enrollment&employeeId='+owner.employeeId);assert.equal(response.status,200);const report=await response.json();
+    browser=await chromium.launch();const page=await browser.newPage({ignoreHTTPSErrors:true,hasTouch:true,viewport:{width:320,height:900},reducedMotion:'reduce'});
+    await page.goto(f.origin+'/#waits?period=since-enrollment&employeeId='+owner.employeeId+'&version='+report.waitVersion);
+    await page.getByLabel('个人读取凭据').fill(owner.readerCredential);await page.getByRole('button',{name:'进入存档',exact:true}).click();
+    const people=page.getByRole('region',{name:'按人等待分布',exact:true}),plot=people.getByRole('button',{name:/独立等待 · 4 段已知，1 段未知/}),tip=people.getByRole('status');
+    const heat=page.getByRole('region',{name:'星期与小时',exact:true}),cell=heat.getByRole('button',{name:/4 条等待/});
+    for(const width of [320,390])for(const theme of ['light','dark']){
+      await page.setViewportSize({width,height:900});await page.evaluate(value=>document.documentElement.dataset.theme=value,theme);
+      await cell.tap();await expect(heat.getByRole('status')).toBeInViewport({ratio:1});await cell.tap();await expect(heat.getByRole('status')).toHaveCount(0);
+      await cell.press('Tab');await page.keyboard.press('Shift+Tab');await expect(cell).toBeFocused();await page.keyboard.press('Escape');await page.keyboard.press('Enter');await page.keyboard.press('Space');await cell.press('Tab');
+      await plot.tap();await expect(tip).toBeInViewport({ratio:1});await expect(tip).toContainText('P90 20 分 0 秒');
+      const button=await plot.boundingBox(),detail=await tip.boundingBox();assert.ok(button&&detail);
+      await writeFile(join(directory,`box-second-tap-${width}-${theme}.json`),JSON.stringify({button,detail},null,2));
+      await page.screenshot({path:join(directory,`box-second-tap-${width}-${theme}.png`),animations:'disabled'});
+      await plot.tap();await expect(tip).toHaveCount(0);
+      assert.ok(detail.y+detail.height<=button.y+.1||detail.y>=button.y+button.height-.1,'details must not cover the trigger');
+      await plot.tap();await page.keyboard.press('Escape');await expect(tip).toHaveCount(0);
+      await page.keyboard.press('Enter');await expect(tip).toBeInViewport({ratio:1});await page.keyboard.press('Space');await expect(tip).toHaveCount(0);
+    }
   }finally{await browser?.close();await f.close();}
 });
 
