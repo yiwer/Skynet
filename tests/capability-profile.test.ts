@@ -2,6 +2,38 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { assessmentFixture } from './assessment-fixture.js';
+import { beijingDate } from '../packages/contracts/reports.js';
+import { monday, addDays } from '../packages/contracts/work-views.js';
+import { setTimeout } from 'node:timers/promises';
+
+test('profile work content binds daily and weekly report revisions without generating reports on read', { timeout: 120000 }, async () => {
+  const fixture = await assessmentFixture();
+  try {
+    const owner = await fixture.owner('Work owner'); await fixture.session(owner);
+    const date = beijingDate(fixture.base), from = monday(date), to = addDays(from, 6), path = '/api/capability-profiles/' + owner.employeeId;
+    const first = await (await fixture.api(owner, path)).json();
+    assert.equal(first.work.items.length, 0);
+    assert.equal(first.work.reports.find((r: any) => r.kind === 'daily' && r.from === date).state, 'not-scheduled');
+    const dailyPath = '/api/daily-reports/' + owner.employeeId + '/' + date;
+    assert.equal((await fixture.api(owner, dailyPath, {})).status, 202);
+    const weeklyPath = '/api/work-view?' + new URLSearchParams({ kind: 'weekly', subject: owner.employeeId, from, to });
+    assert.equal((await fixture.api(owner, weeklyPath, {})).status, 202);
+    let day: any, week: any; const deadline = Date.now() + 45000;
+    do { day = await (await fixture.api(owner, dailyPath)).json(); week = await (await fixture.api(owner, weeklyPath)).json(); if (day.items.length && week.items.length) break; await setTimeout(200); } while (Date.now() < deadline);
+    assert.ok(day.items.length && week.items.length);
+    const profile = await (await fixture.api(owner, path)).json();
+    const daily = profile.work.reports.find((r: any) => r.kind === 'daily' && r.from === date), weekly = profile.work.reports.find((r: any) => r.kind === 'weekly' && r.from === from);
+    assert.equal(daily.version, day.version); assert.equal(daily.revision, day.revision);
+    assert.equal(weekly.version, week.version); assert.equal(weekly.revision, week.revision);
+    assert.equal(profile.work.items.length, 1, 'identical daily and weekly findings retain references without duplicate work');
+    assert.deepEqual(profile.work.items[0].item, day.items[0]);
+    assert.deepEqual(profile.work.items[0].reportIds.sort(), [daily.id, weekly.id].sort());
+    assert.equal(profile.work.items[0].date, date);
+    assert.notEqual(profile.version, first.version);
+    assert.deepEqual(await (await fixture.api(owner, path + '?version=' + first.version)).json(), first);
+    assert.deepEqual(await (await fixture.api(owner, path + '/export?version=' + profile.version)).json(), profile);
+  } finally { await fixture.close(); }
+});
 
 test('an employee profile binds real device sync metadata and usage to its exact assessment across restart', { timeout: 120000 }, async () => {
   const fixture = await assessmentFixture();

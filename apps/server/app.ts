@@ -311,13 +311,6 @@ export async function createApp(options: { db: Database; rawDirectory: string; w
     return reply.header('Content-Disposition', `attachment; filename="skynet-usage-output-${data.version}.json"`).type('application/json').send(data);
   });
   const assessments = assessmentService(db, usage, insights, waits, options.reportClock);
-  const profiles = capabilityProfileService(db, assessments, usage, efficiency, activity, options.reportClock);
-  app.get('/api/capability-profiles/:id', { onRequest: readerGuard }, request => profiles.read(z.uuid().parse((request.params as { id: string }).id), request.query));
-  app.post('/api/capability-profiles/:id/recompute', { onRequest: readerGuard }, request => profiles.recompute(z.uuid().parse((request.params as { id: string }).id), request.body));
-  app.get('/api/capability-profiles/:id/export', { onRequest: readerGuard }, async (request, reply) => {
-    const value = await profiles.export(z.uuid().parse((request.params as { id: string }).id), request.query);
-    return reply.header('Content-Disposition', `attachment; filename="profile-${value.version}.json"`).send(value);
-  });
   const reviewNotes = reviewNotesService(db);
   app.get('/api/employees/:id/review-notes', { onRequest: readerGuard }, request => reviewNotes.read(z.uuid().parse((request.params as { id: string }).id), request.query));
   app.post('/api/employees/:id/review-notes', { onRequest: readerGuard }, async (request, reply) => reply.code(201).send(
@@ -341,6 +334,14 @@ export async function createApp(options: { db: Database; rawDirectory: string; w
   app.get('/api/snapshots/:id/insights', { onRequest: readerGuard }, async request => insights.read(z.uuid().parse((request.params as {id:string}).id), sessionInsightsQuery.parse(request.query)));
   const reports = reportService(db, analysis,workStatistics, options.reportClock);
   const workViews = workViewService(db, reports, options.reportClock);
+  const profiles = capabilityProfileService(db, assessments, usage, efficiency, activity, reports, workViews, options.reportClock);
+  app.get('/api/capability-profiles/:id', { onRequest: readerGuard }, request => profiles.read(z.uuid().parse((request.params as { id: string }).id), request.query));
+  app.post('/api/capability-profiles/:id/recompute', { onRequest: readerGuard }, request => profiles.recompute(z.uuid().parse((request.params as { id: string }).id), request.body));
+  app.get('/api/capability-profiles/:id/export', { onRequest: readerGuard }, async (request, reply) => {
+    const value = await profiles.export(z.uuid().parse((request.params as { id: string }).id), request.query);
+    return reply.header('Content-Disposition', `attachment; filename="profile-${value.version}.json"`).send(value);
+  });
+
   const reportQuery = z.object({ offset: z.coerce.number().int().min(0).max(100000).default(0),
     revision: z.coerce.number().int().min(1).optional() }).strict();
   app.get('/api/daily-reports', { onRequest: readerGuard }, async request => reports.list(reportQuery.parse(request.query).offset));

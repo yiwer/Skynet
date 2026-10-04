@@ -5,13 +5,55 @@ import type { assessmentService } from './assessment.js';
 import type { usageOutputService } from './usage-output.js';
 import type { sessionEfficiencyService } from './session-efficiency.js';
 import type { activityService } from './activity.js';
+import type { ReportService } from './reports.js';
+import type { workViewService } from './work-views.js';
+import { dailyPath, monday, addDays } from '../../packages/contracts/work-views.js';
+import type { DailyItem } from '../../packages/contracts/reports.js';
 import { profileQuery, type CapabilityProfile } from '../../packages/contracts/capability-profile.js';
 
 export async function migrateCapabilityProfiles(db: Database) {
   await db.query('CREATE TABLE IF NOT EXISTS capability_profiles(version text PRIMARY KEY,employee_id uuid NOT NULL REFERENCES employees(id),payload jsonb NOT NULL)');
 }
 export function capabilityProfileService(db: Database, assessments: ReturnType<typeof assessmentService>, usage: ReturnType<typeof usageOutputService>,
-  efficiency: ReturnType<typeof sessionEfficiencyService>, activity: ReturnType<typeof activityService>, clock: () => Date = () => new Date()) {
+  efficiency: ReturnType<typeof sessionEfficiencyService>, activity: ReturnType<typeof activityService>,
+  reports: ReportService, workViews: ReturnType<typeof workViewService>, clock: () => Date = () => new Date()) {
+  async function workContent(employeeId: string, from: string | null, to: string, activeDates: string[]): Promise<CapabilityProfile['work']> {
+    const scheduled = (await db.query('SELECT date FROM daily_report_periods WHERE employee_id=$1 AND date BETWEEN $2 AND $3 ORDER BY date', [employeeId, from ?? to, to])).rows;
+    const dates = [...new Set([...activeDates, ...scheduled.map(row => row.date as string)])].sort().reverse();
+    if (dates.length > 3660) throw new HttpError(413, '画像工作日期超过范围上限');
+    const result: CapabilityProfile['work'] = { reports: [], items: [] }, findings = new Map<string, CapabilityProfile['work']['items'][number]>();
+    const append = (item: DailyItem, date: string, reportId: string) => {
+      const id = digest(JSON.stringify([date, item]));
+      let finding = findings.get(id);
+      if (!finding) { finding = { id, date, item, reportIds: [] }; findings.set(id, finding); result.items.push(finding); }
+      if (!finding.reportIds.includes(reportId)) finding.reportIds.push(reportId);
+      if (findings.size > 10000) throw new HttpError(413, '画像工作条目超过范围上限');
+    };
+    for (const date of dates) {
+      let page = await reports.read(employeeId, date);
+      const id = 'daily/' + date + '/' + page.revision;
+      result.reports.push({ id, kind: 'daily', from: date, to: date, version: page.version, revision: page.revision, state: page.state, refreshPending: page.refreshPending, path: dailyPath(employeeId, date, page.revision) });
+      for (;;) {
+        for (const item of page.items) append(item, date, id);
+        if (page.nextOffset === null) break;
+        page = await reports.read(employeeId, date, page.nextOffset, page.revision);
+      }
+    }
+    for (const start of [...new Set(dates.map(monday))]) {
+      const selection = { kind: 'weekly' as const, subject: employeeId, from: start, to: addDays(start, 6) };
+      let page = await workViews.read(selection);
+      const id = 'weekly/' + start + '/' + page.revision;
+      result.reports.push({ id, kind: 'weekly', from: start, to: selection.to, version: page.version, revision: page.revision, state: page.state, refreshPending: page.refreshPending,
+        path: '#work?' + new URLSearchParams({ ...selection, ...(page.revision ? { revision: String(page.revision) } : {}) }) });
+      for (;;) {
+        for (const { employeeId: owner, employee: _name, sourceDate, dailyRevision: _revision, dailyVersion: _version, dailyPath: _path, continuation: _continuation, ...item } of page.items)
+          if (owner === employeeId && sourceDate >= (from ?? to) && sourceDate <= to) append(item, sourceDate, id);
+        if (page.nextOffset === null) break;
+        page = await workViews.read(selection, page.nextOffset, page.revision);
+      }
+    }
+    return result;
+  }
   async function header(employeeId: string): Promise<CapabilityProfile['header']> {
     const rows = (await db.query(`SELECT d.id,d.name,d.active,d.enrolled_at,max(s.committed_at) AS synced_at
       FROM devices d LEFT JOIN snapshots s ON s.device_id=d.id WHERE d.employee_id=$1
@@ -60,8 +102,15 @@ export function capabilityProfileService(db: Database, assessments: ReturnType<t
       return { algorithmVersion: 'capability-profile-1', employeeId, employee: assessment.employee, range: assessment.range, assessment,
         header: await header(employeeId), kpis: { ...totals, activeDays: activeDates.length }, usage: { version: report.version, metricVersion: report.metricVersion, daily, agents },
         sessions, taskDistribution: [...taskCounts].sort(([a], [b]) => a.localeCompare(b)).map(([taskType, sessions]) => ({ taskType, sessions })), recentActivity,
+        work: await workContent(employeeId, assessment.range.from, assessment.range.to, activeDates),
         references: { efficiency: { version: efficiencyReport.version, metricVersion: efficiencyReport.metricVersion, path: '#efficiency?' + new URLSearchParams({ period: scope.period, employeeId, version: efficiencyReport.version }) } } };
-    });
+    }, async client => ({
+      devices: (await client.query('SELECT id,name,active FROM devices WHERE employee_id=$1 ORDER BY id', [employeeId])).rows,
+      daily: (await client.query('SELECT date,revision,version FROM daily_report_revisions WHERE employee_id=$1 ORDER BY date,revision', [employeeId])).rows,
+      dailyPending: (await client.query('SELECT date,generation,refresh_pending,qualification_revision,source_revision FROM daily_report_periods WHERE employee_id=$1 ORDER BY date', [employeeId])).rows,
+      weekly: (await client.query("SELECT r.period_id,r.revision,r.version FROM work_view_revisions r JOIN work_view_periods p ON p.id=r.period_id WHERE p.selection->>'kind'='weekly' AND p.selection->>'subject'=$1 ORDER BY r.period_id,r.revision", [employeeId])).rows,
+      weeklyPending: (await client.query("SELECT id,generation,refresh_pending,qualification_revision,candidate_revision FROM work_view_periods WHERE selection->>'kind'='weekly' AND selection->>'subject'=$1 ORDER BY id", [employeeId])).rows,
+    }));
     const version = digest(JSON.stringify(content, (_key, value) => value && typeof value === 'object' && !Array.isArray(value)
       ? Object.fromEntries(Object.entries(value).sort(([a], [b]) => a.localeCompare(b))) : value));
     const value: CapabilityProfile = { ...content, version, generatedAt: clock().toISOString() };
