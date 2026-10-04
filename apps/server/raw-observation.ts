@@ -24,10 +24,14 @@ export class RawObservations {
       const value=await this.current.run(scope,read);scope.sealed=true;
       return {value,overflow:scope.overflow,verify:async(check:(device:string,hash:string)=>Promise<Outcome>)=>{
         if(scope.overflow||scope.mixed)return false;
-        const entries=[...scope.entries.values()];let next=0,stable=true;
-        await Promise.all(Array.from({length:Math.min(4,entries.length)},async()=>{
-          while(next<entries.length){const entry=entries[next++]!;if(await check(entry.device,entry.hash)!==entry.outcome)stable=false;}
+        const entries=[...scope.entries.values()];let next=0,stable=true,fatal=false;
+        const completed=await Promise.allSettled(Array.from({length:Math.min(4,entries.length)},async()=>{
+          while(next<entries.length&&!fatal){const entry=entries[next++]!;
+            try{if(await check(entry.device,entry.hash)!==entry.outcome)stable=false;}
+            catch(error){fatal=true;throw error;}
+          }
         }));
+        const failed=completed.find(result=>result.status==='rejected');if(failed?.status==='rejected')throw failed.reason;
         return stable;
       },close:()=>scope.entries.clear()};
     }catch(error){scope.sealed=true;scope.entries.clear();throw error;}

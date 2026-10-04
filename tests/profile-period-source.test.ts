@@ -48,3 +48,28 @@ test('a profile does not freeze a readable team baseline after its original disa
     if(restore)await writeFile(restore.path,restore.bytes);await f.close();
   }
 });
+
+test('simultaneous current profiles retain independent source observations while sharing the metric publication schedule',{timeout:180000},async()=>{
+  const f=await assessmentFixture(),held=await f.testDatabase.connect();let locked=false;
+  const pending:Promise<Response>[]=[];
+  try{
+    const owner=await f.owner('Concurrent period owner'),peer=await f.owner('Concurrent period peer');
+    await f.session(owner,{prompts:3,tokens:1000});await f.session(peer,{prompts:4,tokens:2000});
+    await held.query('BEGIN; LOCK TABLE metric_revisions IN ACCESS EXCLUSIVE MODE');locked=true;
+    const pid=(await held.query('SELECT pg_backend_pid() AS pid')).rows[0].pid,path='/api/capability-profiles/'+owner.employeeId;
+    pending.push(f.api(owner,path));let reached=false;
+    for(let tick=0;tick<500;tick++){
+      reached=(await f.testDatabase.query('SELECT EXISTS(SELECT 1 FROM pg_stat_activity WHERE $1=ANY(pg_blocking_pids(pid))) AS reached',[pid])).rows[0].reached;
+      if(reached)break;await setTimeout(20);
+    }
+    assert.equal(reached,true,'first public profile reaches the isolated publication gate');
+    pending.push(f.api(peer,'/api/capability-profiles/'+peer.employeeId));await setTimeout(200);
+    await held.query('COMMIT');locked=false;
+    const responses=await Promise.all(pending),values=[];
+    for(const response of responses){assert.equal(response.status,200,await response.clone().text());values.push(await response.json());}
+    assert.equal(values[0].kpis.sessions,1);assert.equal(values[1].kpis.sessions,1);
+    assert.equal(values[0].kpis.inputTokens,1000);assert.equal(values[1].kpis.inputTokens,2000);
+    assert.equal(values[0].assessment.inputs.baselineVersion,values[1].assessment.inputs.baselineVersion);
+    const fixed=await f.api(owner,path+'?version='+values[0].version);assert.equal(fixed.status,200);assert.deepEqual(await fixed.json(),values[0]);
+  }finally{if(locked)await held.query('ROLLBACK');held.release();await Promise.allSettled(pending);await f.close();}
+});
