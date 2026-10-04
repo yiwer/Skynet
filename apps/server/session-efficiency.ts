@@ -3,10 +3,12 @@ import {HttpError} from './identities.js';
 import type {usageOutputService} from './usage-output.js';
 import type {UsageSession} from '../../packages/contracts/usage-output.js';
 import type {sessionInsightsService} from './session-insights.js';
-import {taskTypes,type SessionInsights,type InsightCitation} from '../../packages/contracts/session-insights.js';
+import {taskTypes,type SessionInsights} from '../../packages/contracts/session-insights.js';
 import type {MetricsScope} from '../../packages/contracts/metrics.js';
 import type {RawStore} from './raw-store.js';
 import {efficiencyTiming} from './efficiency-timing.js';
+import {promptFactors} from './prompt-factors.js';
+import type {RecordedMessage} from '../../packages/contracts/message-facts.js';
 import {efficiencyQuerySchema,type EfficiencyQuery,type EfficiencySession,type SessionEfficiencyPage} from '../../packages/contracts/session-efficiency.js';
 
 const algorithmVersion='session-efficiency-1';
@@ -25,24 +27,18 @@ function combine(rows:UsageSession[]):EfficiencySession{
     efficiency:ratio(verified,tokens),codeOutput:ratio(codeChanges,tokens),taskType:'unknown',taskEvidence:[],rework:null,reworkEvidence:[],reviewReasons:[],
     inputVersions:[...new Map(rows.flatMap(row=>row.insightVersions).map(input=>[input.snapshotId+'/'+input.version,input])).values()]};
 }
-function applyInferences(row:EfficiencySession,parts:UsageSession[],views:Map<string,SessionInsights>,scope:MetricsScope){
+function applyInferences(row:EfficiencySession,parts:UsageSession[],views:Map<string,SessionInsights>,scope:MetricsScope,messages:RecordedMessage[]){
   const latest=[...new Set(parts.flatMap(part=>part.latestCarrierSnapshotIds))].map(id=>views.get(id));
   const complete=latest.length>0&&latest.every(view=>view?.state==='complete'&&view.inferences?.complete);
   const types=new Set(latest.map(view=>view?.inferences?.taskType.value??'unknown'));
   if(complete&&types.size===1){row.taskType=[...types][0]!;row.taskEvidence=latest.flatMap(view=>view!.inferences!.taskType.citations).slice(0,3);}
   if(!complete)return;
-  const prompts=new Map<string,{rework:boolean|null;first:boolean;citations:InsightCitation[]}>();let unknown=false;
-  for(const view of latest)for(const prompt of view!.inferences!.prompts){
-    const citations=prompt.citations.filter(cite=>cite.role==='user'&&cite.origin&&cite.context==='after-enrollment');
-    const origin=citations[0]?.origin;
-    if(!origin||citations.some(cite=>cite.origin!.eventId!==origin.eventId))continue;
-    if(!origin.sourceDate||origin.sourceDate<scope.from||origin.sourceDate>scope.to||!parts.some(part=>part.employeeId===origin.employeeId&&part.project===origin.project))continue;
-    const previous=prompts.get(origin.eventId),current={rework:prompt.complete?prompt.rework:null,first:prompt.first,citations};
-    if(previous&&(previous.rework!==current.rework||previous.first!==current.first)){unknown=true;continue;}
-    prompts.set(origin.eventId,current);
-  }
-  const nonfirst=[...prompts.values()].filter(prompt=>!prompt.first);
-  if(unknown||nonfirst.some(prompt=>prompt.rework===null))return;
+  const selected=messages.filter(m=>m.context==='after-enrollment'&&m.sourceDate&&m.sourceDate>=scope.from&&m.sourceDate<=scope.to);
+  const inputs=row.inputVersions.map(key=>views.get(key.snapshotId)!).filter(Boolean);
+  const prompts=promptFactors(parts,inputs,selected,messages).prompts;
+  if(latest.some(view=>view?.messageHistoryComplete!==true)||prompts.length!==row.userTurns||prompts.some(prompt=>prompt.first===null))return;
+  const nonfirst=prompts.filter(prompt=>!prompt.first);
+  if(nonfirst.some(prompt=>prompt.rework===null))return;
   row.rework=nonfirst.filter(prompt=>prompt.rework).length;
   row.reworkEvidence=nonfirst.filter(prompt=>prompt.rework).flatMap(prompt=>prompt.citations).slice(0,3);
 }
@@ -58,7 +54,10 @@ export function sessionEfficiencyService(db:Database,usage:ReturnType<typeof usa
     const sessions=[...grouped.values()].map(combine).sort((a,b)=>(b.dates.at(-1)??'').localeCompare(a.dates.at(-1)??'')||a.sessionId.localeCompare(b.sessionId)),tokenP75=quantile(sessions.flatMap(row=>row.tokens===null?[]:[row.tokens]),.75);
     const inputs=[...new Map(sessions.flatMap(row=>row.inputVersions).map(input=>[input.snapshotId+'/'+input.version,input])).values()];
     const views=new Map((await insights.readVersions(inputs)).map(view=>[view.snapshotId,view]));
-    for(const row of sessions)applyInferences(row,grouped.get(row.sessionId)!,views,source.scope);
+    const messages=[...new Map((await insights.readMessageFacts([...views.values()])).flatMap(fact=>fact.messages).map(message=>[message.id,message])).values()],bySource=new Map<string,RecordedMessage[]>();
+    for(const message of messages){const key=JSON.stringify([message.source,message.sourceSessionId]);if(!bySource.has(key))bySource.set(key,[]);bySource.get(key)!.push(message);}
+    for(const row of sessions){const parts=grouped.get(row.sessionId)!,keys=[...new Set(parts.map(part=>JSON.stringify([part.source,part.sourceSessionId])))];
+      applyInferences(row,parts,views,source.scope,keys.flatMap(key=>bySource.get(key)??[]));}
     const timingAsOf=await efficiencyTiming(db,raw,sessions,grouped,views,source.scope,q,full,clock);
     for(const row of sessions){if(row.tokens!==null&&tokenP75!==null&&row.tokens>tokenP75&&row.verified===0)row.reviewReasons.push('Token 高于 P75 且没有已验证结果');
       if(row.claimed!==null&&row.verified!==null&&row.claimed>row.verified)row.reviewReasons.push('声称多于已验证');
