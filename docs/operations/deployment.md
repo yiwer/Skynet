@@ -197,3 +197,10 @@ sudo bash /opt/skynet/current/deploy/ubuntu-release.sh \
 切换前备份回执 `/opt/skynet/receipts/backup-20261004T060047Z-2323412.json` 为 completed，ID `9d7c230b-37e2-4ed0-ba86-d69175e4ae95`，5个原件对象132,332 bytes，SQL dump158,712 bytes。app/db健康，数据库保持运行，previous为`v2-91544e8b1424-1`。四个既有nginx站点哈希一致，配置检查通过，Certbot timer active；分析Worker禁用。
 
 53项只读生产检查通过，新增活动、产效、提示词、评估的鉴权、固定读取与导出，上一发布的用量/等待/等待报表固定结果仍可读。真实会话原件仍为106,317 bytes且上述SHA不变，3条消息、2次工具、8条Trace均保留。员工低可信度保持待定；有可计分维度时可有参考指数，不据指数判断评级完成。生产日期10月3日实际有12条活动；各新页面在1280×720外层不滚动。浏览器发现日期输入紧接点击“应用”会被旧筛选值覆写，已交原作者修复，记录真实问题而不宣称完整视觉交互验收。证据在`E:/GenCode/Skynet-evidence/v2-2026-10-04/deploy-v2-235bdd4a2335-1/`。本批没有新增测试存档或调用模型；#46及后续功能、真实试点、AC-32尚待后续验收。
+
+
+2026-10-04 14:51（北京时间）发布团队报表、评估范围/历史、员工一览、复核备注与活动日期修复 **`v2-e2da6ed6d41c-1`**。固定 Git `e2da6ed6d41cf42bcd52df2e43a940757b553b89`；归档 SHA-256 `7ee947db9b3a9b2a8b7c3a6d1e5b2cccb166a7cae52db159b78e3477c7e017a9`，服务器源码 SHA-256 `ab01e28e8d0c40944e78db8252f238cff8e6917e955d4e973a46c62bdea561bc`，镜像 `sha256:3170b5f9ace8ce0c8fc77a4a6cc9786db932a251de2b1a555961cc6f0ad479d2`。资产 `index-ClrrHDVT.js` / `index-CB1uLX_x.css`。
+
+切换前一致备份 `/opt/skynet/receipts/backup-20261004T065106Z-2390480.json` 为 completed，ID `089cc716-50ae-4367-82da-997569f6cf9a`，5个原件对象132,332 bytes，SQL dump180,034 bytes。数据库原容器保留；四个既有nginx站点哈希不变，配置检查通过，Certbot active，分析Worker仍禁用。
+
+76项生产HTTPS/API检查和11项浏览器检查通过，涵盖新团队/员工/历史评估/只读备注及旧固定报表。实际22:12会话仍为106,317 bytes，原SHA `0efa7692784020f5ea2dead09df32b949e722039d9d32c865ab81583971cc437`，3消息、2工具、8Trace保留。1280/320页面外层不滚动；活动日期输入后同任务立即应用保持10月3日且显示12个事件。没有新增生产测试材料或模型调用。泳道长姓名前缀在SVG左侧裁切仍待#54修正；#48/#49/#51/#53、性能与真实试点总验收尚未交付。证据目录 `E:/GenCode/Skynet-evidence/v2-2026-10-04/deploy-v2-e2da6ed6d41c-1/`，含发布与备份回执、76项smoke、11项browser及10张截图。

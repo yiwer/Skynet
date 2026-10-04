@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { dimKeys, type CapabilityAssessment as Assessment, type MetricScore, type AssessmentHistoryPage } from '../../packages/contracts/assessment.js';
 import './assessment.css';
+import { ProfileReturn, profileWithReturn } from './profile-navigation.js';
 import { ReviewNotes, type AppendNote } from './ReviewNotes.js';
 type Request = (path: string, signal?: AbortSignal) => Promise<Response>;
 const selection = () => new URLSearchParams(location.hash.split('?')[1]);
@@ -19,6 +20,8 @@ export function CapabilityAssessment({ request, currentEmployeeId, appendNote }:
   const [history, setHistory] = useState<AssessmentHistoryPage>(), [historyBusy, setHistoryBusy] = useState(false);
   const historyAbort = useRef<AbortController | null>(null);
   const employeeId = query.get('employeeId') ?? currentEmployeeId, version = query.get('version');
+  const returnTo = query.get('returnTo');
+  const profileLink = (id: string, period: string, preset: string, version?: string) => profileWithReturn(profile(id, period, preset, version), returnTo);
   const requestedPeriod = query.get('period'), requestedPreset = query.get('preset');
   const period = version ? data?.selection?.period ?? requestedPeriod ?? 'since-enrollment' : requestedPeriod ?? 'since-enrollment';
   const preset = version ? data?.preset ?? requestedPreset ?? '默认' : requestedPreset ?? '默认';
@@ -54,19 +57,20 @@ export function CapabilityAssessment({ request, currentEmployeeId, appendNote }:
     } catch (e) { setError((e as Error).message); }
   }
   return <section className="assessment-page">
+    <ProfileReturn value={returnTo} />
     <header className="assessment-heading"><div><p>员工画像</p><h1>{data?.employee ?? people.find(p => p.id === employeeId)?.name ?? '使用能力评估'}</h1></div>
       <div className="assessment-actions"><button onClick={() => setRetry(n => n + 1)} disabled={busy}>刷新</button><button onClick={() => download()} disabled={!data}>导出评估</button></div></header>
-    <div className="assessment-controls"><label>员工<select aria-label="评估员工" value={employeeId} onChange={e => { location.hash = profile(e.target.value, period, preset); }}>
+    <div className="assessment-controls"><label>员工<select aria-label="评估员工" value={employeeId} onChange={e => { location.hash = profileLink(e.target.value, period, preset); }}>
       {people.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select></label>
       {next !== null && <button onClick={async () => { try { const value = await (await request('/api/daily-report-employees?offset=' + next)).json(); setPeople(p => [...p, ...value.employees]); setNext(value.nextOffset); } catch (e) { setError((e as Error).message); } }}>更多员工</button>}
-      <div className="assessment-segments" role="group" aria-label="评估周期">{periods.map(([value, label]) => <button key={value} type="button" aria-pressed={period === value} disabled={busy} onClick={() => { location.hash = profile(employeeId, value, preset); }}>{label}</button>)}</div>
-      <div className="assessment-segments" role="group" aria-label="权重方案">{presets.map(value => <button key={value} type="button" aria-pressed={preset === value} disabled={busy} onClick={() => { location.hash = profile(employeeId, period, value); }}>{value}</button>)}</div>
-      {version && <a href={profile(employeeId, period, preset)}>查看当前评估</a>}</div>
+      <div className="assessment-segments" role="group" aria-label="评估周期">{periods.map(([value, label]) => <button key={value} type="button" aria-pressed={period === value} disabled={busy} onClick={() => { location.hash = profileLink(employeeId, value, preset); }}>{label}</button>)}</div>
+      <div className="assessment-segments" role="group" aria-label="权重方案">{presets.map(value => <button key={value} type="button" aria-pressed={preset === value} disabled={busy} onClick={() => { location.hash = profileLink(employeeId, period, value); }}>{value}</button>)}</div>
+      {version && <a href={profileLink(employeeId, period, preset)}>查看当前评估</a>}</div>
     {error && <p className="error" role="alert">{error}</p>}{busy && <p role="status">正在读取评估…</p>}
     {data && <div key={data.version} className="assessment-content" data-scroll-region="assessment">
       <div className="assessment-range" aria-label="评估范围"><span>{version ? '历史评估 · ' : ''}{data.period} · {data.preset}</span><span>{data.range.empty ? '所选周期早于接入' : `${data.range.from ?? '接入日未知'} — ${data.range.to}`} · 北京时间</span></div>
       <details className="assessment-history"><summary>历史评估</summary>{historyBusy && <p role="status">正在读取版本…</p>}
-        {history && <><ol>{history.items.map(item => <li key={item.version}><a href={profile(employeeId, item.selection?.period ?? 'since-enrollment', item.preset, item.version)} aria-current={version === item.version ? 'page' : undefined}>
+        {history && <><ol>{history.items.map(item => <li key={item.version}><a href={profileLink(employeeId, item.selection?.period ?? 'since-enrollment', item.preset, item.version)} aria-current={version === item.version ? 'page' : undefined}>
           <strong>{item.period} · {item.preset}</strong><span>{new Date(item.generatedAt).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false })} · {number(item.index)} 分 · {item.level}</span><small>{item.version.slice(0, 12)}</small></a></li>)}</ol>
           {history.nextCursor && <button onClick={moreHistory} disabled={historyBusy}>更多历史版本</button>}</>}</details>
       {!data.sample.sessions ? <p className="assessment-empty" data-testid="assessment-empty">{data.range.empty ? '所选周期早于接入' : '暂无会话'}</p> : <>

@@ -9,3 +9,7 @@
 .platform-main .team-coverage .team-cutoff a,.platform-main .team-people a{display:inline-flex;align-items:center;min-width:44px;min-height:44px;vertical-align:middle}
 .platform-main .team-coverage #team-definitions>summary{min-height:44px;box-sizing:border-box;display:flex;align-items:center;gap:8px;cursor:pointer}
 .platform-main .team-coverage #team-definitions>summary:before{content:'▸'}.platform-main .team-coverage #team-definitions[open]>summary:before{content:'▾'}
+
+.team-table-wrap td.team-capability{min-width:180px;max-width:260px;text-align:left;white-space:normal}.platform-main .team-capability a{gap:10px}.team-capability a b{font-size:18px;font-variant-numeric:tabular-nums}.team-capability [data-level]{border:1px solid var(--color-rule);border-radius:5px;padding:3px 7px;font-size:11px}.team-capability [data-level="待定"]{color:var(--color-muted)}.team-capability small.team-capability-coverage{color:var(--color-error,var(--color-ink))}
+
+.team-people .team-table-wrap th:nth-child(2){text-align:left}
