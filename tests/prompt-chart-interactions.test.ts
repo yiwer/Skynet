@@ -6,12 +6,13 @@ import {chromium,expect,type Browser,type Locator} from '@playwright/test';
 import {assessmentFixture} from './assessment-fixture.js';
 
 // Agreed public seams: upload + recorded Analysis result -> fixed report HTTP -> real Web.
-async function promptPage(){
+async function promptPage(includeUnknown=false){
   const f=await assessmentFixture();let browser:Browser|undefined;
   try{
     const owner=await f.owner('提示词交互合成员工');await f.session(owner,{prompts:3,elements:3,rework:false});
+    if(includeUnknown){const peer=await f.owner('未分析员工'),raw=f.rows({prompts:2,elements:0});await f.upload(peer,raw.rows,raw.sessionId);}
     const response=await f.api(owner,'/api/prompt-report?period=since-enrollment');assert.equal(response.status,200,await response.clone().text());
-    const report=await response.json();assert.equal(report.kpis.prompts,3);
+    const report=await response.json();assert.equal(report.kpis.prompts,includeUnknown?5:3);
     browser=await chromium.launch();const page=await browser.newPage({ignoreHTTPSErrors:true,hasTouch:true,viewport:{width:390,height:900},reducedMotion:'reduce'});
     const errors:string[]=[];page.on('pageerror',error=>errors.push(error.message));
     await page.goto(f.origin+'/#prompts?period=since-enrollment&version='+report.version);
@@ -37,6 +38,26 @@ test('prompt count bars support repeat touch and keyboard disclosure without los
     await chart.getByRole('button',{name:'长度数量切换为表格',exact:true}).focus();await expect(tip).toHaveCount(0);
     await chart.getByRole('button',{name:'长度数量切换为表格',exact:true}).tap();
     await expect(chart.getByRole('row').filter({has:page.getByRole('rowheader',{name:'≤15 字',exact:true})}).getByRole('cell')).toHaveText('3');
+    assert.deepEqual(errors,[]);
+  }finally{await fixture.close();}
+});
+
+
+test('prompt element heat details retain known zero and unknown denominators through touch and focus',{timeout:120000},async()=>{
+  const fixture=await promptPage(true);const {page,panel,directory,errors}=fixture;
+  try{
+    const chart=panel.getByRole('region',{name:'提示词要素覆盖',exact:true}),tip=chart.getByRole('tooltip');
+    const known=chart.getByRole('button',{name:'提示词交互合成员工 · 目标 · 3 / 3 · 100%',exact:true});
+    await known.tap();await expect(tip).toHaveText('提示词交互合成员工 · 目标 · 3 / 3');await expect(tip).toBeInViewport({ratio:1});
+    await known.tap();await expect(tip).toHaveCount(0);
+    const zero=chart.getByRole('button',{name:'提示词交互合成员工 · 验收标准 · 0 / 3 · 0%',exact:true});
+    await zero.tap();await expect(tip).toHaveText('提示词交互合成员工 · 验收标准 · 0 / 3');await page.keyboard.press('Escape');await expect(tip).toHaveCount(0);
+    await page.keyboard.press('Enter');await expect(tip).toContainText('0 / 3');await page.keyboard.press('Space');await expect(tip).toHaveCount(0);
+    const unknown=chart.getByRole('button',{name:'未分析员工 · 目标 · 0 / 0 · 2 未知 · —',exact:true});
+    await unknown.tap();await expect(tip).toHaveText('未分析员工 · 目标 · 0 / 0 · 2 未知');await expect(tip).toBeInViewport({ratio:1});
+    await page.screenshot({path:join(directory,'heat-unknown.png'),animations:'disabled'});
+    await chart.getByRole('button',{name:'提示词要素覆盖切换为表格',exact:true}).tap();
+    await expect(chart.getByRole('row').filter({has:page.getByRole('rowheader',{name:'未分析员工',exact:true})}).getByRole('cell').first()).toHaveText('—0 / 0 · 2 未知');
     assert.deepEqual(errors,[]);
   }finally{await fixture.close();}
 });
