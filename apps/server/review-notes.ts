@@ -6,10 +6,12 @@ import { HttpError, identities } from './identities.js';
 export async function migrateReviewNotes(db: Database) {
   await db.query(`CREATE TABLE IF NOT EXISTS review_notes (
     seq bigserial UNIQUE NOT NULL,id uuid PRIMARY KEY,employee_id uuid NOT NULL REFERENCES employees(id),
-    author_id uuid NOT NULL REFERENCES employees(id),author_name text NOT NULL,
+    author_id uuid NOT NULL REFERENCES employees(id),author_name text NOT NULL,request_id uuid,
     assessment_version text NOT NULL REFERENCES assessment_revisions(version),text text NOT NULL,
     created_at timestamptz NOT NULL DEFAULT clock_timestamp()
-  ); CREATE INDEX IF NOT EXISTS review_notes_employee ON review_notes(employee_id,seq DESC)`);
+  ); ALTER TABLE review_notes ADD COLUMN IF NOT EXISTS request_id uuid;
+  CREATE UNIQUE INDEX IF NOT EXISTS review_notes_request_once ON review_notes(author_id,request_id);
+  CREATE INDEX IF NOT EXISTS review_notes_employee ON review_notes(employee_id,seq DESC)`);
 }
 const projection = `id,employee_id AS "employeeId",jsonb_build_object('id',author_id,'name',author_name) AS author,
   assessment_version AS "assessmentVersion",text,to_char(created_at AT TIME ZONE 'Asia/Shanghai','YYYY-MM-DD"T"HH24:MI:SS.MS')||'+08:00' AS "createdAt"`;
@@ -27,8 +29,13 @@ export function reviewNotesService(db: Database) {
       const actor = await identities(db).reader(authorization, client, true);
       if (!(await client.query('SELECT 1 FROM employees WHERE id=$1', [employeeId])).rowCount) throw new HttpError(404, '员工不存在');
       if (!(await client.query('SELECT 1 FROM assessment_revisions WHERE version=$1 AND employee_id=$2', [value.assessmentVersion, employeeId])).rowCount) throw new HttpError(404, '评估版本不存在');
-      const row = (await client.query(`INSERT INTO review_notes(id,employee_id,author_id,author_name,assessment_version,text)
-        VALUES($1,$2,$3,$4,$5,$6) RETURNING ${projection}`, [randomUUID(), employeeId, actor.id, actor.name, value.assessmentVersion, value.text])).rows[0];
+      let row = (await client.query(`INSERT INTO review_notes(id,employee_id,author_id,author_name,assessment_version,text,request_id)
+        VALUES($1,$2,$3,$4,$5,$6,$7) ON CONFLICT(author_id,request_id) DO NOTHING RETURNING ${projection}`,
+      [randomUUID(), employeeId, actor.id, actor.name, value.assessmentVersion, value.text, value.requestId])).rows[0];
+      if (!row) {
+        row = (await client.query(`SELECT ${projection} FROM review_notes WHERE author_id=$1 AND request_id=$2`, [actor.id, value.requestId])).rows[0];
+        if (!row || row.employeeId !== employeeId || row.assessmentVersion !== value.assessmentVersion || row.text !== value.text) throw new HttpError(409, '该提交编号已用于另一条备注');
+      }
       await client.query('COMMIT'); return row;
     } catch (error) { await client.query('ROLLBACK'); throw error; }
     finally { client.release(); }
