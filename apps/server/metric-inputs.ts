@@ -6,16 +6,16 @@ import { primaryInputCoverage, inputIntegrityVersion } from './evidence-integrit
 import { codexInitialBaseline, nativeStatistics, statisticsExtractorVersion } from '../../packages/native-statistics.js';
 import type { Manifest, Source } from '../../packages/contracts/archive.js';
 
-const version = `metric-input-2/${statisticsExtractorVersion}/${inputIntegrityVersion}`;
+const version = `metric-input-3/${statisticsExtractorVersion}/${inputIntegrityVersion}`;
 export type MetricInputFacts = Pick<ReturnType<typeof nativeStatistics>, 'usage' | 'supported' | 'complete'> & {
   coverageComplete: boolean; excludedUserLines: number[];
 };
 type Identity = { snapshotId: string; attributionRevision: string; materialId?: string;
-  hash: string; source: Source; sourceVersion: string; manifest?: Manifest };
+  hash: string; source: Source; sourceVersion: string; manifest?: Manifest; baselineContinuity?: boolean };
 const identify = (input: Identity) => {
   const parserVersion = readEvidence(Buffer.alloc(0), input.source).parserVersion;
   return { parserVersion, key: digest(JSON.stringify([version, parserVersion, input.snapshotId, input.attributionRevision,
-    input.materialId ?? null, input.hash, input.source, input.sourceVersion])) };
+    input.materialId ?? null, input.hash, input.source, input.sourceVersion, input.baselineContinuity === true])) };
 };
 
 /** Only derived facts are retained. Callers verify the original hash before
@@ -30,7 +30,7 @@ export async function metricInputBatch(client: pg.PoolClient, identities: Identi
   function read(input: Identity & { bytes: Buffer }): MetricInputFacts {
     const { key, parserVersion } = identify(input);
     const known = cached.get(key); if (known) return known;
-    const parsed = nativeStatistics(input.bytes, input.source, input.sourceVersion, { codexInitialBaseline: input.manifest && !input.materialId ? codexInitialBaseline(input.bytes, input.manifest) : false });
+    const parsed = nativeStatistics(input.bytes, input.source, input.sourceVersion, { codexInitialBaseline: input.manifest && !input.materialId && input.baselineContinuity === true ? codexInitialBaseline(input.bytes, input.manifest) : false });
     const evidence = readEvidence(input.bytes, input.source);
     const excluded = new Set(evidence.events.filter(event => conversationContext(event) === 'environment').map(event => event.line));
     if (input.source === 'claude-code-cli') for (const [index, text] of input.bytes.toString('utf8').split('\n').entries()) {
