@@ -35,3 +35,31 @@ test('an employee profile binds real device sync metadata and usage to its exact
     assert.deepEqual(await (await fixture.api(owner, path + '/export?version=' + profile.version)).json(), profile);
   } finally { await fixture.close(); }
 });
+
+test('daily verified output follows the original result date within one continuing session', { timeout: 120000 }, async () => {
+  const fixture = await assessmentFixture();
+  try {
+    const owner = await fixture.owner('Two day owner'), record = fixture.rows({ prompts: 2, verified: 1 });
+    const second = record.rows.findIndex((row: any) => row.payload?.role === 'user' && row.payload.content[0].text.startsWith('请求 1'));
+    for (const row of record.rows.slice(second) as any[]) if (row.timestamp) row.timestamp = new Date(Date.parse(row.timestamp) + 86400000).toISOString();
+    const secondStart = Date.parse((record.rows[second] as any).timestamp);
+    const extra = [0, 1].flatMap(index => [
+      { type: 'response_item', timestamp: new Date(secondStart + 10 + index).toISOString(), payload: { type: 'function_call', name: 'exec_command', call_id: 'day2/' + index, arguments: JSON.stringify({ cmd: 'node --test day2-' + index + '.js' }) } },
+      { type: 'response_item', timestamp: new Date(secondStart + 30 + index).toISOString(), payload: { type: 'function_call_output', call_id: 'day2/' + index, output: '# tests 1\n# pass 1\n# fail 0\nday2-' + index } },
+    ]);
+    record.rows.splice(second + 2, 0, ...extra);
+    const uploaded = await fixture.upload(owner, record.rows, record.sessionId); await fixture.analyze(owner, uploaded.snapshotId);
+    const response = await fixture.api(owner, '/api/capability-profiles/' + owner.employeeId); assert.equal(response.status, 200);
+    const profile = await response.json();
+    const date = (time: number) => new Date(time + 8 * 3600000).toISOString().slice(0, 10);
+    const day1 = date(fixture.base.getTime()), day2 = date(fixture.base.getTime() + 86400000);
+    assert.equal(profile.kpis.sessions, 1); assert.equal(profile.kpis.outputs.verified.value, 3);
+    assert.equal(profile.usage.daily.find((day: any) => day.date === day1).outputs.verified.value, 1);
+    assert.equal(profile.usage.daily.find((day: any) => day.date === day2).outputs.verified.value, 2);
+    const usage = await (await fixture.api(owner, '/api/usage-output/export?period=since-enrollment&version=' + profile.usage.version)).json();
+    assert.deepEqual(profile.usage.daily, usage.employees.find((person: any) => person.employeeId === owner.employeeId).daily);
+    const repeated = await fixture.upload(owner, record.rows, record.sessionId);
+    assert.equal(repeated.snapshotId, uploaded.snapshotId);
+    const again = await (await fixture.api(owner, '/api/capability-profiles/' + owner.employeeId)).json(); assert.equal(again.version, profile.version);
+  } finally { await fixture.close(); }
+});

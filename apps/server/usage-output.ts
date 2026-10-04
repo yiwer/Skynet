@@ -6,7 +6,7 @@ import { metricsQuerySchema, type MetricsQuery, type MetricTotals, type SessionM
 import type { OutputAmount, OutputTotals, UsageOutputPage, UsageSession } from '../../packages/contracts/usage-output.js';
 import type { FactContribution, SessionInsights } from '../../packages/contracts/session-insights.js';
 
-const catalogVersion = 'usage-output-1';
+const catalogVersion = 'usage-output-2';
 const kinds = ['verified', 'claimed', 'codeChanges', 'tests', 'commits'] as const;
 type Kind = typeof kinds[number];
 const selection = ({ version: _v, offset: _o, ...scope }: MetricsQuery) => scope;
@@ -21,7 +21,7 @@ function totals(rows: SessionMetrics[]): MetricTotals {
     outputTokens: outputUnknown.size ? null : sum('knownOutputTokens'), unknownInputSessions: inputUnknown.size, unknownOutputSessions: outputUnknown.size,
     unknownTokenSessions: new Set([...inputUnknown, ...outputUnknown]).size };
 }
-function outputTotals(rows: UsageSession[]): OutputTotals {
+function outputTotals(rows: Pick<UsageSession, 'sessionId' | 'outputs'>[]): OutputTotals {
   const result = emptyOutputs();
   for (const kind of kinds) {
     const amount = result[kind];
@@ -108,7 +108,18 @@ export function usageOutputService(db: Database, metrics: MetricsService, insigh
       }
     }
     const scopedRows = new Map<string,UsageSession>();
+    const datedOutputs = new Map<UsageSession, Map<string, OutputTotals>>();
+    const dateOutput = (row: UsageSession, date: string) => {
+      let days = datedOutputs.get(row); if (!days) { days = new Map(); datedOutputs.set(row, days); }
+      let value = days.get(date); if (!value) {
+        value = emptyOutputs();
+        for (const kind of kinds) if (row.outputs[kind].value === null) { value[kind].value = null; value[kind].unknownSessions = 1; }
+        days.set(date, value);
+      }
+      return value;
+    };
     for(const row of rows)for(const snapshotId of row.snapshotIds)scopedRows.set(JSON.stringify([row.employeeId,row.project,snapshotId,row.source,row.sourceSessionId]),row);
+    for (const row of rows) for (const date of row.dates) dateOutput(row, date);
     for (const { kind, fact } of contributions.values()) {
       const origin = origins.get(fact.eventId);
       if (!origin || origin.context !== 'after-enrollment' || !origin.source_date || origin.source_date < metric.scope.from || origin.source_date > metric.scope.to) continue;
@@ -116,17 +127,23 @@ export function usageOutputService(db: Database, metrics: MetricsService, insigh
       if (!row) continue;
       const amount = row.outputs[kind]; amount.known += fact.value;
       for (const field of ['added','removed','passed','failed'] as const) amount[field] += fact[field] ?? 0;
+      const daily = dateOutput(row, origin.source_date)[kind]; daily.known += fact.value;
+      for (const field of ['added','removed','passed','failed'] as const) daily[field] += fact[field] ?? 0;
     }
     for (const row of rows) for (const kind of kinds) if (row.outputs[kind].value !== null) row.outputs[kind].value = row.outputs[kind].known;
     const selected = rows.filter(row => row.selected);
+    for (const days of datedOutputs.values()) for (const value of days.values()) for (const kind of kinds) if (value[kind].value !== null) value[kind].value = value[kind].known;
+    const dailyOutputs = (mine: UsageSession[], date: string) => outputTotals(mine.flatMap(row => {
+      const outputs = datedOutputs.get(row)?.get(date); return outputs ? [{ sessionId: row.sessionId, outputs }] : [];
+    }));
     const employees = metric.employees.filter(person => !q.employeeId || person.employeeId === q.employeeId).map(person => {
       const mine = selected.filter(row => row.employeeId === person.employeeId);
       return { ...person, activeDates: metric.employeeDaily?.find(series=>series.employeeId===person.employeeId)?.days.filter(day=>day.activeSessions>0).map(day=>day.date)??[], outputs: outputTotals(mine), agents: metric.sources.map(({ source }) => ({ source, ...totals(mine.filter(row => row.source === source)) })),
-        daily: metric.employeeDaily?.find(series => series.employeeId === person.employeeId)?.days ?? [] };
+        daily: (metric.employeeDaily?.find(series => series.employeeId === person.employeeId)?.days ?? []).map(day => ({ ...day, outputs: { verified: dailyOutputs(mine, day.date).verified } })) };
     });
     const content = { metricVersion: metric.version, catalogVersion, scope: { ...metric.scope, ...(q.employeeId ? { employeeId: q.employeeId } : {}) },
       totals: q.employeeId ? totals(selected) : metric.totals, outputs: outputTotals(selected), employees,
-      daily: q.employeeId ? employees[0]?.daily ?? [] : metric.daily.map(day=>({date:day.date,activeSessions:day.sessions,...(day.tokenTrend??{inputTokens:day.inputTokens,outputTokens:day.outputTokens,includedSessions:day.sessions-day.unknownTokenSessions,excludedSessions:day.unknownTokenSessions})})), sessions: rows, nextOffset: null,
+      daily: q.employeeId ? employees[0]?.daily ?? [] : metric.daily.map(day=>({date:day.date,activeSessions:day.sessions,...(day.tokenTrend??{inputTokens:day.inputTokens,outputTokens:day.outputTokens,includedSessions:day.sessions-day.unknownTokenSessions,excludedSessions:day.unknownTokenSessions}),outputs:{verified:dailyOutputs(selected,day.date).verified}})), sessions: rows, nextOffset: null,
       sourceInputsComplete: metric.sourceInputsComplete, unknownReasons: metric.unknownReasons, dataAsOf: metric.dataAsOf };
     const version = digest(JSON.stringify(content)), request = selection(q), scopeKey = digest(JSON.stringify(request));
     const client = await db.connect();
