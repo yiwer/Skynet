@@ -1,15 +1,17 @@
+import {fixedWeek} from '../../packages/contracts/fixed-week.js';
+import {addDays} from '../../packages/contracts/work-views.js';
 import { digest, type Database } from './database.js';
 import { HttpError } from './identities.js';
 import type { MetricsService } from './metrics.js';
 import type { sessionInsightsService } from './session-insights.js';
-import { metricsQuerySchema, type MetricsQuery, type MetricTotals, type SessionMetrics } from '../../packages/contracts/metrics.js';
+import { metricsQuerySchema, type MetricsQuery, type MetricTotals, type SessionMetrics, type MetricsPage } from '../../packages/contracts/metrics.js';
 import type { OutputAmount, OutputTotals, UsageOutputPage, UsageSession } from '../../packages/contracts/usage-output.js';
 import type { FactContribution, SessionInsights } from '../../packages/contracts/session-insights.js';
 
 const catalogVersion = 'usage-output-2';
 const kinds = ['verified', 'claimed', 'codeChanges', 'tests', 'commits'] as const;
 type Kind = typeof kinds[number];
-const selection = ({ version: _v, offset: _o, ...scope }: MetricsQuery) => scope;
+const selection = ({ version: _v, offset: _o, week:_week, ...scope }: MetricsQuery) => scope;
 const emptyAmount = (): OutputAmount => ({ value: 0, known: 0, unknownSessions: 0, added: 0, removed: 0, passed: 0, failed: 0 });
 const emptyOutputs = (): OutputTotals => Object.fromEntries(kinds.map(kind => [kind, emptyAmount()])) as OutputTotals;
 function totals(rows: SessionMetrics[]): MetricTotals {
@@ -36,10 +38,10 @@ export async function migrateUsageOutput(db: Database) {
     request jsonb NOT NULL,payload jsonb NOT NULL,UNIQUE(scope_key,revision))`);
 }
 export function usageOutputService(db: Database, metrics: MetricsService, insights: ReturnType<typeof sessionInsightsService>) {
-  async function compute(q: MetricsQuery, full = false): Promise<UsageOutputPage> {
+  async function compute(q: MetricsQuery, full = false, fixedMetric?:MetricsPage): Promise<UsageOutputPage> {
     const metricQuery = { ...q, employeeId: undefined, version: undefined, offset: 0 };
-    const metricHead = full ? await metrics.recompute(metricQuery) : await metrics.readMetrics(metricQuery);
-    const metric = await metrics.exportMetrics({ ...metricQuery, version: metricHead.version });
+    const metricHead = fixedMetric ?? (full ? await metrics.recompute(metricQuery) : await metrics.readMetrics(metricQuery));
+    const metric = fixedMetric ?? await metrics.exportMetrics({ ...metricQuery, version: metricHead.version });
     const ids = [...new Set(metric.sessions.flatMap(row => row.snapshotIds))];
     // Include every carrier of the selected native histories. Old rewrite inputs
     // remain evidence; continuations and verified copies share contribution IDs.
@@ -143,6 +145,7 @@ export function usageOutputService(db: Database, metrics: MetricsService, insigh
     });
     const content = { metricVersion: metric.version, catalogVersion, scope: { ...metric.scope, ...(q.employeeId ? { employeeId: q.employeeId } : {}) },
       totals: q.employeeId ? totals(selected) : metric.totals, outputs: outputTotals(selected), employees,
+      dailyOutputs: [...new Set(selected.flatMap(row => row.dates))].sort().map(date => ({ date, outputs: dailyOutputs(selected, date) })),
       daily: q.employeeId ? employees[0]?.daily ?? [] : metric.daily.map(day=>({date:day.date,activeSessions:day.sessions,...(day.tokenTrend??{inputTokens:day.inputTokens,outputTokens:day.outputTokens,includedSessions:day.sessions-day.unknownTokenSessions,excludedSessions:day.unknownTokenSessions}),outputs:{verified:dailyOutputs(selected,day.date).verified}})), sessions: rows, nextOffset: null,
       sourceInputsComplete: metric.sourceInputsComplete, unknownReasons: metric.unknownReasons, dataAsOf: metric.dataAsOf };
     const version = digest(JSON.stringify(content)), request = selection(q), scopeKey = digest(JSON.stringify(request));
@@ -164,6 +167,7 @@ export function usageOutputService(db: Database, metrics: MetricsService, insigh
     if (!q.version) return { q, payload: await compute(q, full) };
     const record = (await db.query('SELECT request,payload FROM usage_output_revisions WHERE version=$1', [q.version])).rows[0];
     if (!record) throw new HttpError(404, '产出版本不存在');
+    if(q.week&&record.payload.scope.from!==q.week)throw new HttpError(409,'产出版本与指定周不一致');
     const wanted = selection(q);
     if (Object.keys(record.request).length !== Object.keys(wanted).length || Object.entries(wanted).some(([key, value]) => record.request[key] !== value)) throw new HttpError(409, '产出版本与筛选不一致');
     return { q, payload: record.payload as UsageOutputPage };
@@ -176,5 +180,11 @@ export function usageOutputService(db: Database, metrics: MetricsService, insigh
     if (Buffer.byteLength(JSON.stringify(result)) > 80 * 1024) throw new HttpError(413, '产出响应超过范围上限，请缩小筛选');
     return result;
   }
-  return { read, recompute: (input: unknown) => read(input, true), export: async (input: unknown) => (await load(input)).payload };
+  async function readWeek(week:string, filters:{employeeId?:string;source?:MetricsQuery['source'];project?:string},full=false) {
+    fixedWeek.parse(week);const {employeeId,...teamFilters}=filters;
+    const head=await metrics.readCoverageMetrics({date:addDays(week,6),view:'week',...teamFilters},full);
+    const fixed=await metrics.exportMetrics({period:'custom',from:week,to:addDays(week,6),...teamFilters,version:head.version});
+    return compute({period:'this-week',offset:0,...filters},full,fixed);
+  }
+  return {readWeek, read, recompute: (input: unknown) => read(input, true), export: async (input: unknown) => (await load(input)).payload };
 }

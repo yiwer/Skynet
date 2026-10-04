@@ -9,5 +9,5 @@ export type UsageEmployee = MetricTotals & { employeeId: string; employee: strin
   agents: ({ source: Source } & MetricTotals)[]; daily: UsageDailyPoint[] };
 export type UsageOutputPage = { version: string; revision: number; metricVersion: string; catalogVersion: string;
   createdAt: string; dataAsOf: string; scope: MetricsPage['scope']; totals: MetricTotals; outputs: OutputTotals;
-  employees: UsageEmployee[]; daily: UsageDailyPoint[]; sessions: UsageSession[]; nextOffset: number | null;
+  employees: UsageEmployee[]; daily: UsageDailyPoint[]; dailyOutputs?:{date:string;outputs:OutputTotals}[]; sessions: UsageSession[]; nextOffset: number | null;
   sourceInputsComplete: boolean; unknownReasons: string[] };

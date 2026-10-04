@@ -37,6 +37,7 @@ import { sessionInsightsQuery } from '../../packages/contracts/session-insights.
 import { migrateUsageOutput, usageOutputService } from './usage-output.js';
 import {migrateSessionEfficiency,sessionEfficiencyService} from './session-efficiency.js';
 import {migratePromptReports,promptReportService} from './prompt-report.js';
+import {migrateTeamReports,teamReportService} from './team-report.js';
 import { migrateDeliveryReceipts, saveDeliveryReceipt } from './delivery-receipts.js';
 import { migrateAssembly, assemblyService, processingService, recordAssemblyRecipe } from './assembly.js';
 import { migrateWaits, waitsService } from './waits.js';
@@ -62,6 +63,7 @@ export async function createApp(options: { db: Database; rawDirectory: string; w
   await migrateUsageOutput(db);
   await migrateSessionEfficiency(db);
   await migratePromptReports(db);
+  await migrateTeamReports(db);
   await migrateDeliveryReceipts(db);
   await migrateAssembly(db);
   await migrateWaits(db);
@@ -97,7 +99,7 @@ export async function createApp(options: { db: Database; rawDirectory: string; w
 
   const identity = identities(db);
   const { reader, device } = identity;
-  const coverage = coverageService(db);
+  const coverage = coverageService(db,options.reportClock);
   const workStatistics = workStatisticsService(db, raw);
   const readerGuard = async (request: { headers: { authorization?: string } }) => { await reader(request.headers.authorization); };
   const operations=serverOperations(db,options.rawDirectory);
@@ -291,6 +293,12 @@ export async function createApp(options: { db: Database; rawDirectory: string; w
     return reply.header('Content-Disposition',`attachment; filename="skynet-session-efficiency-${value.version}.json"`).type('application/json').send(value);
   });
   const prompts=promptReportService(db,usage,insights);
+  const team=teamReportService(db,usage,prompts,waitReport,options.reportClock);
+  app.post('/api/team-report/recompute',{onRequest:readerGuard},request=>team.recompute(request.body));
+  app.post('/api/team-report/weekly/recompute',{onRequest:readerGuard},request=>team.weeklyRecompute(request.body));
+  app.get('/api/team-report/weekly',{onRequest:readerGuard},request=>team.weekly(request.query));
+  app.get('/api/team-report',{onRequest:readerGuard},request=>team.read(request.query));
+  app.get('/api/team-report/export',{onRequest:readerGuard},async(request,reply)=>{const data=await team.read(request.query);return reply.header('Content-Disposition',`attachment; filename="skynet-team-${data.version}.json"`).type('application/json').send(data);});
   app.get('/api/prompt-report',{onRequest:readerGuard},request=>prompts.read(request.query));
   app.post('/api/prompt-report/recompute',{onRequest:readerGuard},request=>prompts.recompute(request.body));
   app.get('/api/prompt-report/export',{onRequest:readerGuard},async(request,reply)=>{
@@ -460,7 +468,7 @@ export async function createApp(options: { db: Database; rawDirectory: string; w
     const file = await archive.exported((request.params as { id: string }).id, format);
     return reply.header('Content-Disposition', `attachment; filename="${file.filename}"`).type(file.contentType).send(file.bytes);
   });
-  if (options.publicOrigin) await registerMcp(app, db, archive, options.publicOrigin, analysis, reports, coverage, workStatistics, workViews,operations,conversation,metrics,assembly,processing,insights,waits,usage,waitReport,prompts,activity,efficiency,assessments,people);
+  if (options.publicOrigin) await registerMcp(app, db, archive, options.publicOrigin, analysis, reports, coverage, workStatistics, workViews,operations,conversation,metrics,assembly,processing,insights,waits,usage,waitReport,prompts,activity,efficiency,assessments,team,people);
   if (options.webDirectory) {
     await app.register(fastifyStatic, { root: resolve(options.webDirectory), wildcard: false });
   }

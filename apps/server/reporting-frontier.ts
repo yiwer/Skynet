@@ -3,11 +3,12 @@ import { HttpError } from './identities.js';
 import { attributionRevisions } from './qualification.js';
 import { inputIntegrityVersion } from './evidence-integrity.js';
 import { beijingDate } from '../../packages/contracts/reports.js';
+import type pg from 'pg';
 
 /** Semantic input identity, read under one snapshot. Include originals without
  * business events: their unknown coverage can still affect the assessment.
  * Heartbeat times and derived report/cache revisions are deliberately absent. */
-async function reportingFrontier(db: Database, clock: () => Date) {
+async function reportingFrontier(db: Database, clock: () => Date, extra?:(client:pg.PoolClient)=>Promise<unknown>) {
   const client = await db.connect();
   try {
     await client.query('BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY');
@@ -31,19 +32,20 @@ async function reportingFrontier(db: Database, clock: () => Date) {
       FROM snapshot_input_integrity WHERE version=$1 ORDER BY snapshot_id`, [inputIntegrityVersion])).rows;
     const gaps = (await client.query(`SELECT device_id,source,date,hour,gap_observed,fault_codes
       FROM device_coverage_observations WHERE date <= $1 AND gap_observed ORDER BY device_id,source,date,hour`, [day])).rows;
+    const additional=extra?await extra(client):undefined;
     await client.query('COMMIT');
     return digest(JSON.stringify(['reporting-frontier-1', day,
-      snapshots.map(row => [row, revisions.get(row.id)]), people, devices, jobs, targets, integrity, gaps]));
+      snapshots.map(row => [row, revisions.get(row.id)]), people, devices, jobs, targets, integrity, gaps,...(extra?[additional]:[])]));
   } catch (error) { await client.query('ROLLBACK'); throw error; } finally { client.release(); }
 }
 
 /** Compose live services, then bind their result only after the full input
  * identity is unchanged. Callers must persist their combined result afterwards;
  * component services may independently persist their own valid frozen versions. */
-export async function consistentReportingInputs<T extends object>(db: Database, clock: () => Date, read: () => Promise<T>): Promise<T & { frontierVersion: string }> {
+export async function consistentReportingInputs<T extends object>(db: Database, clock: () => Date, read: () => Promise<T>,extra?:(client:pg.PoolClient)=>Promise<unknown>): Promise<T & { frontierVersion: string }> {
   for (let attempt = 0; attempt < 3; attempt++) {
-    const before = await reportingFrontier(db, clock), value = await read();
-    if (await reportingFrontier(db, clock) === before) return { ...value, frontierVersion: before };
+    const before = await reportingFrontier(db, clock,extra), value = await read();
+    if (await reportingFrontier(db, clock,extra) === before) return { ...value, frontierVersion: before };
   }
   throw new HttpError(409, '报告来源正在更新，请重新读取；未保存混合输入的报告');
 }
