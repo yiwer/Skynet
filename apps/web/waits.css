@@ -46,3 +46,8 @@
 @media(max-width:1400px){.platform-main .wait-report-stats{grid-template-columns:repeat(3,minmax(0,1fr))}}
 @media(max-width:700px){.platform-main .wait-report-stats{grid-template-columns:repeat(2,minmax(0,1fr))}.platform-main .wait-person-row{grid-template-columns:1fr;gap:2px}}
 @media(max-width:380px){.platform-main .wait-report-stats{grid-template-columns:1fr}.platform-main .wait-report-stats .usage-stat{padding:12px}.platform-main .wait-report-stats .usage-stat dd{font-size:24px}}
+.platform-main .waiting-report.usage-metrics :is(button,select,input,summary){min-height:44px;min-width:44px}
+.waiting-report summary{box-sizing:border-box;padding-top:12px;padding-bottom:12px}
+.waiting-report a{display:inline-flex;align-items:center;min-height:44px;min-width:44px}
+.platform-main .waiting-report .wait-heat-grid{grid-template-columns:36px repeat(24,minmax(44px,1fr));min-width:1188px}
+.platform-main .waiting-report .wait-heat-cell{height:44px;min-height:44px}

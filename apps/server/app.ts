@@ -244,8 +244,7 @@ export async function createApp(options: { db: Database; rawDirectory: string; w
   app.get('/api/waits', { onRequest: readerGuard }, request => waits.read(request.query));
   app.post('/api/waits/recompute', { onRequest: readerGuard }, request => waits.recompute(request.body));
   app.get('/api/waits/export', { onRequest: readerGuard }, async (request, reply) => {
-    const data = await waits.export(request.query);
-    return reply.header('Content-Disposition', `attachment; filename="skynet-waits-${data.version}.json"`).type('application/json').send(data);
+    return sendReportDownload(request,reply,await waits.download(request.query),'skynet-waits');
   });
   const assembly = assemblyService(db, raw);
   const processing = processingService(db, metrics);
