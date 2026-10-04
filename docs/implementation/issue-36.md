@@ -41,3 +41,5 @@ node --import tsx --test tests/conversation-public.test.ts tests/conversation-tr
 | 浏览器 | 320/768/1280 px、浅/深主题，来源状态 Enter/Space 展开关闭、减少动效、子材料可读；无外层横纵滚动或 page error，六张来源状态截图已人工查看代表样例 |
 
 组合公开回归 4/4 通过；来源状态完整公开旅程、元数据边界修复及迁移边界分别定向验证通过。既有 V2 旅程保留 24 张截图；新增六张截图及 JSON 报告在 `E:/GenCode/Skynet-evidence/v2-2026-10-04/36-conversation/`。该目录保存每个有效 RED/GREEN、最终构建与证据文件哈希索引。等待时长与并行活动由 #37 继续实现；完整 V2、真实客户端能力矩阵与 AC-32 性能由后续票签收。
+
+收口时已合并 `codex/v2` 的 `aca8db7`（包含 #34 用量指标），无冲突；在合并后的代码上 `npm run build` 与受两个票共同影响的 `tests/v2-public.test.ts` 再次通过（1/1，15.28 秒）。未无因重跑全部故障与阅读用例。
