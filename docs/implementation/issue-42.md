@@ -35,3 +35,11 @@ node --import tsx --test tests/prompt-report.test.ts tests/prompt-report-model.t
 外部证据目录：`E:/GenCode/Skynet-evidence/v2-2026-10-04/42-prompts/`。`01-native-red` → `03-native-green`；`05-model-red` → `07-model-green`；`08-public-red` → `10-public-green`；`12-compaction-red` → `13-compaction-green`。`04-model-red` 是合成 fixture 失败，修正后 `05` 才是预期行为 RED；不作为有效 TDD 失败证据。共享洞察/用量回归 `15-shared-green` 为 8/8（60.39 秒）。最终文件、截图与合入检查见同目录 `manifest.json`。
 
 本票不宣称全局 AC32 性能目标完成；千会话全链路性能由 #54 汇总验证。
+
+## 2026-10-04 收口
+
+功能提交 `c3375b7`；已合入集成分支 `b6ee0d0`（#39 活动），仅合并 App 路由及 MCP 服务接线冲突，保留两个公开服务。构建通过。主票四个公开用例 4/4 通过（`17-complete-green.txt`，40.99 秒）；随后补齐全部图表等价表格和任务段键盘提示的屏内断言，`18-task-tooltip-red` → `21-task-tooltip-green` 1/1 通过（21.85 秒）。
+
+合入后的 `23-integrated-green.txt` 为 3/3（19.84 秒）：提示词真实隔离分析 + OAuth MCP + Web + 实际 JSON 下载及固定链接、活动推断首条边界、活动 Web/MCP 固定版本旅程。`22-integrated-build.txt` 为最终构建。仅有既存 bundle 大小和依赖注释警告。
+
+最终截图见外部 `42-prompts/integrated/`，含 320/768/1280/1920 明暗主题的顶部和底部（16 张）；已目视 1280 浅色与 320 深色，外部页面不滚动。`public/` 保留合入前完整旅程证据。未部署或关闭远端 ticket；由独立 merger 交付集成。
