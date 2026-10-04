@@ -34,9 +34,12 @@ else if(argv[0]==='run'){
   try{await child(['seed',bundlePath,...(flag('--mini')?['--mini']:diagnostic?['--diagnostic']:[])]);}
   finally{const {cleanAbandonedSample}=await import('./ac32-owned.js');await cleanAbandonedSample(join(bundlePath,'seed.owner.json'));}
   const bundle=JSON.parse(await readFile(join(bundlePath,'bundle.json'),'utf8'));
+  const postgresRuntime=process.env.SKYNET_TEST_POSTGRES_BIN?
+    (await ownedCommand(join(process.env.SKYNET_TEST_POSTGRES_BIN,'postgres'+(process.platform==='win32'?'.exe':'')),['--version'],process.env,'',{timeoutMs:10000})).stdout.trim():
+    JSON.parse((await ownedCommand('docker',['image','inspect','postgres:17-alpine','--format','{{json .}}'],process.env,'',{timeoutMs:10000})).stdout).Id;
   const measurements:Measurements={kind:'ac32-observations-1',diagnostic,sourceRevision:revision(),sourceBundleHash:bundle.bundleHash,dataset:bundle.dataset,observations:[]};
   const environment={node:process.version,platform:process.platform,cpu:cpus()[0]?.model,logicalCpu:cpus().length,memoryBytes:totalmem(),
-    postgresMode:process.env.SKYNET_TEST_POSTGRES_BIN?'owned-native':'owned-docker',startedAt:new Date().toISOString(),sourceClean:clean(),
+    postgresMode:process.env.SKYNET_TEST_POSTGRES_BIN?'owned-native':'owned-docker',postgresRuntime,startedAt:new Date().toISOString(),sourceClean:clean(),
     conditions:'Serial independent restored fixtures. No cache flushing of host OS, no concurrent-load control inferred. Endpoint order is recorded. Source bundle contains synthetic local credentials and is not a public artifact.'};
   const errors:{entry:string;sample:number;error:string}[]=[];
   const deadline=Date.now()+4*60*60*1000;

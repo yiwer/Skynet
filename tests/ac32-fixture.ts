@@ -106,7 +106,7 @@ export async function restoreBundle(directory:string){
   const bundle:Bundle=JSON.parse(await readFile(join(directory,'bundle.json'),'utf8'));
   assert.equal(bundle.kind,'ac32-source-bundle-1');const {bundleHash,...content}=bundle;assert.equal(hash(JSON.stringify(content)),bundleHash);
   assert.deepEqual(await inventory(join(directory,'raw')),bundle.files);
-  if(bundle.database.format==='pg-custom')assert.equal(await fileHash(join(directory,'source.dump')),bundle.database.hash);
+  if(bundle.database.format==='pg-custom'){assert.equal(process.env.SKYNET_TEST_POSTGRES_BIN,undefined,'Docker source bundles restore only in the same fixture mode');assert.equal(await fileHash(join(directory,'source.dump')),bundle.database.hash);}
   else {assert.equal(bundle.database.format,'pg-stopped-cluster');const files=await inventory(join(directory,'postgres'));assert.deepEqual(files,bundle.database.files);assert.equal(hash(JSON.stringify(files)),bundle.database.hash);}
   const sandbox=await createSandbox(bundle.database.format==='pg-stopped-cluster'?{stoppedNativeSnapshot:{directory:join(directory,'postgres'),password:bundle.database.password!}}:{}),owner=await markOwned(sandbox);
   try{if(bundle.database.format==='pg-custom')await pgCommand(sandbox,'restore',join(directory,'source.dump'));await cp(join(directory,'raw'),sandbox.env.RAW_DIRECTORY!,{recursive:true,errorOnExist:true,force:false});

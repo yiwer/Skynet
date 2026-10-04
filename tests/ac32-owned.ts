@@ -6,7 +6,7 @@ import {ownedCommand,removeOwnedContainer} from './owned-command.js';
 import type {createSandbox} from './support.js';
 
 export async function recordSampleOwner(path:string,sandbox:Awaited<ReturnType<typeof createSandbox>>,owner:string){
-  await writeFile(path,JSON.stringify({directory:sandbox.directory,owner,name:sandbox.name,testOwner:sandbox.testOwner,
+  await writeFile(path,JSON.stringify({directory:sandbox.directory,owner,name:sandbox.name,testOwner:sandbox.testOwner,pid:process.pid,
     ...(process.env.SKYNET_TEST_POSTGRES_BIN?{nativeBinaries:process.env.SKYNET_TEST_POSTGRES_BIN,postgresOwner:await readFile(join(sandbox.directory,'postgres-owner'),'utf8')}:{})}),{flag:'wx',mode:0o600});
 }
 // The outer command knows its child has terminated before invoking this fallback.

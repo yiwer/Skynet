@@ -12,7 +12,7 @@
 
 每个入口的每一个 cold 样本都启动独立 Node 子进程和全新、归属明确的 PostgreSQL fixture，从同一源态复制；前一入口生成的任何报表结果均不会进入下一入口。服务启动、恢复与文件校验在计时外。计时从公开 HTTPS 请求开始，到完整响应体接收并解析 JSON 为止；包括本地 TLS/HTTP 开销，不包含断言或浏览器绘制。cold 是新的应用与 PostgreSQL 进程，**不声称清空宿主操作系统文件缓存**。
 
-每个 cold 后读取同一 live 入口一次得到 warm 样本。默认每入口 20 对，串行执行。P50 / P95 使用 nearest-rank；少于 20 条的 P95 为 `null`，不会作为通过值。重复环境、缺少任何入口、数据规模不同、缺少固定/全量/补传/历史检查、请求或断言失败均不能通过。诊断即使快速也只能得到 `diagnostic-not-acceptance`。每次子命令最多 20 分钟，协调器最多 4 小时；达到界限保留缺失/失败，不补写成功。
+每个 cold 后读取同一 live 入口一次得到 warm 样本。默认每入口 20 对，串行执行。P50 / P95 使用 nearest-rank；少于 20 条的 P95 为 `null`，不会作为通过值。重复环境、缺少任何入口、数据规模不同、缺少固定/全量/补传/历史检查、请求或断言失败均不能通过。诊断即使快速也只能得到 `diagnostic-not-acceptance`。每次子命令最多 20 分钟；测量阶段达到 4 小时后不再启动新样本，执行中样本仍受自身时限约束。达到界限保留缺失/失败，不补写成功。
 
 ## 原始状态隔离
 
@@ -53,6 +53,8 @@ node --import tsx tests/ac32-performance.ts run E:/GenCode/Skynet-evidence/ac32-
 ## 验证与已知边界
 
 作者证据位于 `E:/GenCode/Skynet-evidence/v2-2026-10-04/54-ac32-measurement/`：命令范围、样本门槛、生命周期门槛均保留 RED→GREEN。`11-offline-clone-public.txt` 为公开上传→停止源库→两个独立克隆的回归：在第一个克隆补传/重算后，第二个仍得到原基线，源 bundle 未改变。`mini-all-1/` 的 12 个 sample 均完成 live、fixed、full、export、late、history、late-full；`summary.json` 明确为诊断，不能替代千会话性能验收。
+
+合入集成 `64b7119` 后，`17-integrated-public.txt` 的 5 项公开回归全部通过（118.68 秒）：范围与分布三项、两个独立克隆、真实终止测量子进程后保留失败并清理精确归属数据库。`18-final-typecheck.txt` 与 `19-final-build.txt` 记录最终候选检查。先前 12 入口诊断发生在作者提交前，使用记录的基线 SHA 加未提交测试代码；它用于说明流程覆盖，不是干净固定源码上的正式性能结果。最终提交及各证据哈希见外部 `manifest.json`。
 
 种子诊断发现两个既有容量边界，并未放宽：80 条业务事件的模型返回若包含 21 项 outcomes，扩展证据链接后触发 Analysis 的 60 KiB 上限（`no-validated-segment` 内部原因为 `Session inferences exceed bounded result`）。只提取代表性 outcomes 后，完整公共洞察投影仍为 **83,369 bytes**，超出 80 KiB，HTTP 413 提示读取分析与原文分页；其中 inferences 50,326 bytes、facts 32,104 bytes。见 `analysis-output-diagnostic.json`、`analysis-representative-diagnostic.json`、`insights-80k-capacity.json`。这些 413 不算成功；源态准备以另一个公开可验证的 Analysis 作业接口确认完成，报表若返回容量错误则正式样本失败。
 
