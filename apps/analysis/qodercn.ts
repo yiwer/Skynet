@@ -78,7 +78,9 @@ export async function runQoderAnalysis(config:AnalysisConfig,input:AnalysisInput
     const text=result.result.trim();const json=text.startsWith('```')?(/^```(?:json)?\s*\n([\s\S]*?)\n```$/.exec(text)?.[1]??''):text;
     failure='qoder-json-output';const parsed=JSON.parse(json);failure='qoder-schema-output';
     const output=evidence.decode(parsed);
-    return {output,usage:{inputTokens:number(result.usage.input_tokens),outputTokens:number(result.usage.output_tokens),runtimeCostUsd:null,
+    // Some Qoder models emit the CLI's default zero-valued Token counters even
+    // after a nonempty request/response. Those are unavailable usage, not zero use.
+    return {output,usage:{inputTokens:result.usage.input_tokens>0?number(result.usage.input_tokens):null,outputTokens:result.usage.output_tokens>0?number(result.usage.output_tokens):null,runtimeCostUsd:null,
       providerBilledCny:null,providerCredits:number(result.total_credits),requests}};
   }catch{throw new NativeAnalysisFailure(requests,signal.aborted?'timeout-or-cancelled':failure);}
   finally{
