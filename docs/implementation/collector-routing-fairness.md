@@ -21,7 +21,8 @@ benchmark, and no real event contents were read for this change.
   retries each receive up to half of that budget; unused quota is reused.
 - Old hooks form a FIFO rotation. Rejected new hooks join its tail, so continued
   arrivals cannot insert themselves ahead of an unattempted old hook. New-hook
-  selection also preserves arrival order rather than repeatedly sorting it.
+  selection preserves first-observed queue order across sweeps; filenames first
+  observed within the same sweep are sorted, not ordered by event `observedAt`.
 - `inbox/codex/routing.json` stores only a version and last old-attempt filename.
   Restart resumes the sorted retained set after that position, wrapping at the
   end. Deleted names do not invalidate it. Malformed JSON resets this derived
