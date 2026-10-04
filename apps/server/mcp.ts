@@ -38,7 +38,7 @@ export async function registerMcp(app: FastifyInstance, db: Database, archive: A
         return { isError: true, content: [{ type: 'text' as const, text: error instanceof HttpError ? error.message : '查询暂时不可用，请重试；上传不受影响' }] };
       }
     }
-    mcp.registerTool('read_conversation', { description: '按原件顺序分页读取对话，默认隐藏工具及系统、开发者与纯环境上下文；includeTools / includeContext 可分别展开。固定快照和解析版本，长消息沿 nextCursor 继续。anchor 使用原件 line/block/textOffset 并展开该记录；工具结果存在不表示助手结论已核验。',
+    mcp.registerTool('read_conversation', { description: '按原件顺序分页读取对话，默认隐藏工具及系统、开发者与纯环境上下文；includeTools / includeContext 可分别展开。固定快照和解析版本，长消息沿 nextCursor 继续。默认 conversation-3；readingVersion 可固定 conversation-2。来源状态仅表示已记录的本轮与投递观察，不表示会话永久结束。anchor 使用原件 line/block/textOffset 并展开该记录；工具结果存在不表示助手结论已核验。',
       annotations, inputSchema: conversationInputSchema.safeExtend({ snapshotId }) },
       input => result(() => { const { snapshotId: id, ...query } = input; return conversation.page(id, query); }));
     mcp.registerTool('read_conversation_trace', { description: '分页读取原件中记录的 Trace 标识、时间与执行状态。仅精确标识关联，不包含或重建工具正文。turnId 可限定记录的轮次。',

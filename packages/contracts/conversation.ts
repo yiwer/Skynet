@@ -3,12 +3,15 @@ import type { Source } from './archive.js';
 import type { ActivityContext } from '../activity.js';
 import type { EventOrigin } from './provenance.js';
 import type { EvidenceLocation } from './search.js';
+import type { NativeTurnState } from '../native/turn-state.js';
+import type { DeliveryObservation } from './delivery.js';
 
 export const conversationAnchorSchema = z.object({
   line: z.number().int().min(1), block: z.number().int().min(0).default(0),
   textOffset: z.number().int().min(0).default(0), parserVersion: z.string().min(1).max(128).optional(),
 }).strict();
 export const conversationInputSchema = z.object({
+  readingVersion: z.enum(['conversation-2', 'conversation-3']).optional(),
   cursor: z.string().max(2048).optional(), includeTools: z.boolean().default(false),
   includeContext: z.boolean().default(false),
   limit: z.number().int().min(1).max(25).default(10), anchor: conversationAnchorSchema.optional(),
@@ -63,7 +66,9 @@ export interface ConversationPage {
   status: {
     compacted: boolean | null; unrecognizedLines: number; partialLine: boolean;
     captureGapCount: number; captureGapExamples: Array<{ code: string; reference: string }>;
-    offlineBackfill: 'unknown'; ongoing: 'unknown'; verification: 'not-assessed';
+    offlineBackfill: 'unknown' | 'observed' | 'not-observed'; ongoing: NativeTurnState['state']; verification: 'not-assessed';
+    turn?: NativeTurnState;
+    delivery?: DeliveryObservation;
   };
   related: Array<{ materialId: string; role: string; name: string; sourceSessionId: string | null; webPath: string }>;
   relatedTotal: number;

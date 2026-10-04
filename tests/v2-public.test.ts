@@ -122,8 +122,8 @@ test('V2 public originals → conversation and metrics Web → real HTTPS OAuth 
     assert.equal(defaultPages[0]!.messages.find(message => message.line === 2)!.toolEvidence, 'none-observed');
     assert.equal(defaultPages[0]!.status.verification, 'not-assessed');
     await expect(conversation.getByRole('button', { name: '显示 1 次工具调用、2 条工具记录', exact: true })).toBeVisible();
-    assert.deepEqual([defaultPages[0]!.trailingHiddenToolCalls, defaultPages[0]!.trailingHiddenToolEvents], [1, 1]);
-    await expect(conversation.getByRole('button', { name: '显示 1 次工具调用', exact: true })).toBeVisible();
+    assert.deepEqual([defaultPages[0]!.trailingHiddenToolCalls, defaultPages[0]!.trailingHiddenToolEvents], [0, 0]);
+    await expect(conversation.getByRole('button', { name: '显示 1 次工具调用', exact: true })).toHaveCount(0);
     assert.equal(await conversation.locator('pre').filter({ hasText: injection }).count(), 0);
     await conversation.getByLabel('显示工具调用与结果').check();
     const toolMessage = conversation.locator('.conversation-message').filter({ hasText: '工具实际返回：测试尚未执行' });
@@ -154,6 +154,8 @@ test('V2 public originals → conversation and metrics Web → real HTTPS OAuth 
       }
     }
     assert.ok(segmentContinuations > 0, 'the long original must be read through the explicit segment action');
+    assert.deepEqual([defaultPages.at(-1)!.trailingHiddenToolCalls, defaultPages.at(-1)!.trailingHiddenToolEvents], [1, 1]);
+    await expect(conversation.getByRole('button', { name: '显示 1 次工具调用', exact: true })).toBeVisible();
     await expect(conversation.getByRole('button', { name: '继续阅读对话', exact: true })).toBeDisabled();
     await page.keyboard.press('Control+k');
     const search = page.getByRole('region', { name: '搜索会话', exact: true });

@@ -13,3 +13,19 @@ export const deliveryHealthSchema = z.object({
 }).strict();
 export type DeliveryHealth = z.infer<typeof deliveryHealthSchema>;
 export type DeliveryFailure = z.infer<typeof deliveryFailureSchema>;
+
+// Observations from an authenticated collector, separate from immutable source bytes.
+// Client timestamps are not a server-measured end-to-end latency.
+export const deliveryReceiptSchema = z.object({
+  uploadId: z.uuid(), snapshotId: z.uuid(), capturedAt: z.iso.datetime().max(64), acknowledgedAt: z.iso.datetime().max(64),
+  disconnectedAttempts: z.number().int().min(0).max(1_000_000_000),
+  firstDisconnectedAt: z.iso.datetime().max(64).nullable(), lastDisconnectedAt: z.iso.datetime().max(64).nullable(),
+}).strict().refine(value => value.disconnectedAttempts === 0
+  ? value.firstDisconnectedAt === null && value.lastDisconnectedAt === null
+  : value.firstDisconnectedAt !== null && value.lastDisconnectedAt !== null, 'Disconnect observations must be consistent');
+export type DeliveryReceipt = z.infer<typeof deliveryReceiptSchema>;
+export interface DeliveryObservation {
+  revision: string; receiptCount: number; disconnectedAttempts: number;
+  firstDisconnectedAt: string | null; lastDisconnectedAt: string | null;
+  capturedAt: string | null; acknowledgedAt: string | null; receivedAt: string | null;
+}
