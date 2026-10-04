@@ -49,4 +49,3 @@ test('waiting facets and cursors stay fixed without automatic complete downloads
     await writeFile(join(directory,'web.json'),JSON.stringify({errors,automaticExports:0,explicitExports:exports.length,sections:sections.length,lateFacetsIsolated:true,tailIntervals:1},null,2));
   }finally{release();await browser.close();await f.close();}
 });
-
