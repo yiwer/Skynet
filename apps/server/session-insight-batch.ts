@@ -118,8 +118,12 @@ async function readInsightBatchOnce(db: Database, raw: RawStore, requested: stri
     }
     for (let offset = 0; offset < inserted.length; offset += 100) await client.query(`INSERT INTO insight_fact_revisions(version,snapshot_id,payload)
       SELECT x.version,x."snapshotId",x.payload FROM jsonb_to_recordset($1::jsonb) AS x(version text,"snapshotId" uuid,payload jsonb) ON CONFLICT DO NOTHING`, [JSON.stringify(inserted.slice(offset,offset+100))]);
-    for (let offset = 0; offset < views.length; offset += 100) await client.query(`INSERT INTO session_insight_revisions(version,snapshot_id,analysis_id,payload)
-      SELECT x.version,x."snapshotId",(x."analysisVersion"->>'id')::uuid,x.payload FROM jsonb_to_recordset($1::jsonb) AS x(version text,"snapshotId" uuid,"analysisVersion" jsonb,payload jsonb) ON CONFLICT DO NOTHING`, [JSON.stringify(views.slice(offset,offset+100).map(view => ({ ...view, payload: view })))]);
+    // Persist only missing versions; all views above were still freshly
+    // projected. Concurrent readers may also insert after this RR lookup.
+    const storedViews = new Set((await client.query('SELECT version FROM session_insight_revisions WHERE version=ANY($1::text[])', [views.map(view => view.version)])).rows.map(row => row.version));
+    const pendingViews = views.filter(view => !storedViews.has(view.version));
+    for (let offset = 0; offset < pendingViews.length; offset += 100) await client.query(`INSERT INTO session_insight_revisions(version,snapshot_id,analysis_id,payload)
+      SELECT x.version,x."snapshotId",(x."analysisVersion"->>'id')::uuid,x.payload FROM jsonb_to_recordset($1::jsonb) AS x(version text,"snapshotId" uuid,"analysisVersion" jsonb,payload jsonb) ON CONFLICT DO NOTHING`, [JSON.stringify(pendingViews.slice(offset,offset+100).map(view => ({ version:view.version,snapshotId:view.snapshotId,analysisVersion:view.analysisVersion,payload:view })))]);
     await client.query('COMMIT');
     const byId = new Map(views.map(view => [view.snapshotId, view]));
     return requested.map(id => byId.get(id)!);
