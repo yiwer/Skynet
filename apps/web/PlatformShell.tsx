@@ -49,7 +49,7 @@ const navigation: { label: string; items: NavigationItem[] }[] = [
   ] },
   { label: '报表', items: [
     { label: '用量与产出', icon: 'chart', view: 'metrics' },
-    { label: '会话产效', icon: 'gauge' },
+    { label: '会话产效', icon: 'gauge', view: 'efficiency' },
     { label: '提示词分析', icon: 'quote', view:'prompts' },
     { label: '响应与等待', icon: 'clock', view: 'waits' },
   ] },
