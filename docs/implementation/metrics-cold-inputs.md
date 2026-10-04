@@ -25,3 +25,7 @@
 归属候选在同库 SQL 诊断中将旧查询约 696/798 ms 降为 391/428 ms，1,000 个完整修订值相等；实际首次归属查询为 288 ms。但整条首次仍为 4,647 ms，其中事件 SQL 为 1,554 ms。因其执行计划包含第二次按九个字段的宽行外部排序，当前候选恢复传输原有 15 列，再在本次请求内准备紧凑分组身份与共享键。原 SQL ORDER/LIMIT 不变，每行按数据库返回位置得到原序号；分组仍包含全部九项字段，并按首次出现顺序创建。与冻结 SQL 分组实现对比的公开 Reporting 完整报告及版本相等；再加原指标与事件上限回归共 6/6 通过。此步不声称降低传输体积，也没有提高 `work_mem`、新增接入状态或跨请求缓存。证据 `54-metrics-client-pack-public.txt`；本候选性能待测。
 
 证据目录：`E:/GenCode/Skynet-evidence/v2-2026-10-04/`。设计与逐轮记录见 `54-metrics-cold-query-design.md`；诊断分别为 `54-metrics-cold-a2a757b-profile.*`、`54-metrics-cold-union-profile.*`、`54-metrics-cold-packed-profile.*`。紧凑身份正式性能为 `54-metrics-cold-compact-performance.{json,txt}`；请求内键复用构建与回归为 `54-metrics-group-keys-{build,public}.txt`。最后切片的正式性能复验待并行负载结束，尚未独立接受，#54 保持开放。
+
+客户端分组候选 clean `8a38612` 的诊断首次为 4,512.85 ms，单次后续 277.39 ms，仍未通过。真实主查询 wall 为 849.49 ms，包含传输和行解析；归属为 351 ms，十批事实写入合计 523 ms。旧诊断的 EXPLAIN 变量被后台修复查询覆盖，`54-metrics-client-pack-cpu-plan.json` 已明确排除，不能拿其 69 ms / 0 行计划解释该主查询。独立 CPU 复核发现分组 helper 自耗时约 509 ms，其中大量为每条重复元数据的 JSON 编码/Map 查找。
+
+当前窄修以 snapshot bucket 查找第一组，但仍逐项比较全部九个元数据字段；不相等的日期、员工、材料等变体才使用完整 JSON key 的 Map。原始顺序、所有事件、指纹与上限保持相同，没有依赖“同快照必同日期”的假设。公开完整 Reporting/版本差分加入同一原件三个日期交错，连同材料与指标回归 3/3 通过（73.95 秒），构建通过。证据 `54-metrics-metadata-keys-{build,public}.txt`，性能待精确候选测量。

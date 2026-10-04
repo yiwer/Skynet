@@ -8,6 +8,10 @@ export type MetricEvent = { event_id: string; snapshot_id: string; employee_id: 
   qualification_revision: string; proof_snapshot_id: string | null };
 type PackedEvent = [position: number, eventId: string, role: string, line: number, block: number, qualification: string, proof: string | null];
 type Group = Pick<MetricEvent, 'snapshot_id' | 'employee_id' | 'employee' | 'device_id' | 'source' | 'source_session_id' | 'project' | 'source_date' | 'material_id'> & { events: PackedEvent[] };
+const sameMetadata = (group: Group, event: MetricEvent) => group.snapshot_id === event.snapshot_id && group.employee_id === event.employee_id
+  && group.employee === event.employee && group.device_id === event.device_id && group.source === event.source
+  && group.source_session_id === event.source_session_id && group.project === event.project && group.source_date === event.source_date
+  && group.material_id === event.material_id;
 
 /** Select every original event before preparing shared request-local keys.
  * The database determines event order and enforces the pre-group bound. The
@@ -22,13 +26,23 @@ export async function readMetricEvents(client: pg.PoolClient, scope: MetricsScop
     ORDER BY o.event_id LIMIT ($6::integer+1)`,
   [scope.from, scope.to, scope.employeeId ?? null, scope.source ?? null, scope.project ?? null, limit])).rows as MetricEvent[];
   if (events.length > limit) return undefined;
-  const groups: Group[] = [], eventGroups: MetricEvent[][] = [], byMetadata = new Map<string, number>();
+  const groups: Group[] = [], eventGroups: MetricEvent[][] = [];
+  const bySnapshot = new Map<string, { first: number; others?: Map<string, number> }>();
   for (const [index, event] of events.entries()) {
-    const key = JSON.stringify([event.snapshot_id,event.employee_id,event.employee,event.device_id,event.source,
-      event.source_session_id,event.project,event.source_date,event.material_id]);
-    let groupIndex = byMetadata.get(key);
+    const bucket = bySnapshot.get(event.snapshot_id);
+    let groupIndex: number | undefined, key: string | undefined;
+    // Most ordinary carriers share one metadata tuple. Compare all fields
+    // before reusing it; variants still use a complete, bounded map lookup.
+    if (bucket && sameMetadata(groups[bucket.first]!, event)) groupIndex = bucket.first;
+    else if (bucket) {
+      key = JSON.stringify([event.snapshot_id,event.employee_id,event.employee,event.device_id,event.source,
+        event.source_session_id,event.project,event.source_date,event.material_id]);
+      groupIndex = bucket.others?.get(key);
+    }
     if (groupIndex === undefined) {
-      groupIndex = groups.length; byMetadata.set(key, groupIndex);
+      groupIndex = groups.length;
+      if (!bucket) bySnapshot.set(event.snapshot_id, { first: groupIndex });
+      else { bucket.others ??= new Map(); bucket.others.set(key!, groupIndex); }
       groups.push({ snapshot_id: event.snapshot_id, employee_id: event.employee_id, employee: event.employee, device_id: event.device_id,
         source: event.source, source_session_id: event.source_session_id, project: event.project, source_date: event.source_date,
         material_id: event.material_id, events: [] });
