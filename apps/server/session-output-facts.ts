@@ -2,23 +2,43 @@ import type { AnalysisInput } from './analysis.js';
 import { insightCitations } from './analysis-insights.js';
 import type { SessionInsights, RecordedFact } from '../../packages/contracts/session-insights.js';
 
-export const outputFactsVersion='recorded-output-2';
+export const outputFactsVersion='recorded-output-4';
 type Call={id:string;name:string;args:Record<string,unknown>|null;text:string;event:number};
 type Result={id:string;text:string;event:number;error:boolean};
 const lines=(text:string)=>text===''?0:text.replace(/\r\n/g,'\n').replace(/\n$/,'').split('\n').length;
+function editLines(before:string,after:string):{added:number;removed:number}|null{
+  const split=(value:string)=>value===''?[]:value.replace(/\r\n/g,'\n').replace(/\n$/,'').split('\n');
+  const old=split(before),next=split(after),n=old.length,m=next.length;
+  if(n+m>20_000)return null;
+  // Myers' shortest edit distance counts inserted/deleted lines, preserving shared
+  // context inside the replacement. A bounded workload keeps large edits unknown.
+  const frontier=new Map<number,number>([[1,0]]);let work=0;
+  for(let distance=0;distance<=n+m;distance++)for(let diagonal=-distance;diagonal<=distance;diagonal+=2){
+    if(++work>200_000)return null;
+    const left=frontier.get(diagonal-1)??-Infinity,down=frontier.get(diagonal+1)??-Infinity;
+    let x=diagonal===-distance||(diagonal!==distance&&left<down)?down:left+1;
+    let y=x-diagonal;
+    while(x<n&&y<m&&old[x]===next[y]){x++;y++;if(++work>200_000)return null;}
+    frontier.set(diagonal,x);
+    if(x>=n&&y>=m)return{added:(distance+m-n)/2,removed:(distance+n-m)/2};
+  }
+  return null;
+}
 const object=(value:unknown):Record<string,unknown>|null=>value&&typeof value==='object'&&!Array.isArray(value)?value as Record<string,unknown>:null;
 const asText=(value:unknown):string|null=>typeof value==='string'?value:null;
 function args(text:string){try{return object(JSON.parse(text));}catch{return null;}}
 function testSummary(raw:string):{total:number;passed:number;failed:number}|null{
   const text=raw.replace(/\x1b\[[0-9;]*m/g,'');
-  if([...text.matchAll(/^# tests \d+\r?$/gm)].length>1||[...text.matchAll(/^Tests:\s+/gm)].length>1||[...text.matchAll(/^\s*Tests\s+[^\r\n]+\(\d+\)\s*$/gm)].length>1)return null;
+  const pytestPattern=/^(?:=+\s*)?((?:\d+ (?:passed|failed|skipped|xfailed|xpassed|errors?|deselected|warnings?)(?:, )?)+) in \d+(?:\.\d+)?s(?:\s*=+)?\s*$/gm;
+  const summaries=[...text.matchAll(/^# tests \d+\r?$/gm),...text.matchAll(/^Tests:\s+/gm),...text.matchAll(/^\s*Tests\s+[^\r\n]+\(\d+\)\s*$/gm),...text.matchAll(pytestPattern)];
+  if(summaries.length!==1)return null;
   const total=/^# tests (\d+)\r?$/m.exec(text),passed=/^# pass (\d+)\r?$/m.exec(text),failed=/^# fail (\d+)\r?$/m.exec(text);
   let result:{total:number;passed:number;failed:number}|null=null;
   if(total&&passed&&failed)result={total:Number(total[1]),passed:Number(passed[1]),failed:Number(failed[1])};
   else{
     const jest=/^Tests:\s+([^\r\n]+)$/m.exec(text)?.[1];
     const vitest=/^\s*Tests\s+([^\r\n]+)\((\d+)\)\s*$/m.exec(text);
-    const pytest=/^(?:=+\s*)?((?:\d+ (?:passed|failed|skipped|xfailed|xpassed|errors?|deselected|warnings?)(?:, )?)+) in \d+(?:\.\d+)?s(?:\s*=+)?\s*$/m.exec(text)?.[1];
+    const pytest=pytestPattern.exec(text)?.[1];
     const counts=(summary:string)=>Object.fromEntries([...summary.matchAll(/(\d+) (passed|failed|skipped|xfailed|xpassed|errors?|total)/g)].map(match=>[match[2]!,Number(match[1])]));
     if(jest){const values=counts(jest);if(values.total!==undefined)result={total:values.total,passed:values.passed??0,failed:values.failed??0};}
     else if(vitest){const values=counts(vitest[1]!);result={total:Number(vitest[2]),passed:values.passed??0,failed:values.failed??0};}
@@ -49,9 +69,13 @@ export function recordedOutputFacts(bytes:Buffer,input:AnalysisInput):SessionIns
       if(p.type==='tool_result'&&typeof p.content==='string')results.push({id:p.tool_use_id,text:p.content,event,error:p.is_error===true});
     }
   }
+  // Replayed native rows can share a proven origin. Normalize those occurrences
+  // before pairing, while preserving ambiguity for different origins with one ID.
+  const originals=<T extends {event:number}>(rows:T[]):T[]=>[...new Map(rows.slice().reverse().map(row=>[input.events[row.event]!.origin?.eventId??`${input.snapshotId}/${row.event}`,row])).values()].sort((a,b)=>a.event-b.event);
+  const originalCalls=originals(calls),originalResults=originals(results);
   const callCount=new Map<string,number>(),resultCount=new Map<string,number>();
-  for(const call of calls)callCount.set(call.id,(callCount.get(call.id)??0)+1);
-  for(const result of results)resultCount.set(result.id,(resultCount.get(result.id)??0)+1);
+  for(const call of originalCalls)callCount.set(call.id,(callCount.get(call.id)??0)+1);
+  for(const result of originalResults)resultCount.set(result.id,(resultCount.get(result.id)??0)+1);
   const seen=new Set<string>();
   const citation=(event:number)=>insightCitations(input,[{event,textOffset:0,quote:input.events[event]!.text.slice(0,512)}])[0]!;
   const add=(fact:RecordedFact,value:number,call:Call,result:Result,extra:{added?:number;removed?:number;passed?:number;failed?:number}={})=>{
@@ -61,11 +85,11 @@ export function recordedOutputFacts(bytes:Buffer,input:AnalysisInput):SessionIns
     fact.contributions.push({eventId:origin.eventId,employeeId:origin.employeeId,sourceDate:origin.sourceDate,snapshotId:origin.snapshotId,value,...extra});
   };
   const uncertain=new Set<keyof typeof facts>();
-  for(const call of calls){
+  for(const call of originalCalls){
     const origin=input.events[call.event]!.origin;const identity=origin?.eventId??`${input.snapshotId}/${call.event}`;
     if(seen.has(identity))continue;seen.add(identity);
     if(input.events[call.event]!.context==='historical')continue;
-    const result=callCount.get(call.id)===1&&resultCount.get(call.id)===1?results.find(r=>r.id===call.id):undefined;
+    const result=callCount.get(call.id)===1&&resultCount.get(call.id)===1?originalResults.find(r=>r.id===call.id):undefined;
     const name=call.name?.split('.').at(-1);
     if(!['apply_patch','Edit','Write','Read','exec_command','shell','shell_command','Bash'].includes(name??'')){
       uncertain.add('codeChanges');uncertain.add('tests');uncertain.add('commits');continue;
@@ -82,8 +106,9 @@ export function recordedOutputFacts(bytes:Buffer,input:AnalysisInput):SessionIns
         const patch=call.text.split('\n');added=patch.filter(line=>line.startsWith('+')).length;removed=patch.filter(line=>line.startsWith('-')).length;
         // Delete File omits old bytes; those deleted lines are unknowable from this command.
         if(patch.some(line=>line.startsWith('*** Delete File:')))uncertain.add('codeChanges');
-      }else if(name==='Edit'&&!result.error&&typeof call.args?.old_string==='string'&&typeof call.args.new_string==='string'&&call.args.replace_all!==true&&/successfully|has been updated/i.test(result.text)){
-        added=lines(call.args.new_string);removed=lines(call.args.old_string);
+      }else if(name==='Edit'&&!result.error&&typeof call.args?.old_string==='string'&&typeof call.args.new_string==='string'&&call.args.replace_all!==true&&/^The file [^\r\n]+ has been updated successfully\./m.test(result.text)){
+        const changes=editLines(call.args.old_string,call.args.new_string);
+        if(changes){added=changes.added;removed=changes.removed;}else uncertain.add('codeChanges');
       }else if(name==='Write'&&!result.error&&typeof call.args?.content==='string'&&/^File created successfully at:/i.test(result.text)){
         added=lines(call.args.content);removed=0;
       }else uncertain.add('codeChanges');

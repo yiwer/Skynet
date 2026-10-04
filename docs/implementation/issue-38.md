@@ -20,9 +20,9 @@
 
 ## 原件计数
 
-`recorded-output-2` 只处理已证实归属的接入后原事件，按 `origin.eventId` 去重。每项贡献携带原事件身份、员工、来源日期和源快照，后续跨快照聚合须再次按该身份去重，不能直接相加多个快照的总计。历史上下文不贡献新产出；未知归属不贡献猜测值。支持的原生记录版本为 Codex CLI 0.157.1 / 0.160.0、Claude Code CLI 2.1.281；其他来源或版本保持未知。
+`recorded-output-4` 只处理已证实归属的接入后原事件，按 `origin.eventId` 去重。每项贡献携带原事件身份、员工、来源日期和源快照，后续跨快照聚合须再次按该身份去重，不能直接相加多个快照的总计。历史上下文不贡献新产出；未知归属不贡献猜测值。支持的原生记录版本为 Codex CLI 0.157.1 / 0.160.0、Claude Code CLI 2.1.281；其他来源或版本保持未知。
 
-- 代码变更是原件中成功的 apply_patch 增/删行、Claude Edit 的 old/new 文本行，以及明确“创建文件”的 Write 文本行。Delete File 缺少旧文本、replace_all、覆盖式 Write、缺工具结果等保留未知或已知部分；不把调用意图当成应用成功。
+- 代码变更是原件中成功的 apply_patch 增/删行、Claude Edit 的 old/new 实际行差异，以及明确“创建文件”的 Write 文本行。Edit 用有界 Myers 最短编辑距离排除共同上下文，超过 20,000 总行或 200,000 步保持未知。Delete File 缺少旧文本、replace_all、覆盖式 Write、缺工具结果等保留未知或已知部分；不把调用意图当成应用成功。
 - 测试只从执行工具的原生结果摘要解析：Node TAP `# tests/# pass/# fail`、Jest `Tests:`、Vitest `Tests … (N)`、pytest 终结摘要。只认单个一致摘要；未支持、重复/含糊、缺结果、纯自述不填零。
 - 会话内提交需要直接 git commit 执行记录与匹配的原生提交哈希输出；不是通过 Agent 文本或外部仓库查询推测。
 - 完整且受支持、可确认没有该类记录的范围为已知零。未知行、未闭合末行、关联材料、采集缺口或未知归属使完整性降级。每项保留 `complete`、有限原文引用与完整有界 contribution。超大响应明确拒绝，不静默截断计数。
@@ -43,3 +43,11 @@ node node_modules/tsx/dist/cli.mjs --test tests/session-insights.test.ts tests/n
 ```
 
 本票没有启用生产分析 Worker、读取员工材料或调用千问 PAYG。真实运行时的合成 loopback 验证与真实提供商/试点签收分开记录；部署与远端 Issue 状态由集成流程处理。
+
+### 2026-10-04 验证记录
+
+已合并 `codex/v2` 的 `0044f3a` 基线；合并回归 16/16 通过，包括 Analysis、长会话、队列、Conversation 和 Metrics。最后的原件计数修正后，公开分析测试 4/4 与真实 Claude 测试 1/1 再次通过；`npm run build` 通过。
+
+固定证据位于 `E:/GenCode/Skynet-evidence/v2-2026-10-04/38-analysis/`：`final-tests.log` 是合并回归，`final-public-regression.log` 是最终公开边界回归，`native-stable-layout.log` 是最终真实运行时、OAuth MCP 和 Web 验收。Edit 实际行差异、原事件去重、重复/混合测试摘要各有对应 RED/GREEN 日志。`native-final/insights-native-evidence.json` 保留合成请求、真实 Worker 结果与运行记录。
+
+`native-final/` 包含 320、768、1280 宽度的明暗主题稳定截图及窄屏洞察面板截图。截屏完成有限动画后，测试确认桌面导航在视口内、关闭的窄屏抽屉完全移出视口、页面无外层滚动，并通过区域内部滚动访问窄屏洞察。页面支持键盘折叠和展开。旧的过渡中间帧截图不作为视觉验收依据。

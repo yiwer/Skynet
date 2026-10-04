@@ -97,8 +97,15 @@ test('real isolated Claude transports V2 inferences and recorded output to the i
     for(const width of [320,768,1280])for(const theme of ['light','dark']){
       await page.setViewportSize({width,height:900});await page.evaluate(value=>document.documentElement.dataset.theme=value,theme);
       assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth||document.documentElement.scrollHeight>innerHeight),false,`${width} ${theme} no outer scroll`);
-      await page.screenshot({path:join(sandbox.directory,`insights-${width}-${theme}.png`)});
+      await page.screenshot({path:join(sandbox.directory,`insights-${width}-${theme}.png`),animations:'disabled'});
+      const railBounds=await page.getByLabel('侧边栏',{exact:true}).boundingBox();
+      if(width>=960)assert.ok(railBounds&&railBounds.x>=0&&railBounds.x+railBounds.width<=width,'desktop navigation remains in the viewport after its transition');
+      else assert.ok(railBounds&&railBounds.x+railBounds.width<=0,'closed mobile navigation is fully outside the viewport after its transition');
     }
+    await page.setViewportSize({width:320,height:900});
+    await panel.scrollIntoViewIfNeeded();await expect(panel).toBeInViewport();
+    await page.screenshot({path:join(sandbox.directory,'insights-320-panel.png'),animations:'disabled'});
+    assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth||document.documentElement.scrollHeight>innerHeight),false,'mobile insights scroll within their region');
     console.log(`Session insights native evidence: ${sandbox.directory}`);
   } finally { await client?.close();await browser?.close();await stop(child); fixture.server.closeAllConnections(); await new Promise<void>(resolve => fixture.server.close(() => resolve())); await sandbox.close(); }
 });
