@@ -70,3 +70,23 @@ test('an uploaded source without readable activity is incomplete rather than a z
     await expect(page.getByTestId('assessment-empty')).toHaveText('来源不完整');const nav=page.getByRole('navigation',{name:'画像目录',exact:true});await nav.getByRole('button',{name:'使用数据',exact:true}).click();const usage=page.getByRole('region',{name:'使用数据',exact:true});await expect(usage.getByText('来源不完整',{exact:true})).toBeVisible();await expect(usage.getByLabel('Token 输入',{exact:true})).toContainText('未知');await expect(usage.getByLabel('已验证结果',{exact:true})).toContainText('未知');assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth||document.documentElement.scrollHeight>innerHeight),false);
   }finally{await browser?.close();await s.close();}
 });
+
+
+test('profile total Token labels and chart details agree across touch, pointer and keyboard input', {timeout:120000}, async()=>{
+  const s=await assessmentFixture();let browser:Browser|undefined;
+  try{
+    const person=await s.owner('Measured profile'),item=s.rows({prompts:3});
+    const usage=(item.rows.at(-1) as any).payload.info.total_token_usage;usage.output_tokens=500;usage.total_tokens=1500;
+    const stored=await s.upload(person,item.rows,item.sessionId);await s.analyze(person,stored.snapshotId);
+    const profile=await(await s.api(person,'/api/capability-profiles/'+person.employeeId)).json();assert.equal(profile.kpis.inputTokens,1000);assert.equal(profile.kpis.outputTokens,500);assert.equal(profile.sessions[0].tokens,1500);assert.equal(profile.sessions[0].efficiency.denominator,1500);
+    browser=await chromium.launch();const touch=await browser.newPage({ignoreHTTPSErrors:true,viewport:{width:320,height:900},hasTouch:true,isMobile:true});
+    const visit=async(page:import('@playwright/test').Page)=>{await page.goto(s.origin+'/#profile?'+new URLSearchParams({employeeId:person.employeeId,profileVersion:profile.version}));await page.getByLabel('个人读取凭据').fill(person.readerCredential);await page.getByRole('button',{name:'进入存档',exact:true}).click();await expect(page.getByRole('navigation',{name:'画像目录',exact:true})).toBeVisible();};await visit(touch);
+    const table=touch.getByRole('table',{name:'画像会话',exact:true}),region=touch.getByRole('region',{name:'每日 Token 输入',exact:true}),detail=region.getByRole('button',{name:'每日 Token 输入详情',exact:true});await detail.scrollIntoViewIfNeeded();await detail.tap();
+    const observed={header:await table.locator('thead th').nth(2).innerText(),firstTap:await region.getByRole('tooltip').isVisible()};assert.deepEqual(observed,{header:'Token 合计',firstTap:true});
+    await expect(table.locator('tbody tr').first().locator('td').nth(1)).toHaveText('1,500');
+    await detail.scrollIntoViewIfNeeded();await detail.tap();await expect(region.getByRole('tooltip')).toHaveCount(0);await detail.tap();await expect(region.getByRole('tooltip')).toContainText('1,000');await touch.keyboard.press('Escape');await expect(region.getByRole('tooltip')).toHaveCount(0);
+    const agents=touch.getByRole('region',{name:'Agent 分布',exact:true}),agent=agents.getByRole('button',{name:/Codex CLI/});await agent.tap();await expect(agents.getByRole('tooltip')).toBeVisible();await agent.tap();await expect(agents.getByRole('tooltip')).toHaveCount(0);await touch.getByText('会话指标口径',{exact:true}).click();await expect(touch.locator('.profile-formula')).toContainText('Token 合计（输入 + 输出）');
+    const mouse=await browser.newPage({ignoreHTTPSErrors:true,viewport:{width:1280,height:900}});await visit(mouse);const mouseRegion=mouse.getByRole('region',{name:'每日 Token 输入',exact:true}),mouseDetail=mouseRegion.getByRole('button',{name:'每日 Token 输入详情',exact:true});
+    await mouseDetail.hover();await expect(mouseRegion.getByRole('tooltip')).toBeVisible();await mouseDetail.click();await expect(mouseRegion.getByRole('tooltip')).toBeVisible();await mouseDetail.click();await expect(mouseRegion.getByRole('tooltip')).toHaveCount(0);await mouse.mouse.move(0,0);await mouseDetail.blur();await mouseDetail.focus();await expect(mouseRegion.getByRole('tooltip')).toBeVisible();await mouse.keyboard.press('Escape');await expect(mouseRegion.getByRole('tooltip')).toHaveCount(0);await mouse.keyboard.press('Enter');await expect(mouseRegion.getByRole('tooltip')).toBeVisible();await mouse.keyboard.press('Space');await expect(mouseRegion.getByRole('tooltip')).toHaveCount(0);
+  }finally{await browser?.close();await s.close();}
+});
