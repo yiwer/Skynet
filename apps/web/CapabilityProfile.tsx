@@ -1,0 +1,61 @@
+import { useEffect, useState } from 'react';
+import type { CapabilityProfilePage, profileSections } from '../../packages/contracts/capability-profile.js';
+import type { OutputAmount } from '../../packages/contracts/usage-output.js';
+import { sourceLabel } from '../../packages/contracts/archive.js';
+import { taskTypeLabels } from '../../packages/contracts/session-insights.js';
+import { CapabilityAssessment } from './CapabilityAssessment.js';
+import type { AppendNote } from './ReviewNotes.js';
+import './capability-profile.css';
+
+type Request=(path:string,signal?:AbortSignal)=>Promise<Response>;
+type Section=typeof profileSections[number];
+const current=()=>new URLSearchParams(location.hash.split('?')[1]);
+const num=(n:number|null|undefined)=>n==null?'未知':n.toLocaleString('zh-CN');
+const time=(s:string|null)=>s?new Date(s).toLocaleString('zh-CN',{timeZone:'Asia/Shanghai',hour12:false}):'未知';
+function Amount({value}:{value:OutputAmount}){return <>{value.value===null?value.known?`${num(value.known)} + 未知`:'未知':num(value.value)}</>;}
+function jump(id:string){const element=document.getElementById(id);element?.focus({preventScroll:true});element?.scrollIntoView({block:'start',behavior:matchMedia('(prefers-reduced-motion: reduce)').matches?'instant':'smooth'});}
+function Distribution({label,values}:{label:string;values:{label:string;value:number}[]}){
+  const [table,setTable]=useState(false),[tip,setTip]=useState<string>(),max=Math.max(1,...values.map(row=>row.value));
+  return <section className="profile-distribution" aria-label={label} onKeyDown={event=>{if(event.key==='Escape')setTip(undefined);}}><header><h3>{label}</h3><button aria-label={label+'表格'} aria-pressed={table} onClick={()=>setTable(!table)}>{table?'图表':'表格'}</button></header>
+    {table?<div className="profile-table"><table aria-label={label}><thead><tr><th>{label==='Agent 分布'?'Agent':'任务类型'}</th><th>会话</th></tr></thead><tbody>{values.map(row=><tr key={row.label}><th>{row.label}</th><td>{row.value}</td></tr>)}</tbody></table></div>:values.length?<div className="profile-bars">{values.map(row=><button key={row.label} onFocus={()=>setTip(row.label)} onBlur={()=>setTip(undefined)} onMouseEnter={()=>setTip(row.label)} onMouseLeave={()=>setTip(undefined)} onClick={()=>setTip(tip===row.label?undefined:row.label)}><span>{row.label}</span><i aria-hidden="true"><b style={{width:row.value/max*100+'%'}}/></i><strong>{row.value}</strong></button>)}{tip&&<p role="tooltip">{tip} · {values.find(row=>row.label===tip)?.value} 个会话</p>}</div>:<p className="profile-empty">暂无会话</p>}
+  </section>;
+}
+function DailyChart({label,points}:{label:string;points:{date:string;value:number|null}[]}){
+  const [open,setOpen]=useState(false),max=Math.max(1,...points.map(day=>day.value??0)),width=240/Math.max(1,points.length);
+  return <section className="profile-daily-chart" aria-label={label} onKeyDown={e=>{if(e.key==='Escape')setOpen(false);}}><header><h3>{label}</h3><button aria-label={label+'详情'} onFocus={()=>setOpen(true)} onBlur={()=>setOpen(false)} onMouseEnter={()=>setOpen(true)} onMouseLeave={()=>setOpen(false)} onClick={()=>setOpen(!open)}>详情</button></header><svg viewBox="0 0 240 72" aria-hidden="true">{points.map((day,index)=>day.value===null?<path key={day.date} d={`M${index*width+width/2-2},65l4,4m-4,0l4,-4`}/>:<rect key={day.date} x={index*width+1} y={66-day.value/max*60} width={Math.max(1,width-2)} height={Math.max(1,day.value/max*60)}/>)}</svg><div className="profile-chart-dates"><span>{points[0]?.date.slice(5)}</span><span>{points.at(-1)?.date.slice(5)}</span></div>{open&&<div role="tooltip" className="profile-chart-tooltip">{points.map(day=><span key={day.date}>{day.date} · {num(day.value)}</span>)}</div>}</section>;
+}
+function Usage({profile,more,busy}:{profile:CapabilityProfilePage;more:(section:Section)=>void;busy:boolean}){
+  const [table,setTable]=useState(false),k=profile.kpis,daily=profile.usage.daily;
+  return <section id="profile-usage" tabIndex={-1} className="profile-section" aria-label="使用数据"><h2>使用数据</h2><div className="profile-kpis">
+    <article aria-label="活跃天数"><span>活跃天数</span><strong>{k.activeDays}</strong><small>{profile.assessment.sample.workdays} 个工作日</small></article>
+    <article aria-label="会话与提示词"><span>会话 · 提示词</span><strong>{k.sessions}</strong><small>{k.userTurns} 条提示词 · {k.toolCalls} 次工具调用</small></article>
+    <article><span>Token 输入</span><strong>{k.inputTokens===null&&!k.knownInputTokens?'未知':num(k.knownInputTokens)}</strong>{k.unknownInputSessions>0&&<small>{k.unknownInputSessions} 个会话未知</small>}</article>
+    <article><span>已验证结果 <em>模型推断</em></span><strong><Amount value={k.outputs.verified}/></strong><small>仅声称 <Amount value={k.outputs.claimed}/></small></article>
+    <article><span>代码变更</span><strong><Amount value={k.outputs.codeChanges}/></strong><small>+{k.outputs.codeChanges.added} / −{k.outputs.codeChanges.removed} 行</small><small>提交 <Amount value={k.outputs.commits}/> · 测试 {k.outputs.tests.passed} / {k.outputs.tests.passed+k.outputs.tests.failed}</small></article>
+  </div><div role="group" aria-label="每日趋势"><header className="profile-section-heading"><h3>每日使用</h3><button aria-label="每日趋势表格" aria-pressed={table} onClick={()=>setTable(!table)}>{table?'图表':'表格'}</button></header>{table?<div className="profile-table"><table aria-label="每日使用数据"><thead><tr><th>日期</th><th>会话</th><th>Token 输入</th><th>未知 Token 会话</th><th>已验证结果 · 模型推断</th></tr></thead><tbody>{daily.map(day=><tr key={day.date}><th>{day.date}</th><td>{day.activeSessions}</td><td>{day.inputTokens??'未知'}</td><td>{day.excludedSessions}</td><td>{day.outputs?<Amount value={day.outputs.verified}/>:'未知'}</td></tr>)}</tbody></table></div>:<div className="profile-daily"><DailyChart label="每日会话" points={daily.map(day=>({date:day.date,value:day.activeSessions}))}/><DailyChart label="每日 Token 输入" points={daily.map(day=>({date:day.date,value:day.inputTokens}))}/><DailyChart label="每日已验证结果" points={daily.map(day=>({date:day.date,value:day.outputs?.verified.value??null}))}/></div>}{profile.pages.daily.nextOffset!==null&&<button disabled={busy} onClick={()=>more('daily')}>更多日期</button>}</div>
+    <div className="profile-distributions"><Distribution label="Agent 分布" values={profile.usage.agents.map(row=>({label:sourceLabel(row.source),value:row.sessions}))}/><Distribution label="任务类型" values={profile.taskDistribution.map(row=>({label:taskTypeLabels[row.taskType],value:row.sessions}))}/></div>
+  </section>;
+}
+export function CapabilityProfile({request,currentEmployeeId,appendNote}:{request:Request;currentEmployeeId:string;appendNote?:AppendNote}){
+  const [query,setQuery]=useState(current),[data,setData]=useState<CapabilityProfilePage>(),[error,setError]=useState(''),[fallback,setFallback]=useState(false),[retry,setRetry]=useState(0),[paging,setPaging]=useState(false);
+  const employeeId=query.get('employeeId')??currentEmployeeId,version=query.get('profileVersion'),assessmentVersion=query.get('version'),period=query.get('period'),preset=query.get('preset');
+  useEffect(()=>{const change=()=>setQuery(current());window.addEventListener('hashchange',change);return()=>window.removeEventListener('hashchange',change);},[]);
+  useEffect(()=>{
+    const abort=new AbortController();setData(undefined);setError('');setFallback(false);
+    const params=new URLSearchParams({...version?{version}:{},...assessmentVersion?{assessmentVersion}:{},...period?{period}:{},...preset?{preset}:{}});
+    request('/api/capability-profiles/'+employeeId+'?'+params,abort.signal).then(r=>r.json()).then((value:CapabilityProfilePage)=>{if(abort.signal.aborted)return;setData(value);const fixed=current();fixed.set('employeeId',employeeId);fixed.set('profileVersion',value.version);fixed.set('version',value.assessment.version);fixed.set('period',value.assessment.selection?.period??'since-enrollment');fixed.set('preset',value.assessment.preset);history.replaceState(history.state,'','#profile?'+fixed);})
+      .catch(e=>{if(abort.signal.aborted)return;if(!version&&assessmentVersion&&e.status===409&&/历史评估尚无完整画像/.test(e.message))setFallback(true);else setError(e.message);});
+    return()=>abort.abort();
+  },[employeeId,version,assessmentVersion,period,preset,retry]);
+  async function download(){if(!data)return;try{const response=await request('/api/capability-profiles/'+employeeId+'/export?version='+data.version),url=URL.createObjectURL(await response.blob()),a=document.createElement('a');a.href=url;a.download='profile-'+data.version+'.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);}catch(e){setError((e as Error).message);}}
+  async function more(section:Section){if(!data||paging)return;const offset=data.pages[section].nextOffset;if(offset===null)return;const origin=data;setPaging(true);try{const value:CapabilityProfilePage=await(await request('/api/capability-profiles/'+employeeId+'?'+new URLSearchParams({version:origin.version,section,offset:String(offset)}))).json();if(value.version!==origin.version)throw new Error('画像版本不一致');setData(previous=>{if(previous?.version!==origin.version)return previous;const next={...previous,pages:{...previous.pages,[section]:value.pages[section]}};if(section==='daily')next.usage={...previous.usage,daily:[...previous.usage.daily,...value.usage.daily]};if(section==='devices')next.header={...previous.header,devices:[...previous.header.devices,...value.header.devices]};if(section==='sessions')next.sessions=[...previous.sessions,...value.sessions];if(section==='work')next.work={...previous.work,items:[...previous.work.items,...value.work.items]};if(section==='reports')next.work={...previous.work,reports:[...previous.work.reports,...value.work.reports]};if(section==='activity')next.recentActivity={...previous.recentActivity,events:[...previous.recentActivity.events,...value.recentActivity.events]};return next;});}catch(e){setError((e as Error).message);}finally{setPaging(false);}}
+  if(fallback)return <CapabilityAssessment request={request} currentEmployeeId={currentEmployeeId} appendNote={appendNote} additions={{metadata:<p className="profile-fallback" role="status">此版本仅保存了评估。</p>}}/>;
+  if(!data)return <section className="assessment-page"><h1>员工画像</h1>{error?<><p role="alert">{error}</p><button onClick={()=>setRetry(n=>n+1)}>重试</button></>:<p role="status">正在读取画像…</p>}</section>;
+  return <CapabilityAssessment key={employeeId} request={request} currentEmployeeId={currentEmployeeId} appendNote={appendNote} frozen={data.assessment} additions={{
+    metadata:<section className="profile-metadata" aria-label="接入信息"><span>{data.header.deviceCount} 台设备</span><span>接入 {time(data.header.enrolledAt)}</span><span>最近同步 {time(data.header.lastSyncedAt)}</span></section>,
+    actions:<button onClick={download}>导出画像</button>,onRefresh:()=>{setQuery(current());setRetry(n=>n+1);},
+    navigation:<nav className="profile-nav" aria-label="画像目录">{[['verdict','结论'],['dimensions','能力维度'],['usage','使用数据'],['notes','复核备注']].map(([id,label])=><button key={id} onClick={()=>jump('profile-'+id)}>{label}</button>)}</nav>,
+    details:<><details className="profile-devices"><summary>设备 · {data.header.deviceCount}</summary><div className="profile-table"><table aria-label="设备同步"><thead><tr><th>设备</th><th>状态</th><th>接入</th><th>最近同步</th></tr></thead><tbody>{data.header.devices.map(device=><tr key={device.id}><th>{device.name}</th><td>{device.active?'启用':'停用'}</td><td>{time(device.enrolledAt)}</td><td>{time(device.lastSyncedAt)}</td></tr>)}</tbody></table></div>{data.pages.devices.nextOffset!==null&&<button disabled={paging} onClick={()=>more('devices')}>更多设备</button>}</details>{error&&<p role="alert">{error}</p>}</>,
+    content:<Usage profile={data} more={more} busy={paging}/>,
+  }}/>;
+}
