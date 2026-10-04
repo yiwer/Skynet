@@ -162,18 +162,24 @@ export async function assignOrigins(q: Query, raw: RawStore, record: Record, bac
   return provenance;
 }
 
-export async function eventOrigins(q: Query, snapshotId: string, materialId?: string) {
-  const rows = await q.query(`SELECT s.line,s.block,o.event_id AS "eventId",o.snapshot_id AS "snapshotId",o.line AS "originLine",o.block AS "originBlock",
+export async function eventOriginsBatch(q: Query, snapshotIds: string[], materialId?: string) {
+  const result=new Map<string,(EventOrigin&{originLine:number;originBlock:number})[]>(snapshotIds.map(id=>[id,[]]));
+  if(!snapshotIds.length)return result;
+  const rows = await q.query(`SELECT s.snapshot_id AS carrier,s.line,s.block,o.event_id AS "eventId",o.snapshot_id AS "snapshotId",o.line AS "originLine",o.block AS "originBlock",
     o.employee_id AS "employeeId",e.name AS employee,o.device_id AS "deviceId",o.project,o.context,o.source_date AS "sourceDate",o.material_id AS "materialId",o.text_offset AS "textOffset",
     CASE WHEN o.qualification_revision>0 THEN jsonb_build_object('revision',o.qualification_revision::text,'proofSnapshotId',o.proof_snapshot_id,
       'proofLine',o.proof_line,'proofBlock',o.proof_block,'enrolledAt',o.proof_enrolled_at) ELSE NULL END AS qualification
     FROM ${materialId ? 'material_events' : 'effective_snapshot_events'} s JOIN effective_event_origins o ON o.event_id=s.event_id JOIN employees e ON e.id=o.employee_id
-    WHERE s.snapshot_id=$1 ${materialId ? 'AND s.material_id=$2' : ''} ORDER BY s.line,s.block`, materialId ? [snapshotId, materialId] : [snapshotId]);
+    WHERE s.snapshot_id=ANY($1::uuid[]) ${materialId ? 'AND s.material_id=$2' : ''} ORDER BY s.snapshot_id,s.line,s.block`, materialId ? [snapshotIds, materialId] : [snapshotIds]);
   // Location in this snapshot is distinct from the original location of the event.
-  return (rows.rows as (EventOrigin & { originLine: number; originBlock: number })[]).map(row => {
+  for (const {carrier,...row} of rows.rows as (EventOrigin & { carrier:string;originLine: number; originBlock: number })[]) {
     const original = locatedOrigin({ ...row, line: row.originLine, block: row.originBlock });
-    return { ...original, line: row.line, block: row.block };
-  });
+    result.get(carrier)!.push({ ...original, line: row.line, block: row.block,originLine:row.originLine,originBlock:row.originBlock });
+  }
+  return result;
+}
+export async function eventOrigins(q: Query, snapshotId: string, materialId?: string) {
+  return (await eventOriginsBatch(q,[snapshotId],materialId)).get(snapshotId)!;
 }
 
 export async function backfillOrigins(db: Database, raw: RawStore) {
