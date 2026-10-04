@@ -69,7 +69,10 @@ export function sessionEfficiencyService(db:Database,usage:ReturnType<typeof usa
       return[{taskType,count:values.length,unknownCount:members.length-values.length,median:quantile(values,.5),minimum:values.length?Math.min(...values):null,maximum:values.length?Math.max(...values):null,points:[...points].sort((a,b)=>a[0]-b[0]).map(([value,count])=>({value,count}))}];});
     const content={algorithmVersion,usageVersion:source.version,metricVersion:source.metricVersion,scope:source.scope,createdAt:source.createdAt,dataAsOf:timingAsOf&&timingAsOf>source.dataAsOf?timingAsOf:source.dataAsOf,
       total:sessions.length,reviewCount:sessions.filter(row=>row.reviewReasons.length).length,tokenP75,sessions,distributions,nextOffset:null,filteredTotal:sessions.length,definition};
-    const version=digest(JSON.stringify(content)),value:SessionEfficiencyPage={version,...content};
+    // PostgreSQL jsonb and a fresh projection can order object keys differently.
+    // Their identical semantic content must retain the same public revision.
+    const version=digest(JSON.stringify(content,(_key,value)=>value&&typeof value==='object'&&!Array.isArray(value)
+      ?Object.fromEntries(Object.entries(value).sort(([a],[b])=>a.localeCompare(b))):value)),value:SessionEfficiencyPage={version,...content};
     if(Buffer.byteLength(JSON.stringify(value))>16*1024*1024)throw new HttpError(413,'会话产效导出超过范围上限');
     await db.query('INSERT INTO session_efficiency_revisions(version,request,payload) VALUES($1,$2,$3) ON CONFLICT DO NOTHING',[version,request,value]);return{q,value};
   }
