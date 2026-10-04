@@ -13,6 +13,7 @@ import { metricInputBatch, type MetricInputFacts } from './metric-inputs.js';
 import { attributionRevisions } from './qualification.js';
 
 const catalogVersion = `recorded-metrics-3/${statisticsExtractorVersion}`;
+const employeeNames = new Intl.Collator('zh-CN');
 const definition = '仅统计已验证原件中接入后、按北京时间来源日期归期的活动。eventId 去重；已验证服务器恢复链归为同一会话，未确认副本保持独立。员工和项目沿用每条活动的原始归属。会话数为所选范围内有业务事件的去重会话数，跨日或多人参与的会话不可直接相加；仅有原生 Token 记录的日期保留用量，不增加会话、轮次或调用。轮次、调用和已知 Token 可相加。Token 未知单列，不当作零或参加比值。';
 const limits = { snapshots: 20000, events: 100000, rawBytes: 128 * 1024 * 1024, sessions: 10000, exportBytes: 16 * 1024 * 1024 };
 const bounded = () => new HttpError(413, '指标范围超过单次计算上限，请缩小日期、员工或项目范围；未返回截断汇总');
@@ -98,7 +99,7 @@ function summarize(slices: Slice[]): SessionMetrics[] {
       unknownReasons: [...new Set([...reasons, ...(values.some(value => !value) ? ['用量基线或重复记录存在未知/冲突'] : []),
         ...(values.some(value => value && value.input === null) ? ['输入 Token 的原生分项不齐全'] : []),
         ...(values.some(value => value && value.output === null) ? ['输出 Token 未上报'] : [])])] };
-  }).sort((a, b) => a.employee.localeCompare(b.employee, 'zh-CN') || a.employeeId.localeCompare(b.employeeId)
+  }).sort((a, b) => employeeNames.compare(a.employee, b.employee) || a.employeeId.localeCompare(b.employeeId)
     || a.sessionId.localeCompare(b.sessionId) || a.project.localeCompare(b.project));
 }
 
@@ -257,8 +258,21 @@ export function metricsService(db: Database, raw: RawStore, clock: () => Date = 
         else if(valid)valid=firstNative.get(nativeKey(record.device_id,record.source,record.source_session_id))===record.id&&(!capture||capture.change==='initial');
         baselineProofs.set(record.id,valid);return valid;
       }
-      let totalBytes = 0; const rawInputs: unknown[] = [];
+      let totalBytes = candidates.reduce((sum, record) => sum + record.manifest.byteLength, 0);
+      if (totalBytes > limits.rawBytes) throw bounded();
+      const rawInputs: unknown[] = [];
       const rawBuffers = new Map<string, Buffer>();
+      // Fresh verification belongs to this request. Bound filesystem work while
+      // keeping each original's failure separate and processing facts in order.
+      const originals = new Map<string, { content: Buffer } | { error: unknown }>();
+      let nextOriginal = 0;
+      await Promise.all(Array.from({ length: Math.min(4, candidates.length) }, async () => {
+        while (nextOriginal < candidates.length) {
+          const record = candidates[nextOriginal++]!;
+          try { originals.set(record.id, { content: await raw.read(record.device_id, record.hash) }); }
+          catch (error) { originals.set(record.id, { error }); }
+        }
+      }));
       const materialized = new Map<string, MetricInputFacts>();
       const inputBatch = await metricInputBatch(client, candidates.map(record => ({ snapshotId: record.id, attributionRevision: record.attribution_revision,
         hash: record.hash, source: record.source, sourceVersion: record.manifest.sourceVersion, manifest: record.manifest, baselineContinuity: baselineContinuity(record) })), full);
@@ -279,11 +293,12 @@ export function metricsService(db: Database, raw: RawStore, clock: () => Date = 
         const relevant = sliceGroups.get(groupKey) ?? [];
         const ownerSelected = (!q.employeeId || record.employee_id === q.employeeId) && (!q.source || record.source === q.source)
           && (q.project === undefined || record.manifest.project === q.project);
-        totalBytes += record.manifest.byteLength; if (totalBytes > limits.rawBytes) throw bounded();
         rawInputs.push([record.id, record.hash, record.manifest.sourceVersion, record.enrolled_at?.toISOString(), record.provenance]);
         let parsed: MetricInputFacts, content: Buffer;
         try {
-          content = await raw.read(record.device_id, record.hash);
+          const original = originals.get(record.id)!;
+          if ('error' in original) throw original.error;
+          content = original.content;
           parsed = inputBatch.read({ snapshotId: record.id, attributionRevision: record.attribution_revision,
             bytes: content, hash: record.hash, source: record.source, sourceVersion: record.manifest.sourceVersion, manifest: record.manifest, baselineContinuity: baselineContinuity(record) });
         }
@@ -398,7 +413,7 @@ export function metricsService(db: Database, raw: RawStore, clock: () => Date = 
       const byEmployee = new Map<string, SessionMetrics[]>();
       for (const session of sessions) byEmployee.set(session.employeeId, [...byEmployee.get(session.employeeId) ?? [], session]);
       let employees: MetricsPage['employees'] = [...new Map(sessions.map(s => [s.employeeId, s.employee])).entries()]
-        .sort((a, b) => a[1].localeCompare(b[1], 'zh-CN') || a[0].localeCompare(b[0]))
+        .sort((a, b) => employeeNames.compare(a[1], b[1]) || a[0].localeCompare(b[0]))
         .map(([employeeId, employee]) => ({ employeeId, employee, ...total(byEmployee.get(employeeId)!) }));
       const sources = [...new Set(sessions.map(s => s.source))].sort().map(source => ({ source, ...total(sessions.filter(s => s.source === source)) }));
       const unscoped = (await client.query(`SELECT s.id,s.employee_id,s.committed_at,p.complete,p.revision FROM (
@@ -418,7 +433,7 @@ export function metricsService(db: Database, raw: RawStore, clock: () => Date = 
         const unknownReasons = [...new Set([...mine.flatMap(row => row.unknownReasons), ...failures.map(row => row.reason), ...(unresolved.length ? ['存在来源日期不能确定的原件缺口，范围完整性未知'] : [])])].sort();
         return { ...employee, ...(unscopedSources ? { inputTokens: null, outputTokens: null } : {}), unscopedSources,
           sourceInputsComplete: !unscopedSources && mine.every(row => row.sourceInputsComplete), unknownReasons };
-      }).sort((a, b) => a.employee.localeCompare(b.employee, 'zh-CN') || a.employeeId.localeCompare(b.employeeId));
+      }).sort((a, b) => employeeNames.compare(a.employee, b.employee) || a.employeeId.localeCompare(b.employeeId));
       const unknownReasons = [...new Set([...sessions.flatMap(s => s.unknownReasons), ...discoveryGaps, ...(unscoped.length ? ['存在来源日期不能确定的原件缺口，范围完整性未知'] : [])])].sort();
       const dataAsOf = new Date(Math.max(0, ...candidates.map(s => s.committed_at.getTime()), ...unscoped.map(s => (s.committed_at as Date).getTime()))).toISOString();
       const inputVersion = digest(JSON.stringify([events, rawInputs, unscoped]));

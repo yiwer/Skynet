@@ -136,7 +136,12 @@ test('material-first → original normal source qualification versions activity 
       });assert.equal(await queue.finish(claim,result),true);
     }
     for(let i=0;i<4;i++){await db.query("UPDATE analysis_workers SET updated_at=now() WHERE id='qualification-test'");const claim=await queue.claim();if(!claim)break;await finish(claim);}
-    const currentReport=await(await api(`/api/daily-reports/${A.employeeId}/${date}`,undefined,json({}))).json();assert.equal(currentReport.statistics.records,1);assert.ok(currentReport.revision>beforeReport.revision);assert.ok(currentReport.items.some((item:any)=>item.activityEventIds.includes(initialIds[1])));
+    let currentReport=await(await api(`/api/daily-reports/${A.employeeId}/${date}`,undefined,json({}))).json();
+    // Refresh is a public 202 operation. A competing scheduled refresh may keep
+    // the prior revision visible until the newly applicable analysis is consumed.
+    const analysisDeadline=Date.now()+12000;
+    while(currentReport.refreshPending&&Date.now()<analysisDeadline){await new Promise(resolve=>setTimeout(resolve,200));currentReport=await(await api(`/api/daily-reports/${A.employeeId}/${date}`)).json();}
+    assert.equal(currentReport.refreshPending,false);assert.equal(currentReport.statistics.records,1);assert.ok(currentReport.revision>beforeReport.revision);assert.ok(currentReport.items.some((item:any)=>item.activityEventIds.includes(initialIds[1])));
     assert.deepEqual(await(await api(`/api/daily-reports/${A.employeeId}/${date}?revision=${beforeReport.revision}`)).json(),frozenReport);
     let project:WorkView=await(await api(projectPath)).json();let weekly:WorkView=await(await api(weekPath)).json();
     const viewDeadline=Date.now()+15000;

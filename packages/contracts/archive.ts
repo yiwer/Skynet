@@ -39,8 +39,9 @@ export const appendSnapshotSchema = z.object({
   appendHash: hashSchema, appendByteLength: z.number().int().min(1).max(MAX_ARTIFACT_BYTES),
 }).strict();
 
+const sourceTimestampSchema = z.iso.datetime({ offset: true });
 export function sourceTimestamp(value: unknown): string | null {
-  const parsed = z.iso.datetime({ offset: true }).safeParse(value);
+  const parsed = sourceTimestampSchema.safeParse(value);
   return parsed.success ? parsed.data : null;
 }
 
