@@ -8,7 +8,8 @@ import { HistoryMaterials } from './HistoryMaterials.js';
 import { SessionAnalysis } from './SessionAnalysis.js';
 import { SessionInsights } from './SessionInsights.js';
 import { QualificationProof } from './QualificationProof.js';
-import { ConversationReader, conversationSelection } from './ConversationReader.js';
+import { ConversationReader, conversationSelection, conversationTitle } from './ConversationReader.js';
+import type { ConversationPage } from '../../packages/contracts/conversation.js';
 import { EvidenceReader } from './EvidenceReader.js';
 import type { selectedEvidence } from './EvidenceReader.js';
 import type { MetricTotals } from '../../packages/contracts/metrics.js';
@@ -18,7 +19,7 @@ export type Detail = { snapshotId:string; employee:string; manifest:Manifest; co
  recovery:{nativeRuntimeVersion:string|null; preparation:string; nativeBackend:string; limitation:string} };
 const date=(value:string)=>new Date(value).toLocaleString('zh-CN',{timeZone:'Asia/Shanghai',hour12:false});
 const contextLabel:Record<ActivityContext,string>={historical:'历史上下文','after-enrollment':'接入后活动','unknown-time':'来源时间未知','unknown-enrollment':'接入边界未知'};
-type Props={detail:Detail;reading:'conversation'|'timeline'|'raw'; conversationHash:string;refresh:number;offset:number;
+type Props={detail:Detail;reading:'conversation'|'timeline'|'raw'; conversationHash:string;refresh:number;offset:number;title?:string;onTitle:(title:string)=>void;
  evidenceLocation:ReturnType<typeof selectedEvidence>;setOffset:(value:number|((old:number)=>number))=>void;
  request:(path:string,signal?:AbortSignal,method?:'POST',body?:unknown)=>Promise<Response>;
  download:(kind:'raw'|'readable'|'recovery')=>Promise<void>;exporting:boolean;exportStatus:string;exportError:string};
@@ -30,11 +31,18 @@ function SessionFacts({snapshotId,request}:{snapshotId:string;request:Props['req
  if(!rows.length&&!error)return null;
  return <section className="session-facts"><h2>会话数据</h2><dl>{rows.map(([label,n])=><div key={label}><dt>{label}</dt><dd>{n.toLocaleString('zh-CN')}</dd></div>)}</dl>{error&&<p role="alert">数据读取失败</p>}</section>;
 }
-export function SessionDetail({detail,reading,conversationHash,refresh,offset,evidenceLocation,setOffset,request,download,exporting,exportStatus,exportError}:Props){
+export function SessionDetail({detail,reading,conversationHash,refresh,offset,evidenceLocation,setOffset,request,download,exporting,exportStatus,exportError,title,onTitle}:Props){
  const selected=detail.snapshotId;
- const [title,setTitle]=useState('');
  const [analysisRefresh,setAnalysisRefresh]=useState(0);
- useEffect(()=>{setTitle('');},[selected]);
+ const anchored=!!conversationSelection(conversationHash).anchor;
+ useEffect(()=>{
+   if(title||reading==='conversation'&&!anchored)return;
+   const abort=new AbortController();
+   request(`/api/snapshots/${selected}/conversation?includeTools=false&includeContext=false`,abort.signal)
+     .then(response=>response.json()).then((page:ConversationPage)=>{const first=conversationTitle(page);if(!abort.signal.aborted&&first)onTitle(first);})
+     .catch(()=>{/* Original evidence remains readable when a title cannot be resolved. */});
+   return()=>abort.abort();
+ },[selected,reading,anchored,!!title]);
  useEffect(()=>{if(new URLSearchParams(conversationHash.split('?')[1]).get('recover')==='true')document.getElementById('session-recovery')?.scrollIntoView({block:'start'});},[conversationHash]);
  const heading=detail.manifest.project.replaceAll('\\','/').split('/').filter(Boolean).at(-1)||'未归类项目';
  const navigation:ReactNode=<nav className="reading-nav" aria-label="会话阅读方式">{([['conversation','对话视图'],['timeline','时间线'],['raw','原件 JSONL']] as const).map(([mode,label])=><a key={mode} aria-label={label} href={'#'+selected+'?view='+mode} aria-current={reading===mode?'page':undefined}>{mode==='conversation'?'对话':label}</a>)}</nav>;
@@ -42,7 +50,7 @@ export function SessionDetail({detail,reading,conversationHash,refresh,offset,ev
  <div className="session-page-heading"><nav className="session-crumbs" aria-label="位置"><a href="#sessions">会话</a><span>/</span><span className="hash">{detail.manifest.sourceSessionId}</span></nav><div className="session-title-row"><div><h1>{title||heading}</h1><p>{detail.employee} · {heading} · {sourceLabel(detail.manifest.source)} · {detail.activity.sourceFrom?date(detail.activity.sourceFrom):'来源时间未知'}</p></div><a className="session-recover-button" href={'#recovery?snapshot='+selected}>找回此会话</a></div></div>
  <div className="session-meta"><span>{detail.total} 条记录</span><span>{detail.manifest.byteLength.toLocaleString()} 字节</span></div>
  <div className="session-columns"><section className="session-reading" data-scroll-region="conversation" aria-label="会话内容">
- {reading==='conversation'?<ConversationReader key={selected+':'+conversationHash+':'+refresh} snapshotId={selected} initial={conversationSelection(conversationHash)} request={request} navigation={navigation} onTitle={setTitle}/>:navigation}
+ {reading==='conversation'?<ConversationReader key={selected+':'+conversationHash+':'+refresh} snapshotId={selected} initial={conversationSelection(conversationHash)} request={request} navigation={navigation} onTitle={onTitle}/>:navigation}
  {reading==='raw'&&<EvidenceReader key={'raw:'+selected+':'+refresh} snapshotId={selected} location={{kind:'raw',line:1,textOffset:0}} request={request}/>}
  {reading==='timeline'&&evidenceLocation&&<EvidenceReader key={selected+':'+JSON.stringify(evidenceLocation)+':'+refresh} snapshotId={selected} location={evidenceLocation} request={request}/>}
           {reading === 'timeline' && <>
