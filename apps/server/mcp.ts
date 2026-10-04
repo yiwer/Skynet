@@ -32,11 +32,14 @@ import { assessmentQuery } from '../../packages/contracts/assessment.js';
 import type { usageOutputService } from './usage-output.js';
 import type {promptReportService} from './prompt-report.js';
 import {promptReportQuerySchema} from '../../packages/contracts/prompt-report.js';
+import { reviewNotesService } from './review-notes.js';
+import { reviewNotesQuery } from '../../packages/contracts/review-notes.js';
 
 import type { activityService } from './activity.js';
 import { activityQuerySchema } from '../../packages/contracts/activity.js';
 export async function registerMcp(app: FastifyInstance, db: Database, archive: ArchiveQuery, publicOrigin: string, analysis: AnalysisService, reports: ReportService, coverage: CoverageService, workStatistics: WorkStatisticsService, workViews: WorkViewService,operations:ServerOperationsService, conversation: ReturnType<typeof conversationQuery>, metrics: ReturnType<typeof metricsService>, assembly: ReturnType<typeof assemblyService>, processing: ReturnType<typeof processingService>, insights:ReturnType<typeof sessionInsightsService>, waits:ReturnType<typeof waitsService>, usage:ReturnType<typeof usageOutputService>, waitReport:ReturnType<typeof waitReportService>, prompts:ReturnType<typeof promptReportService>, activity:ReturnType<typeof activityService>, assessments: ReturnType<typeof assessmentService>) {
   const { guard } = await registerMcpAuth(app, db, publicOrigin);
+  const reviewNotes = reviewNotesService(db);
   const offset = z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).default(0);
   const snapshotId = z.uuid().describe('Immutable snapshot ID from list_sessions, never a mutable session ID');
   const annotations = { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false };
@@ -80,6 +83,8 @@ export async function registerMcp(app: FastifyInstance, db: Database, archive: A
       annotations, inputSchema: assessmentQuery.extend({ employeeId: z.uuid() }) }, input => result(() => { const { employeeId, ...query } = input; return assessments.read(employeeId, query); }));
     mcp.registerTool('read_assessment_model', { description: '读取评估结果引用的完整参数版本：13 项锚点、样本门槛、权重、分档、可信度与固定建议库。',
       annotations, inputSchema: { version: z.string().regex(/^[a-f0-9]{64}$/) } }, input => result(() => assessments.model(input.version)));
+    mcp.registerTool('read_review_notes', { description: '分页读取员工画像的追加复核备注、平台作者、北京时间及所附评估版本。所有已认证用户共享读取；备注不改变评估。沿 nextCursor 读取同一追加边界，每页最多10条。',
+      annotations, inputSchema: reviewNotesQuery.extend({ employeeId: z.uuid() }) }, input => result(() => { const { employeeId, ...query } = input; return reviewNotes.read(employeeId, query); }));
     mcp.registerTool('list_sessions', { description: '分页列出全体员工的会话快照。nextCursor 保持同一查询时间范围。',
       annotations, inputSchema: { cursor: z.string().max(1024).optional(), limit: z.number().int().min(1).max(10).default(10) } },
     input => result(() => archive.sessions(input.cursor, input.limit)));
