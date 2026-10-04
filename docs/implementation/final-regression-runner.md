@@ -24,3 +24,4 @@ Workflow 保留固定源码、dirty 状态、Node/npm/Docker/宿主版本、runt
 首次完整回归应等同机性能采样结束并使用冻结源码，避免资源争用掩盖行为。正常隔离 Windows 安装/Task、Docker 灾备、原生宿主矩阵和真实提供商门槛仍单独登记，不能把本工具或 fixture 通过写成那些能力已验收。
 
 验证证据：`E:/GenCode/Skynet-evidence/v2-2026-10-04/54-final-validation/`。`01-runner-red.txt` 是真实资源竞争 RED，`02-runner-green.txt` 通过；`03-shards-red.txt` 记录分片未生效导致重复执行，`04-runner-green.txt` 修复通过。`05-typecheck.txt` 保留测试局部 env 类型错误，修正后 `06-typecheck.txt` 通过。`08-build.txt` 构建通过，`09-final-runner-public.txt` **11/11 PASS（6.40 秒）**，包含既有 owned-command 完整回归。Linux原生包未在Windows执行，GitHub workflow 尚未触发，完整普通套件尚未运行；这些都不能记成 CI PASS。
+合入已接受等待批处理的集成 `f1a1094` 后，作者代码固定为 `0c991711af8109f48ad7dca8b585fdb2d62a4eb7`：`10-integrated-build.txt` 构建通过；`11-integrated-runner-public.txt` **11/11 PASS（7.87 秒，0 skip）**。本轮只执行构建和无 PostgreSQL 的运行器/owned-command 用例，没有启动普通全套或与千会话数据库量测竞争。
