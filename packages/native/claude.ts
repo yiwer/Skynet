@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { sourceTimestamp, type EvidenceLine } from '../contracts/archive.js';
 import {completeOriginalLines,partialOriginalLine} from './raw-lines.js';
+import type { PreparedOriginal } from './prepared-original.js';
 
 const text = z.object({ type: z.literal('text'), text: z.string() });
 const toolUse = z.object({ type: z.literal('tool_use'), id: z.string().min(1), name: z.string().min(1), input: z.record(z.string(), z.unknown()) });
@@ -34,14 +35,16 @@ export function claudeIdentity(bytes: Buffer, expectedSessionId: string) {
   return { version: version! };
 }
 
-export function readClaudeEvidence(bytes: Buffer) {
+export function readClaudeEvidence(bytes: Buffer, prepared?: PreparedOriginal) {
   const events: EvidenceLine[] = [];
   let unrecognizedLines = 0;
-  for (const {line:lineNumber,text:line} of completeOriginalLines(bytes)) {
+  for (const record of prepared?.records ?? completeOriginalLines(bytes)) {
+    const { line: lineNumber, text: line } = record;
     if(line===null){unrecognizedLines++;continue;}
     if (!line.trim()) continue;
     try {
-      const parsed = messageSchema.safeParse(JSON.parse(line));
+      const value = 'parsed' in record ? (record.parsed ? record.value : undefined) : JSON.parse(line);
+      const parsed = messageSchema.safeParse(value);
       if (!parsed.success) { unrecognizedLines++; continue; }
       const item = parsed.data;
       const content = item.message.content;

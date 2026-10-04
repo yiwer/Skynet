@@ -5,6 +5,7 @@ import { conversationContext } from './conversation-trace.js';
 import { primaryInputCoverage, inputIntegrityVersion } from './evidence-integrity.js';
 import { codexInitialBaseline, nativeStatistics, statisticsExtractorVersion } from '../../packages/native-statistics.js';
 import type { Manifest, Source } from '../../packages/contracts/archive.js';
+import { prepareOriginal } from '../../packages/native/prepared-original.js';
 
 const version = `metric-input-3/${statisticsExtractorVersion}/${inputIntegrityVersion}`;
 export type MetricInputFacts = Pick<ReturnType<typeof nativeStatistics>, 'usage' | 'supported' | 'complete'> & {
@@ -30,13 +31,15 @@ export async function metricInputBatch(client: pg.PoolClient, identities: Identi
   function read(input: Identity & { bytes: Buffer }): MetricInputFacts {
     const { key, parserVersion } = identify(input);
     const known = cached.get(key); if (known) return known;
-    const parsed = nativeStatistics(input.bytes, input.source, input.sourceVersion, { codexInitialBaseline: input.manifest && !input.materialId && input.baselineContinuity === true ? codexInitialBaseline(input.bytes, input.manifest) : false });
-    const evidence = readEvidence(input.bytes, input.source);
+    const prepared = prepareOriginal(input.bytes);
+    const parsed = nativeStatistics(input.bytes, input.source, input.sourceVersion, { prepared,
+      codexInitialBaseline: input.manifest && !input.materialId && input.baselineContinuity === true ? codexInitialBaseline(input.bytes, input.manifest, prepared) : false });
+    const evidence = readEvidence(input.bytes, input.source, prepared);
     const excluded = new Set(evidence.events.filter(event => conversationContext(event) === 'environment').map(event => event.line));
     if (input.source === 'claude-code-cli') for (const [index, text] of input.bytes.toString('utf8').split('\n').entries()) {
       try { const row = JSON.parse(text); if (row.isCompactSummary === true || row.isMeta === true) excluded.add(index + 1); } catch { /* Incomplete evidence stays unknown. */ }
     }
-    const coverage = primaryInputCoverage(input.bytes, input.source, evidence);
+    const coverage = primaryInputCoverage(input.bytes, input.source, evidence, prepared);
     if (!input.materialId) coverageProofs.set(input.snapshotId, coverage);
     const facts: MetricInputFacts = { usage: parsed.usage, supported: parsed.supported, complete: parsed.complete,
       coverageComplete: coverage.complete, excludedUserLines: [...excluded].sort((a, b) => a - b) };
