@@ -49,3 +49,9 @@ node --import tsx --test tests/profile-coaching*.test.ts
 外部证据目录：`E:/GenCode/Skynet-evidence/v2-2026-10-04/49-profile-coaching/`。按切片保留 `01/03/05/07/09-*-red` 和对应 GREEN；`11-web-green.txt` 实际记录 MCP 预算失败，后续 `13-web-budget-green.txt` 才通过。`14-native-public.txt` 记录长度错误扩大未知的失败，`15-native-green.txt` 和 `18-native-restored-public.txt` 记录修复及恢复归属通过。`16-compatibility-public.txt` 三项失败来自旧测试假定第一页固定 20 或等于完整导出，已改为通过真实游标核对完整内容；其真实上传交错用例通过。最终集成结果见外部 manifest。
 
 本票不执行付费分析，不发布试点参数，不代表 #52 真实试点或 #54 性能验收完成。
+
+## 最终作者验证
+
+实现提交 `11180e9` 合并实际集成 `17e9977` 后，作者树 `a487e35` 构建通过；`22-integrated-public.txt` 全部 **18/18** 通过（121.17 秒），其中本票 10 项与既有画像兼容 8 项。覆盖原生多文本块、人工更正、截断后追加、跨员工恢复、已验证/Token/身份并列选择、599/600/601 秒等待、同基线周趋势与跨周历史、真实上传交错、转义字节预算、实际 OAuth MCP、触屏/键盘详情及双主题窄屏。全部文件 diff 检查通过。
+
+`browser/manifest.json` 记录最后浏览器结果版本及实际 MCP 包装字节数，12 张截图对应两个新区域、三个宽度与两套主题；无页面运行时错误。最终结果不依赖真实员工会话或付费模型。
