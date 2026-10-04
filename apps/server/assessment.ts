@@ -1,6 +1,6 @@
 import type { Database } from './database.js';
 import { HttpError } from './identities.js';
-import { assessmentQuery, type CapabilityAssessment } from '../../packages/contracts/assessment.js';
+import { assessmentQuery, type AssessmentPeriod, type AssessmentPreset, type CapabilityAssessment } from '../../packages/contracts/assessment.js';
 import { assessmentModel, assessmentModelVersion } from './assessment-model.js';
 import { assessmentInputs } from './assessment-inputs.js';
 import { consistentReportingInputs } from './reporting-frontier.js';
@@ -20,6 +20,15 @@ export async function migrateAssessments(db: Database) {
   await db.query('INSERT INTO assessment_models(version,payload) VALUES($1,$2) ON CONFLICT DO NOTHING', [assessmentModelVersion, assessmentModel]);
 }
 export function assessmentService(db: Database, usage: ReturnType<typeof usageOutputService>, insights: ReturnType<typeof sessionInsightsService>, waits: ReturnType<typeof waitsService>, clock: () => Date = () => new Date()) {
+  type Prepared=Awaited<ReturnType<typeof assessmentInputs>> & {frontierVersion:string};
+  const preparing=new Map<string,Promise<Prepared>>();let lastPreparation:Promise<unknown>=Promise.resolve();
+  function prepare(full:boolean,preset:AssessmentPreset,period:AssessmentPeriod){
+    const key=JSON.stringify([full,preset,period]),existing=preparing.get(key);if(existing)return existing;
+    // Share concurrent readers of one scope and sequence different presets that
+    // rely on the same underlying metric materialization. No completed cache.
+    const result=lastPreparation.catch(()=>undefined).then(()=>consistentReportingInputs(db,clock,()=>assessmentInputs(db,usage,insights,waits,clock,full,preset,period))).finally(()=>preparing.delete(key));
+    preparing.set(key,result);lastPreparation=result;return result;
+  }
   function weekLabel(monday: string) {
     const thursday = new Date(monday + 'T00:00:00Z'); thursday.setUTCDate(thursday.getUTCDate() + 3);
     const year = thursday.getUTCFullYear(), week = Math.ceil(((thursday.getTime() - Date.UTC(year, 0, 1)) / 86400000 + 1) / 7);
@@ -44,9 +53,14 @@ export function assessmentService(db: Database, usage: ReturnType<typeof usageOu
       return row.payload;
     }
     const preset = q.preset ?? '默认', period = q.period ?? 'since-enrollment';
-    const inputSet = await consistentReportingInputs(db, clock, () => assessmentInputs(db, usage, insights, waits, clock, full, preset, period));
+    const inputSet = await prepare(full,preset,period);
     const employee = inputSet.people.find(person => person.id === employeeId);
     if (!employee) throw new HttpError(404, '员工不存在');
+    return store(inputSet,employee,preset,period);
+  }
+  type InputSet=Awaited<ReturnType<typeof assessmentInputs>> & {frontierVersion:string};
+  async function store(inputSet:InputSet,employee:InputSet['people'][number],preset:AssessmentPreset,period:AssessmentPeriod){
+    const employeeId=employee.id;
     const { baselineVersion } = inputSet;
     await db.query('INSERT INTO assessment_baselines(version,payload) VALUES($1,$2) ON CONFLICT DO NOTHING', [baselineVersion, inputSet.baseline]);
     const content = { employeeId, employee: employee.name, period: period === 'since-enrollment' ? '接入至今' : weekLabel(inputSet.report.scope.from), preset, selection: { period, preset }, modelVersion: assessmentModelVersion,
@@ -54,6 +68,13 @@ export function assessmentService(db: Database, usage: ReturnType<typeof usageOu
       range: employee.range, dims: employee.dims, ...employee.verdict,
       sample: employee.sample, coverageIssues: employee.issues, representatives: employee.representatives };
     return storeAssessment(db, content, clock);
+  }
+  async function batch(input:unknown={},full=false){
+    const q=assessmentQuery.parse(input);if(q.version||q.inputOffset)throw new HttpError(400,'批量当前评估不能混用单人固定版本或输入分页');
+    const preset=q.preset??'默认',period=q.period??'since-enrollment';
+    const inputSet=await prepare(full,preset,period);
+    const values:CapabilityAssessment[]=[];for(const employee of inputSet.people)values.push(await store(inputSet,employee,preset,period));
+    return {values,report:inputSet.report,factors:inputSet.factors,frontierVersion:inputSet.frontierVersion,baselineVersion:inputSet.baselineVersion};
   }
   function page(value: CapabilityAssessment, offset: number, limit: number) {
     const analysisCount = value.inputs.analysisVersions.length, insightCount = value.inputs.insightVersions.length;
@@ -64,6 +85,6 @@ export function assessmentService(db: Database, usage: ReturnType<typeof usageOu
     const q = assessmentQuery.parse(input), value = await load(employeeId, q, full);
     return page(value, q.inputOffset, 32);
   }
-  return { read, model, baseline, history: (employeeId: string, input: unknown) => assessmentHistory(db, employeeId, input), recompute: (employeeId: string, input: unknown) => read(employeeId, input, true),
+  return { read, batch, model, baseline, history: (employeeId: string, input: unknown) => assessmentHistory(db, employeeId, input), recompute: (employeeId: string, input: unknown) => read(employeeId, input, true),
     export: async (employeeId: string, input: unknown) => page(await load(employeeId, input), 0, Number.MAX_SAFE_INTEGER) };
 }

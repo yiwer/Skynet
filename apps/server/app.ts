@@ -42,6 +42,7 @@ import { migrateAssembly, assemblyService, processingService, recordAssemblyReci
 import { migrateWaits, waitsService } from './waits.js';
 import { migrateAssessments, assessmentService } from './assessment.js';
 import { migrateReviewNotes, reviewNotesService } from './review-notes.js';
+import { migrateCapabilityPeople, capabilityPeopleService } from './capability-people.js';
 import { migrateWaitReports, waitReportService } from './wait-report.js';
 import { migrateActivity,activityService } from './activity.js';
 
@@ -65,6 +66,7 @@ export async function createApp(options: { db: Database; rawDirectory: string; w
   await migrateWaits(db);
   await migrateAssessments(db);
   await migrateReviewNotes(db);
+  await migrateCapabilityPeople(db);
   await migrateWaitReports(db);
   await migrateActivity(db);
   const raw = new RawStore(options.rawDirectory);
@@ -303,6 +305,13 @@ export async function createApp(options: { db: Database; rawDirectory: string; w
   app.get('/api/employees/:id/review-notes', { onRequest: readerGuard }, request => reviewNotes.read(z.uuid().parse((request.params as { id: string }).id), request.query));
   app.post('/api/employees/:id/review-notes', { onRequest: readerGuard }, async (request, reply) => reply.code(201).send(
     await reviewNotes.append(z.uuid().parse((request.params as { id: string }).id), request.headers.authorization, request.body)));
+  const people = capabilityPeopleService(db, assessments, options.reportClock);
+  app.get('/api/capability-people', { onRequest: readerGuard }, request => people.read(request.query));
+  app.post('/api/capability-people/recompute', { onRequest: readerGuard }, request => people.recompute(request.body));
+  app.get('/api/capability-people/export', { onRequest: readerGuard }, async (request, reply) => {
+    const value = await people.export(request.query);
+    return reply.header('Content-Disposition', `attachment; filename="people-${value.version}.json"`).send(value);
+  });
   app.get('/api/assessment-models/:version', { onRequest: readerGuard }, request => assessments.model(hashSchema.parse((request.params as { version: string }).version)));
   app.get('/api/assessment-baselines/:version', { onRequest: readerGuard }, request => assessments.baseline(hashSchema.parse((request.params as { version: string }).version)));
   app.get('/api/assessments/:id', { onRequest: readerGuard }, request => assessments.read(z.uuid().parse((request.params as { id: string }).id), request.query));
@@ -442,7 +451,7 @@ export async function createApp(options: { db: Database; rawDirectory: string; w
     const file = await archive.exported((request.params as { id: string }).id, format);
     return reply.header('Content-Disposition', `attachment; filename="${file.filename}"`).type(file.contentType).send(file.bytes);
   });
-  if (options.publicOrigin) await registerMcp(app, db, archive, options.publicOrigin, analysis, reports, coverage, workStatistics, workViews,operations,conversation,metrics,assembly,processing,insights,waits,usage,waitReport,prompts,activity,efficiency,assessments);
+  if (options.publicOrigin) await registerMcp(app, db, archive, options.publicOrigin, analysis, reports, coverage, workStatistics, workViews,operations,conversation,metrics,assembly,processing,insights,waits,usage,waitReport,prompts,activity,efficiency,assessments,people);
   if (options.webDirectory) {
     await app.register(fastifyStatic, { root: resolve(options.webDirectory), wildcard: false });
   }

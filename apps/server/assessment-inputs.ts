@@ -57,5 +57,5 @@ export async function assessmentInputs(db: Database, usage: ReturnType<typeof us
       coverageVersion: digest(JSON.stringify([observations, sessions.map(s => [s.sessionId, s.sourceInputsComplete])])) };
   });
   for (const key of dimKeys) { const reference = median(values.flatMap(person => person.dims[key].score === null ? [] : [person.dims[key].score!])); for (const person of values) person.dims[key].teamMedian = reference; }
-  return { report, waitsVersion: waitReport.version, baseline, baselineVersion, people: values };
+  return { report, factors, waitsVersion: waitReport.version, baseline, baselineVersion, people: values };
 }
