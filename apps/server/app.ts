@@ -40,6 +40,7 @@ import { migrateDeliveryReceipts, saveDeliveryReceipt } from './delivery-receipt
 import { migrateAssembly, assemblyService, processingService, recordAssemblyRecipe } from './assembly.js';
 import { migrateWaits, waitsService } from './waits.js';
 import { migrateWaitReports, waitReportService } from './wait-report.js';
+import { migrateActivity,activityService } from './activity.js';
 
 export async function createApp(options: { db: Database; rawDirectory: string; webDirectory?: string; publicOrigin?: string; reportClock?: () => Date }) {
   const { db } = options;
@@ -59,6 +60,7 @@ export async function createApp(options: { db: Database; rawDirectory: string; w
   await migrateAssembly(db);
   await migrateWaits(db);
   await migrateWaitReports(db);
+  await migrateActivity(db);
   const raw = new RawStore(options.rawDirectory);
   await backfillOrigins(db, raw);
   await reconcileOriginIntegrity(db,raw);
@@ -222,6 +224,10 @@ export async function createApp(options: { db: Database; rawDirectory: string; w
     const data = await waitReport.read(request.query);
     return reply.header('Content-Disposition', `attachment; filename="skynet-wait-report-${data.version}.json"`).type('application/json').send(data);
   });
+  const activity = activityService(db,raw,options.reportClock);
+  app.get('/api/activity',{onRequest:readerGuard},request=>activity.read(request.query));
+  app.post('/api/activity/recompute',{onRequest:readerGuard},request=>activity.recompute(request.body));
+  app.get('/api/activity/export',{onRequest:readerGuard},async(request,reply)=>{const data=await activity.export(request.query);return reply.header('Content-Disposition',`attachment; filename="skynet-activity-${data.version}.json"`).type('application/json').send(data);});
   app.get('/api/waits', { onRequest: readerGuard }, request => waits.read(request.query));
   app.post('/api/waits/recompute', { onRequest: readerGuard }, request => waits.recompute(request.body));
   app.get('/api/waits/export', { onRequest: readerGuard }, async (request, reply) => {
