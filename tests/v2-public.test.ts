@@ -244,13 +244,13 @@ test('V2 public originals → conversation and metrics Web → real HTTPS OAuth 
     await expect(sessionLinks).toHaveAttribute('href', new RegExp(`^#${unknownSnapshotId}\\?insightVersion=`));
     await page.evaluate(() => { location.hash = 'metrics'; });
     await expect(sessionLinks).toHaveCount(2);
-    const dailyPoint = usagePage.getByRole('region', {name:'每日用量',exact:true}).locator('[tabindex="0"][aria-label*="110"]').first();
+    const dailyPoint = usagePage.getByRole('region', {name:'每日用量',exact:true}).getByRole('button',{name:/110/}).first();
     await expect(dailyPoint).toHaveCount(1);
     await dailyPoint.focus();
     await expect(usagePage.getByRole('tooltip')).toContainText('110');
     await page.keyboard.press('Escape');
     await expect(usagePage.getByRole('tooltip')).toHaveCount(0);
-    await usagePage.locator('.usage-bar-segment').first().focus();
+    await usagePage.getByRole('region',{name:'员工用量',exact:true}).getByRole('button',{name:/Claude Code CLI/}).first().focus();
     await expect(usagePage.getByRole('tooltip')).toContainText('Claude Code CLI');
     await page.keyboard.press('Tab');
     await expect(usagePage.getByRole('tooltip')).toHaveCount(0);
