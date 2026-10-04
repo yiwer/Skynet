@@ -14,6 +14,7 @@ import type { ActivityEvent,ActivityEvidence,ActivityPage,ActivityType,ActivityL
 import type { SessionInsights } from '../../packages/contracts/session-insights.js';
 import { primaryInputCoverage } from './evidence-integrity.js';
 import type { ReplyWait } from '../../packages/contracts/waits.js';
+const employeeNames=new Intl.Collator('zh-CN');
 
 export function activityOriginal(bytes:Buffer,source:Source){
   const evidence=readEvidence(bytes,source),markers:{type:ActivityType;line:number;timestamp:string|null;text:string;sessionId?:string}[]=[];
@@ -119,7 +120,7 @@ export function activityRecords(originals:WaitOriginal[],details:Map<string,Acti
       }
     }
   }
-  const list=[...events.values()].filter(event=>!scope.type||event.type===scope.type).sort((a,b)=>Number(!a.timestamp)-Number(!b.timestamp)||(a.timestamp??'').localeCompare(b.timestamp??'')||a.employee.localeCompare(b.employee,'zh-CN')||Number(a.basis==='derived')-Number(b.basis==='derived')||a.evidence.line-b.evidence.line||a.id.localeCompare(b.id));
+  const list=[...events.values()].filter(event=>!scope.type||event.type===scope.type).sort((a,b)=>Number(!a.timestamp)-Number(!b.timestamp)||(a.timestamp??'').localeCompare(b.timestamp??'')||employeeNames.compare(a.employee,b.employee)||Number(a.basis==='derived')-Number(b.basis==='derived')||a.evidence.line-b.evidence.line||a.id.localeCompare(b.id));
   const lanes=new Map<string,ActivityLane>();
   for(const event of list){
     if(!lanes.has(event.employeeId))lanes.set(event.employeeId,{employeeId:event.employeeId,employee:event.employee,sessions:[],points:[],segments:[]});
@@ -133,5 +134,5 @@ export function activityRecords(originals:WaitOriginal[],details:Map<string,Acti
     if(event.timestamp<session.observedFrom)session.observedFrom=event.timestamp;if(event.timestamp>session.observedTo)session.observedTo=event.timestamp;
     if(event.type==='session-start')session.startBoundary='observed';
   }
-  return {events:list,lanes:[...lanes.values()].sort((a,b)=>a.employee.localeCompare(b.employee,'zh-CN')||a.employeeId.localeCompare(b.employeeId)),coverage:{permission:'unknown' as const,sessionEnd:'unknown' as const,unknownTime:unknownTimes.size,unavailableSources:unavailableSources.size}};
+  return {events:list,lanes:[...lanes.values()].sort((a,b)=>employeeNames.compare(a.employee,b.employee)||a.employeeId.localeCompare(b.employeeId)),coverage:{permission:'unknown' as const,sessionEnd:'unknown' as const,unknownTime:unknownTimes.size,unavailableSources:unavailableSources.size}};
 }
