@@ -37,7 +37,7 @@ export function waitsService(db: Database, raw: RawStore, clock: () => Date = ()
         UNION SELECT o.employee_id FROM effective_snapshot_events se JOIN effective_event_origins o ON o.event_id=se.event_id WHERE se.snapshot_id=$1`, [q.snapshotId])).rows.map(row => row.employee_id);
       const originals = await waitDataset(client, raw, full, employees);
       if (q.snapshotId && !originals.some(original => original.record.id === q.snapshotId)) throw new HttpError(404, '未找到会话原件');
-      if (q.employeeId && !(await client.query('SELECT id FROM employees WHERE id=$1', [q.employeeId])).rowCount) throw new HttpError(404, '员工不存在');
+      if(q.employeeId){const employee=(await client.query('SELECT id,name FROM employees WHERE id=$1',[q.employeeId])).rows[0];if(!employee)throw new HttpError(404,'员工不存在');scope.employeeName=employee.name;}
       const result=await materializeWaits(client,originals,scope,clock);
       await client.query('COMMIT');return result;
     } catch (error) { await client.query('ROLLBACK'); throw error; } finally { client.release(); }
@@ -68,5 +68,5 @@ export function waitsService(db: Database, raw: RawStore, clock: () => Date = ()
     if (Buffer.byteLength(JSON.stringify(page)) > (exporting ? 16 * 1024 * 1024 : 80 * 1024)) throw waitBounded();
     return page;
   }
-  return {forScope:(input:unknown,range:{from:string;to:string})=>compute(waitsQuerySchema.parse(input),false,range), read, recompute: (input: unknown) => read(input, true), export: (input: unknown) => read(input, false, true) };
+  return {forScope:(input:unknown,range:{from:string;to:string},full=false)=>compute(waitsQuerySchema.parse(input),full,range), read, recompute: (input: unknown) => read(input, true), export: (input: unknown) => read(input, false, true) };
 }

@@ -386,9 +386,9 @@ export function metricsService(db: Database, raw: RawStore, clock: () => Date = 
       const byEmployeeDay = new Map<string, Slice[]>();
       for (const slice of selected) { const key = JSON.stringify([slice.employeeId, slice.date]); byEmployeeDay.set(key, [...byEmployeeDay.get(key) ?? [], slice]); }
       const employeeDays = [...byEmployeeDay.values()].map(values => {
-        const first = values[0]!, rows = summarize(values), included = rows.filter(row => !unknownSessions.has(row.sessionId)), known = total(included);
+        const first = values[0]!, rows = summarize(values), included = rows.filter(row => !unknownSessions.has(row.sessionId)), known = total(included),all=total(rows);
         const excludedSessions = new Set(rows.filter(row => unknownSessions.has(row.sessionId)).map(row => row.sessionId)).size;
-        return { employeeId: first.employeeId, date: first.date, activeSessions: total(rows).sessions,
+        return { employeeId: first.employeeId, date: first.date, activeSessions: all.sessions,userTurns:all.userTurns,toolCalls:all.toolCalls,knownInputTokens:all.knownInputTokens,unknownInputSessions:all.unknownInputSessions,
           inputTokens: !included.length && excludedSessions ? null : known.knownInputTokens, outputTokens: !included.length && excludedSessions ? null : known.knownOutputTokens,
           includedSessions: new Set(included.map(row => row.sessionId)).size, excludedSessions };
       }).sort((a,b) => a.employeeId.localeCompare(b.employeeId) || a.date.localeCompare(b.date));
@@ -449,10 +449,10 @@ export function metricsService(db: Database, raw: RawStore, clock: () => Date = 
     return boundedPage({ ...payload, sessions: payload.sessions.slice(q.offset, q.offset + 20), nextOffset: q.offset + 20 < payload.sessions.length ? q.offset + 20 : null });
   }
   async function exportMetrics(input: unknown = {}): Promise<MetricsPage> { const { payload } = await load(input); return payload; }
-  async function readCoverageMetrics(input: unknown) {
+  async function readCoverageMetrics(input: unknown,full=false) {
     const { date, view, ...filters } = coverageMetricsQuerySchema.parse(input);
     const q: MetricsQuery = { period: 'custom', from: view === 'day' ? date : addDays(date, -6), to: date, offset: 0, ...filters };
-    const payload = q.version ? (await load(q)).payload : await compute(q);
+    const payload = q.version ? (await load(q)).payload : await compute(q,full);
     return boundedPage({ ...payload, sessions: payload.sessions.slice(0, 20), nextOffset: payload.sessions.length > 20 ? 20 : null });
   }
   async function recompute(input: unknown = {}): Promise<MetricsPage> {

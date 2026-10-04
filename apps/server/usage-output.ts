@@ -109,6 +109,7 @@ export function usageOutputService(db: Database, metrics: MetricsService, insigh
           sourceDate: origin.sourceDate, snapshotId: origin.snapshotId, value: 1 } });
       }
     }
+    const outputDays=new Map<string,OutputTotals>();
     const scopedRows = new Map<string,UsageSession>();
     for(const row of rows)for(const snapshotId of row.snapshotIds)scopedRows.set(JSON.stringify([row.employeeId,row.project,snapshotId,row.source,row.sourceSessionId]),row);
     for (const { kind, fact } of contributions.values()) {
@@ -118,16 +119,18 @@ export function usageOutputService(db: Database, metrics: MetricsService, insigh
       if (!row) continue;
       const amount = row.outputs[kind]; amount.known += fact.value;
       for (const field of ['added','removed','passed','failed'] as const) amount[field] += fact[field] ?? 0;
+      if(row.selected){const day=outputDays.get(origin.source_date)??emptyOutputs();outputDays.set(origin.source_date,day);day[kind].known+=fact.value;for(const field of ['added','removed','passed','failed'] as const)day[kind][field]+=fact[field]??0;}
     }
     for (const row of rows) for (const kind of kinds) if (row.outputs[kind].value !== null) row.outputs[kind].value = row.outputs[kind].known;
     const selected = rows.filter(row => row.selected);
+    const dailyOutputs=[...new Set(selected.flatMap(row=>row.dates))].sort().map(date=>{const outputs=outputDays.get(date)??emptyOutputs();for(const kind of kinds){const amount=outputs[kind];amount.unknownSessions=new Set(selected.filter(row=>row.dates.includes(date)&&row.outputs[kind].value===null).map(row=>row.sessionId)).size;amount.value=amount.unknownSessions?null:amount.known;}return {date,outputs};});
     const employees = metric.employees.filter(person => !q.employeeId || person.employeeId === q.employeeId).map(person => {
       const mine = selected.filter(row => row.employeeId === person.employeeId);
       return { ...person, activeDates: metric.employeeDaily?.find(series=>series.employeeId===person.employeeId)?.days.filter(day=>day.activeSessions>0).map(day=>day.date)??[], outputs: outputTotals(mine), agents: metric.sources.map(({ source }) => ({ source, ...totals(mine.filter(row => row.source === source)) })),
         daily: metric.employeeDaily?.find(series => series.employeeId === person.employeeId)?.days ?? [] };
     });
     const content = { metricVersion: metric.version, catalogVersion, scope: { ...metric.scope, ...(q.employeeId ? { employeeId: q.employeeId } : {}) },
-      totals: q.employeeId ? totals(selected) : metric.totals, outputs: outputTotals(selected), employees,
+      totals: q.employeeId ? totals(selected) : metric.totals, outputs: outputTotals(selected), employees,dailyOutputs,
       daily: q.employeeId ? employees[0]?.daily ?? [] : metric.daily.map(day=>({date:day.date,activeSessions:day.sessions,...(day.tokenTrend??{inputTokens:day.inputTokens,outputTokens:day.outputTokens,includedSessions:day.sessions-day.unknownTokenSessions,excludedSessions:day.unknownTokenSessions})})), sessions: rows, nextOffset: null,
       sourceInputsComplete: metric.sourceInputsComplete, unknownReasons: metric.unknownReasons, dataAsOf: metric.dataAsOf };
     const version = digest(JSON.stringify(content)), request = selection(q), scopeKey = digest(JSON.stringify(request));
@@ -162,11 +165,11 @@ export function usageOutputService(db: Database, metrics: MetricsService, insigh
     if (Buffer.byteLength(JSON.stringify(result)) > 80 * 1024) throw new HttpError(413, '产出响应超过范围上限，请缩小筛选');
     return result;
   }
-  async function readWeek(week:string, filters:{employeeId?:string;source?:MetricsQuery['source'];project?:string}) {
+  async function readWeek(week:string, filters:{employeeId?:string;source?:MetricsQuery['source'];project?:string},full=false) {
     fixedWeek.parse(week);const {employeeId,...teamFilters}=filters;
-    const head=await metrics.readCoverageMetrics({date:addDays(week,6),view:'week',...teamFilters});
+    const head=await metrics.readCoverageMetrics({date:addDays(week,6),view:'week',...teamFilters},full);
     const fixed=await metrics.exportMetrics({period:'custom',from:week,to:addDays(week,6),...teamFilters,version:head.version});
-    return compute({period:'this-week',offset:0,...filters},false,fixed);
+    return compute({period:'this-week',offset:0,...filters},full,fixed);
   }
   return {readWeek, read, recompute: (input: unknown) => read(input, true), export: async (input: unknown) => (await load(input)).payload };
 }

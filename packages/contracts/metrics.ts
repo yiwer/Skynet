@@ -23,7 +23,7 @@ export type MetricTotals = { sessions: number; userTurns: number; toolCalls: num
   inputTokens: number | null; outputTokens: number | null; knownInputTokens: number; knownOutputTokens: number;
   unknownTokenSessions: number; unknownInputSessions: number; unknownOutputSessions: number };
 export type MetricTokenTrend = { inputTokens: number | null; outputTokens: number | null; includedSessions: number; excludedSessions: number };
-export type MetricDailyPoint = { date: string; activeSessions: number } & MetricTokenTrend;
+export type MetricDailyPoint = { date: string; activeSessions: number; userTurns?:number; toolCalls?:number; knownInputTokens?:number; unknownInputSessions?:number } & MetricTokenTrend;
 export type SessionMetrics = MetricTotals & { sessionId: string; employeeId: string; employee: string; source: Source;
   project: string; sourceSessionId: string; snapshotId: string; snapshotIds: string[]; webPath: string; dates: string[];
   sourceInputsComplete: boolean; unknownReasons: string[] };

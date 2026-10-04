@@ -31,4 +31,4 @@ export interface WaitsPage {
   replySupport: 'observed' | 'unknown'; permissionSupport: 'unknown'; unknownReasons: string[];
   definition: string;
 }
-export type WaitsScope = { activityDate?:string;snapshotId?: string; period?: 'this-week' | 'last-week' | 'since-enrollment'; from?: string; to?: string; timeZone: 'Asia/Shanghai'; employeeId?: string; source?: Source; project?: string };
+export type WaitsScope = { activityDate?:string;snapshotId?: string; period?: 'this-week' | 'last-week' | 'since-enrollment'; from?: string; to?: string; timeZone: 'Asia/Shanghai'; employeeId?: string; employeeName?:string; source?: Source; project?: string };
