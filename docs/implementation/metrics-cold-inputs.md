@@ -12,4 +12,8 @@
 
 验证通过已确认的公开上传、Reporting、HTTP、导出边界进行。新增公开事件上限用例验证超过 100,000 个事件时整份拒绝、缩小到单独项目仍能读取；原指标测试保留恢复去重、来源日期、已知零/未知、筛选、迟到、当前/全量/固定版本。同一隔离数据库上的旧编码 Reporting 升级探针也核对旧固定报告可读、新旧事实相同、新编码全量与当前版本相同。
 
-证据目录：`E:/GenCode/Skynet-evidence/v2-2026-10-04/`。设计与逐轮记录见 `54-metrics-cold-query-design.md`；最新诊断分别为 `54-metrics-cold-a2a757b-profile.*`、`54-metrics-cold-union-profile.*`、`54-metrics-cold-packed-profile.*`。正式性能与最终回归仍在进行，尚未独立接受，#54 保持开放。
+上述紧凑身份候选在未修改的正式性能程序中首次读取为 3,099.25 ms，仍未通过 3,000 ms；十次后续读取 P50 为 169.92 ms、P95 为 220.17 ms。已知总量、并发员工筛选、当前/全量、迟到与固定历史断言全部通过。该程序记录的是一次首次读取，不是首次 P95，也不覆盖活动或画像性能。
+
+后续最小切片复用同一次请求里已经准备的事件组，按组计算 native/session/slice 键，而各事件仍分别贡献消息 anchor、工具 eventId 和证明缺口。组的首个原序号决定处理顺序，保持原首载体选择；不新增缓存或更改输入指纹。公开 Reporting 差分探针将新消费逻辑与旧消费逻辑的完整报告（包括版本）进行逐项比较，覆盖团队、单员工、项目与恢复归属。该探针及指标/材料资格公开回归 7/7 通过。
+
+证据目录：`E:/GenCode/Skynet-evidence/v2-2026-10-04/`。设计与逐轮记录见 `54-metrics-cold-query-design.md`；诊断分别为 `54-metrics-cold-a2a757b-profile.*`、`54-metrics-cold-union-profile.*`、`54-metrics-cold-packed-profile.*`。紧凑身份正式性能为 `54-metrics-cold-compact-performance.{json,txt}`；请求内键复用构建与回归为 `54-metrics-group-keys-{build,public}.txt`。最后切片的正式性能复验待并行负载结束，尚未独立接受，#54 保持开放。

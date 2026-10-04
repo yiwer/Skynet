@@ -14,7 +14,7 @@ type Group = Pick<MetricEvent, 'snapshot_id' | 'employee_id' | 'employee' | 'dev
  * Positions restore the database's original event order, including its exact
  * collation. The identity includes every field and occurrence, with repeated
  * metadata encoded once; it never substitutes counts for the proof ledger. */
-export async function readMetricEvents(client: pg.PoolClient, scope: MetricsScope, limit: number): Promise<{ events: MetricEvent[]; identity: string } | undefined> {
+export async function readMetricEvents(client: pg.PoolClient, scope: MetricsScope, limit: number): Promise<{ events: MetricEvent[]; groups: MetricEvent[][]; identity: string } | undefined> {
   const groups = (await client.query(`WITH selected AS MATERIALIZED (
     SELECT o.event_id,o.snapshot_id,o.employee_id,e.name AS employee,o.device_id,o.source,
       o.source_session_id,o.project,o.source_date,o.role,o.line,o.block,o.material_id,o.qualification_revision,o.proof_snapshot_id,
@@ -36,11 +36,17 @@ export async function readMetricEvents(client: pg.PoolClient, scope: MetricsScop
   groups.sort((a, b) => a.events[0]![0] - b.events[0]![0]);
   const identity = digest(JSON.stringify(['metric-event-input-1', groups]));
   const events = new Array<MetricEvent>(count);
-  for (const group of groups) for (const [position, eventId, role, line, block, qualification, proof] of group.events) {
-    // The public calculation still receives the previous row types and order.
-    events[position - 1] = { event_id: eventId, snapshot_id: group.snapshot_id, employee_id: group.employee_id, employee: group.employee,
-      device_id: group.device_id, source: group.source, source_session_id: group.source_session_id, project: group.project,
-      source_date: group.source_date, role, line, block, material_id: group.material_id, qualification_revision: qualification, proof_snapshot_id: proof };
+  const eventGroups: MetricEvent[][] = [];
+  for (const group of groups) {
+    const unpacked: MetricEvent[] = [];
+    for (const [position, eventId, role, line, block, qualification, proof] of group.events) {
+      // The public calculation still receives the previous row types and order.
+      const event = { event_id: eventId, snapshot_id: group.snapshot_id, employee_id: group.employee_id, employee: group.employee,
+        device_id: group.device_id, source: group.source, source_session_id: group.source_session_id, project: group.project,
+        source_date: group.source_date, role, line, block, material_id: group.material_id, qualification_revision: qualification, proof_snapshot_id: proof };
+      events[position - 1] = event; unpacked.push(event);
+    }
+    eventGroups.push(unpacked);
   }
-  return { events, identity };
+  return { events, groups: eventGroups, identity };
 }
