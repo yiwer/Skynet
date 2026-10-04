@@ -79,6 +79,7 @@ export function archiveQuery(db: Database, raw: RawStore) {
   }
   async function detail(id: string, offset = 0, summary = false) {
     if (!z.uuid().safeParse(id).success) throw new HttpError(404, '未找到存档');
+    const current=await snapshot(id);await raw.read(current.device_id,current.hash);
     await verifySnapshotIntegrity(db,raw,id);
     const revision=await attributionRevision(db,id);
     const { record, evidence, activity, recovery } = await evidenceCache.get(`${id}:${beijingDate(new Date())}:${revision}`, async () => {
@@ -135,6 +136,11 @@ export function archiveQuery(db: Database, raw: RawStore) {
   }
   async function exported(id: string, format: ExportFormat) {
     if (!z.uuid().safeParse(id).success) throw new HttpError(404, '未找到存档');
+    // Cached rendering is reusable; physical availability is checked on every
+    // current read, including already prepared downloads and recovery bundles.
+    const current=await snapshot(id),bytes=await raw.read(current.device_id,current.hash);
+    if(format==='raw')return {bytes,contentType:'application/octet-stream',filename:`${current.id}.jsonl`};
+    for(const material of manifestSchema.parse(current.manifest).capture?.materials??[])await raw.read(current.device_id,material.hash);
     if(format==='readable')await verifySnapshotIntegrity(db,raw,id);
     const revision=format==='readable'?await attributionRevision(db,id):'raw';
     const value=await exportCache.get(`${id}:${format}:${revision}`, async () => {
@@ -203,8 +209,8 @@ export function archiveQuery(db: Database, raw: RawStore) {
     const record = await snapshot(id);
     const material = manifestSchema.parse(record.manifest).capture?.materials.find(item => item.id === materialId);
     if (!material) throw new HttpError(404, '此快照没有该关联材料');
+    const bytes = await raw.read(record.device_id, material.hash);
     const file = await exportCache.get(`material:${id}:${materialId}`, async () => {
-      const bytes = await raw.read(record.device_id, material.hash);
       return { bytes, filename: `${material.id}.bin`, contentType: 'application/octet-stream',
         text: material.mediaType === 'binary' ? bytes.toString('base64') : bytes.toString('utf8') };
     });

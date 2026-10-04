@@ -23,6 +23,7 @@ function nativeSegments(originals:WaitOriginal[],parts:UsageSession[],scope:Metr
   const selected=originals.filter(o=>leaves.has(o.record.id)&&parts.some(p=>p.sourceSessionId===o.record.source_session_id));
   const turns=new Map<string,EfficiencySegment>(),rangeStart=Date.parse(scope.from+'T00:00:00+08:00'),rangeEnd=Date.parse(addDays(scope.to,1)+'T00:00:00+08:00');
   for(const original of selected){
+    if(original.unavailable){result.push({kind:'gap',startedAt:null,endedAt:null,durationMs:null,evidence:[waitEvidence(original,1,0,true)],reason:'原件不可读取，轮次与等待边界未知'});continue;}
     const groups=new Map<string,TurnBoundary[]>(),origins=new Map(original.origins.map(o=>[`${o.line}/${o.block}`,o]));
     for(const boundary of original.facts.boundaries){const key=boundary.turnId??`unknown-${boundary.line}`;if(!groups.has(key))groups.set(key,[]);groups.get(key)!.push(boundary);}
     for(const [id,group]of groups){
@@ -68,7 +69,7 @@ export async function efficiencyTiming(db:Database,raw:RawStore,sessions:Efficie
       if(sourceIds.has(record.id)&&!primaryInputCoverage(bytes,record.source,readEvidence(bytes,record.source)).complete)incomplete.add(record.id);
     }):[];
     const originals=dataset.filter(o=>!sessionIds.has(o.sessionId)||sourceIds.has(o.record.id));
-    for(const [id,view]of views){const original=originals.find(o=>o.record.id===id);if(!original||original.record.hash!==view.input.hash||original.revision!==view.input.attributionRevision)throw new HttpError(409,'产效原件归属已更新，请重新读取');}
+    for(const [id,view]of views){const original=originals.find(o=>o.record.id===id);if(!original||original.record.hash!==view.input.hash||original.revision!==view.input.attributionRevision||original.unavailable!==view.sourceAvailability?.reason)throw new HttpError(409,'产效原件归属或可用性已更新，请重新读取');}
     const waiting=await materializeWaits(client,originals,{...scope,period:q.period},clock);
     for(const row of sessions){
       const parts=groups.get(row.sessionId)!,segments=nativeSegments(originals.filter(o=>o.sessionId===row.sessionId),parts,scope,incomplete,historyIncomplete);

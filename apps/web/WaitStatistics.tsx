@@ -4,13 +4,13 @@ const weekdays=['周一','周二','周三','周四','周五','周六','周日'];
 const duration=(ms:number|null)=>ms===null?'未知':`${Math.floor(ms/60000)} 分 ${Number((ms%60000/1000).toFixed(3))} 秒`;
 const percent=(f:WaitFraction)=>f.value===null?'未知':`${Number((f.value*100).toFixed(1))}%`;
 function Toggle({label,table,onChange}:{label:string;table:boolean;onChange:(v:boolean)=>void}){return <div className="usage-view-toggle" role="group" aria-label={label}>{[false,true].map(v=><button type="button" key={String(v)} aria-label={label+(v?'表格':'图表')} aria-pressed={table===v} onClick={()=>onChange(v)}>{v?'表格':'图表'}</button>)}</div>;}
-export function WaitStatistics({report}:{report:WaitReport}){
+export function WaitStatistics({report,sourceUnavailable=false}:{report:WaitReport;sourceUnavailable?:boolean}){
   const [heatTable,setHeatTable]=useState(false),[peopleTable,setPeopleTable]=useState(false),[focus,setFocus]=useState(''),[personFocus,setPersonFocus]=useState('');
   const s=report.summary,maxHeat=Math.max(1,...report.heatmap.map(c=>c.medianMs??0)),maxPerson=Math.max(1,...report.people.map(p=>p.maximumMs??0));
   const cellText=(c:WaitReport['heatmap'][number])=>`${weekdays[c.weekday]} ${String(c.hour).padStart(2,'0')}:00 · ${c.count} 条等待 · 中位数 ${duration(c.medianMs)}`;
   return <>
     <dl className="usage-stats wait-stats wait-report-stats">
-      <div className="usage-stat"><dt>等待中位数</dt><dd data-testid="wait-report-median">{duration(s.medianMs)}</dd><span>{s.knownCount} 段已知 · {s.unknownCount} 段未知</span></div>
+      <div className="usage-stat"><dt>等待中位数</dt><dd data-testid="wait-report-median">{duration(s.medianMs)}</dd><span>{s.knownCount} 段已知 · {sourceUnavailable?'区间总数未知':`${s.unknownCount} 段未知`}</span></div>
       <div className="usage-stat"><dt>等待 P90</dt><dd data-testid="wait-report-p90">{duration(s.p90Ms)}</dd><span>{s.knownCount} 段已知</span></div>
       <div className="usage-stat"><dt>长等待占比</dt><dd data-testid="wait-report-long">{percent(s.longFraction)}</dd><span>{s.longFraction.numerator} / {s.longFraction.denominator} 段 · ≥ 10 分钟</span></div>
       <div className="usage-stat"><dt>权限等待中位数</dt><dd data-testid="wait-permission-total"><span data-testid="wait-report-permission">{duration(s.permissionMedianMs)}</span></dd></div>
@@ -31,7 +31,7 @@ export function WaitStatistics({report}:{report:WaitReport}){
           <svg viewBox="0 0 600 32" aria-hidden="true"><line x1={x(p.minimumMs)} x2={x(p.maximumMs)} y1="16" y2="16"/><line x1={x(p.minimumMs)} x2={x(p.minimumMs)} y1="10" y2="22"/><line x1={x(p.maximumMs)} x2={x(p.maximumMs)} y1="10" y2="22"/><rect x={x(p.q1Ms)} y="8" width={Math.max(2,x(p.q3Ms)-x(p.q1Ms))} height="16"/><line className="wait-person-median" x1={x(p.medianMs)} x2={x(p.medianMs)} y1="6" y2="26"/></svg>
           <span>中位数 {duration(p.medianMs)} · {p.count} 段{p.unknownCount?` · 未知 ${p.unknownCount} 段`:''}</span></div>:<span>未知 · {p.unknownCount} 段</span>}</div>;
       })}{personFocus&&<div className="usage-chart-tooltip" role="status">{personFocus}</div>}</div>}
-      {report.people.length===0&&<p className="usage-empty">暂无等待分布</p>}
+      {report.people.length===0&&<p className="usage-empty">{sourceUnavailable?'原件不可读取，等待分布未知':'暂无等待分布'}</p>}
     </section>
     <section className="usage-figure" aria-label="权限请求"><div className="usage-figure-head"><h2>权限请求</h2><span>未知</span></div><p className="usage-empty">尚无可核对的权限请求记录</p><details className="usage-data-status"><summary>权限来源</summary><p>{report.permissions.reason}</p></details></section>
     <details className="usage-data-status"><summary>统计口径与版本</summary><p>{report.definition}</p><p>{report.algorithmVersion} · 等待来源 {report.waitVersion}</p>{report.unknownReasons.map(reason=><p key={reason}>{reason}</p>)}</details>

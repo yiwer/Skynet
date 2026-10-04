@@ -45,7 +45,7 @@ export function activityService(db:Database,raw:RawStore,insights:ReturnType<typ
       const delivery=new Map<string,DeliveryObservation>(receipts.map(row=>{const observation={receiptCount:row.count,disconnectedAttempts:Number(row.attempts),firstDisconnectedAt:row.first,lastDisconnectedAt:row.last,capturedAt:row.captured,acknowledgedAt:row.acknowledged,receivedAt:row.received?.toISOString()??null};return [row.snapshot_id,{...observation,revision:digest(JSON.stringify(observation))}];}));
       const latest=[...new Map(originals.map(original=>[original.sessionId,original])).values()].filter(original=>(!q.source||original.record.source===q.source)&&original.origins.some(origin=>origin.context==='after-enrollment'&&origin.sourceDate===scope.date&&(!q.employeeId||origin.employeeId===q.employeeId)&&(q.project===undefined||origin.project===q.project)));
       const views=await insights.readMany(latest.map(original=>original.record.id),{full});
-      for(const [index,view] of views.entries()){const original=latest[index]!;if(view.input.hash!==original.record.hash||view.input.attributionRevision!==original.revision)throw new HttpError(409,'活动原件归属已更新，请重新读取');}
+      for(const [index,view] of views.entries()){const original=latest[index]!;if(view.input.hash!==original.record.hash||view.input.attributionRevision!==original.revision||original.unavailable!==view.sourceAvailability?.reason)throw new HttpError(409,'活动原件归属或可用性已更新，请重新读取');}
       const waiting=await materializeWaits(client,originals,{timeZone:'Asia/Shanghai',activityDate:scope.date,from:scope.date,to:scope.date,...(scope.employeeId?{employeeId:scope.employeeId}:{}),...(scope.source?{source:scope.source}:{}),...(scope.project!==undefined?{project:scope.project}:{})},clock);
       const records=activityRecords(originals,evidence,delivery,scope,views,waiting.intervals);
       // The existing conversation reader accepts a fixed waiting revision. Every
@@ -53,9 +53,9 @@ export function activityService(db:Database,raw:RawStore,insights:ReturnType<typ
       const pinned=new Set<object>();const pin=(evidence:{conversationPath:string|null})=>{if(!pinned.has(evidence)&&evidence.conversationPath)evidence.conversationPath+='&waitVersion='+waiting.version;pinned.add(evidence);};
       for(const event of records.events){pin(event.evidence);if(event.endEvidence)pin(event.endEvidence);}
       for(const lane of records.lanes){for(const session of lane.sessions)pin(session.evidence);for(const point of lane.points)pin(point.evidence);for(const segment of lane.segments)pin(segment.evidence);}
-      const inputs=originals.map(o=>({snapshotId:o.record.id,hash:o.record.hash,attributionRevision:o.revision,parserVersion:o.facts.parserVersion}));
+      const inputs=originals.map(o=>({snapshotId:o.record.id,hash:o.record.hash,attributionRevision:o.revision,parserVersion:o.facts.parserVersion,...(o.unavailable?{unavailable:o.unavailable}:{})}));
       const dataAsOf=[...originals.map(original=>original.record.committed_at.toISOString()),...receipts.map(receipt=>receipt.received?.toISOString()).filter(Boolean)].sort().at(-1)??null;
-      const content={scope,...records,total:records.events.length,nextOffset:null,algorithmVersion:'activity-1',dataAsOf,
+      const content={scope,...records,total:records.events.length,nextOffset:null,algorithmVersion:'activity-2',dataAsOf,
         inputs,analyses:views.map(({snapshotId,version,state,analysisVersion})=>({snapshotId,version,state,analysisVersion})),nextLaneOffset:null,nextInputOffset:null,
         inputCount:inputs.length,laneItemCount:lanePage(records.lanes,0).total,employeeOrder:records.lanes.map(({employeeId,employee})=>({employeeId,employee})),waitAlgorithmVersion,waitVersion:waiting.version,inputVersion:digest(JSON.stringify(inputs))};
       const version=digest(JSON.stringify(content));
