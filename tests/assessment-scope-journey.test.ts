@@ -56,12 +56,16 @@ test('Web and OAuth MCP select fixed assessment scopes, explain actual weights a
       for (const theme of ['light', 'dark']) { await page.evaluate(value => { document.documentElement.dataset.theme = value; }, theme);
         await page.getByTestId('assessment-index').scrollIntoViewIfNeeded(); const filename = join(directory, `scope-${width}-${theme}.png`);
         await page.screenshot({ path: filename, animations: 'disabled' }); shots.push(filename);
+        const targets=await page.locator('.assessment-controls button,.assessment-controls select,.assessment-history>summary').evaluateAll(nodes=>nodes.map(node=>{const box=node.getBoundingClientRect();return {text:node.textContent?.trim(),width:box.width,height:box.height};}));
+        assert.ok(targets.every(box=>box.width>=44&&box.height>=44),JSON.stringify({width,theme,targets}));
         assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth && document.documentElement.scrollHeight <= innerHeight));
       }
     }
     await page.getByText('历史评估', { exact: true }).click();
+    const historyTargets=await page.locator('.assessment-history li>a').evaluateAll(nodes=>nodes.map(node=>{const box=node.getBoundingClientRect();return {width:box.width,height:box.height};}));assert.ok(historyTargets.every(box=>box.width>=44&&box.height>=44));
     await page.locator(`a[href*="version=${standard.version}"]`).click();
     await expect(page.getByTestId('assessment-index')).toHaveText('73'); await expect(page.getByLabel('评估范围')).toContainText('历史');
+    const currentTarget=await page.getByRole('link',{name:'查看当前评估',exact:true}).boundingBox();assert.ok(currentTarget&&currentTarget.width>=44&&currentTarget.height>=44);
     await sandbox.session(owner, { prompts: 3 });
     await page.getByRole('button', { name: '刷新', exact: true }).click(); await expect(page.getByLabel('评估结论')).toContainText('3 个会话');
     assert.deepEqual(await call('read_assessment', { version: standard.version }), standard);
