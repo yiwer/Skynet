@@ -169,3 +169,20 @@ C:/Users/yiwer/AppData/Local/Packages/OpenAI.Codex_2p2nqsd0c76g0/LocalCache/Roam
 通过 Hidden / 当前用户 Limited 一次性任务在包外离线更新标准 npm，执行正常 `upgrade --state`；之后更新 MSIX npm，并独立复核标准入口。MSIX 安装仍导致标准 shim 缺失，按已核实归档仅修复标准 npm 入口，不重复升级后台。最终两个上下文均为 0.2.5 / running / connected，设备 ID、稳定状态目录、正式任务名称及后台实例一致；身份与 hooks 字节不变。所有本次一次性任务均已移除，正式采集任务保留 Running。
 
 旧的未知来源事件仍保留，Desktop 完整来源识别不因这次升级被认定通过；不重放旧原件、不扫描历史、不制造旧耗时。新回执在后续正常拾取与 ACK 后产生，真实数据何时到达取决于宿主新活动。证据在 `E:/GenCode/Skynet-evidence/v2-2026-10-04/` 的 `upgrade-0.2.5-evidence.json`、`upgrade-0.2.5-outside-final.json`、`upgrade-0.2.5-msix-status.json`、`upgrade-0.2.5-final-tasks.json`。
+
+## 0.2.6 队列调度与本机实测
+
+2026-10-05 从独立接受的 `32c5b7980c424663083d9ed6e909e7929017bce7` 构建私有 `@skynet/agent` 0.2.6，包 SHA-256 为 `4d3767b791e78f39606ff1fd828101435ebc2546b0326d9ca4a898772d65d8de`。归档在同一证据根目录的 `local-onboarding-release-0.2.6/skynet-agent-0.2.6.tgz`，未发布公共 npm。此版本包含 Windows 后台启动句柄修复和有界 Codex hook 路由，逐轮处理新事件及旧重试，保持原有来源、身份、路径和 1 MiB 元数据边界。
+
+通过当前用户 Hidden / Limited 一次性任务离线更新普通 npm，再执行正常 `upgrade --state`，00:11:54 完成。随后更新 MSIX npm，并从包外修复其影响的普通 npm shim；没有重复升级运行实例。设备 ID、正式任务、身份与 hooks 文件字节保持不变；两个一次性任务已移除，正式采集任务继续运行。
+
+00:12:32、00:12:46、00:13:00 的三次真实状态检查均为 0.2.6 / running / connected / fresh，服务器 `checkedAt` 和 `lastSweepCompletedAt` 连续前进。当时约 2.9 万条未分类事件仍在，单轮实际尝试 256 条，未把一轮的失败数当作全队列总量。升级前抽样的 32 条旧 hook 文件在升级后全部保持原 SHA-256。此前的 `running` 配合过期心跳不作为正常处理证据。
+
+随后在已配置的真实 Codex CLI 0.160.0 中分别打开默认共享后台模式和 `--no-daemon` 模式，仅执行 `/quit`。只从这两个子进程环境移除继承的 `CODEX_INTERNAL_ORIGINATOR_OVERRIDE`，未改宿主或系统配置。原生 SessionEnd 自动触发、后台自动上传，两次均无用户模型提示、无工具调用；这是接入链路校验，不是新增业务对话或完整模型行为验收。
+
+| 模式 | 原生来源 | 会话 ID | 平台快照 | 原件 bytes | 本地与平台共同 SHA-256 |
+| --- | --- | --- | --- | --- | --- |
+| 默认共享后台 | vscode / codex-tui | 01a107b1-3b06-7322-b2af-cad730329388 | 7f2e131a-4252-489f-b713-58987ddd5fe1 | 22,852 | ed1069ba7748f93e91f1719ee6547359c4d9c35f57820f3a67493e3bfbaafb7b |
+| 独立进程 | cli / codex-tui | 01a107b3-d4c5-7e90-a5e0-7edb84b7f660 | 071d4300-84a8-4b3d-be7c-c3db9f12fc78 | 22,849 | cdcb60c3022a71e6ecbc88b367bcafee189856e5897c7b3b96d4729d9709e15e |
+
+两份下载原件已逐字节核对，默认模式原件也已在平台浏览器中实际打开。完整记录在 `upgrade-0.2.6-evidence.json`、`upgrade-0.2.6-outside-final.json`、`upgrade-0.2.6-heartbeat.json`、`upgrade-0.2.6-retained-{before,after}.json`、`upgrade-0.2.6-native-verification.json` 与 `upgrade-0.2.6-final-tasks.json`。这些是功能与运行状态证据，不是 P95；未分类 Desktop 来源仍未开放采集，#54 / AC32 和真实试用门槛继续单独验收。

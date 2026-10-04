@@ -10,6 +10,9 @@ test('current employee profiles retain standalone usage and efficiency versions 
   try{
     const owner=await f.owner('固定准备甲'),peer=await f.owner('固定准备乙');
     const week=monday(beijingDate(f.now));
+    // The late Tuesday must already be inside since-enrollment's as-of date,
+    // including when the real test runner starts on a Beijing Monday.
+    f.now.setTime(Date.parse(addDays(week,4)+'T18:00:00+08:00'));
     async function recorded(person:typeof owner,date:string,tokens:number){
       const original=f.rows({prompts:3,tokens,verified:1,claimed:0});
       const shift=Date.parse(date+'T12:00:00+08:00')-f.base.getTime();
@@ -33,7 +36,7 @@ test('current employee profiles retain standalone usage and efficiency versions 
       assert.deepEqual(await get('/api/session-efficiency/export?'+query+'&version='+profile.references.efficiency.version),efficiency);
     }
     await recorded(owner,addDays(week,1),4000);
-    const latest=await get(path);assert.equal(latest.kpis.sessions,3);assert.equal(latest.kpis.inputTokens,7000);
+    const latest=await get(path);assert.equal(latest.range.to,addDays(week,4));assert.equal(latest.kpis.sessions,3);assert.equal(latest.kpis.inputTokens,7000);
     assert.notEqual(latest.version,originals[0].version);assert.equal(latest.references.efficiency.version,(await get('/api/session-efficiency/export?period=since-enrollment&employeeId='+owner.employeeId)).version);
     for(const original of originals)assert.deepEqual(await get(path+'?version='+original.version),original);
   }finally{await f.close();}

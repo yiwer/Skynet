@@ -37,6 +37,7 @@ import { migrateSessionInsights,sessionInsightsService } from './session-insight
 import { sessionInsightsQuery } from '../../packages/contracts/session-insights.js';
 import { migrateUsageOutput, usageOutputService } from './usage-output.js';
 import {migrateSessionEfficiency,sessionEfficiencyService} from './session-efficiency.js';
+import {sendReportDownload} from './report-download.js';
 import {migratePromptReports,promptReportService} from './prompt-report.js';
 import {migrateTeamReports,teamReportService} from './team-report.js';
 import { migrateDeliveryReceipts, saveDeliveryReceipt } from './delivery-receipts.js';
@@ -299,8 +300,7 @@ export async function createApp(options: { db: Database; rawDirectory: string; w
   app.get('/api/session-efficiency',{onRequest:readerGuard},request=>efficiency.read(request.query));
   app.post('/api/session-efficiency/recompute',{onRequest:readerGuard},request=>efficiency.recompute(request.body));
   app.get('/api/session-efficiency/export',{onRequest:readerGuard},async(request,reply)=>{
-    const value=await efficiency.export(request.query);
-    return reply.header('Content-Disposition',`attachment; filename="skynet-session-efficiency-${value.version}.json"`).type('application/json').send(value);
+    return sendReportDownload(request,reply,await efficiency.download(request.query),'skynet-session-efficiency');
   });
   const prompts=promptReportService(db,usage,insights);
   const assessments = assessmentService(db, usage, insights, waits, options.reportClock);

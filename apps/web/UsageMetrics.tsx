@@ -1,12 +1,13 @@
 import { useEffect, useState, useRef, type CSSProperties, type FormEvent } from 'react';
 import type { MetricTotals, MetricsQuery } from '../../packages/contracts/metrics.js';
 import { sourceLabel, type Source } from '../../packages/contracts/archive.js';
-import type { UsageOutputPage } from '../../packages/contracts/usage-output.js';
+import type { UsageOutputPage, UsageReadingPage, UsageQuery } from '../../packages/contracts/usage-output.js';
+import {readUsageCollections} from './usage-reading.js';
 import { OutputKpis, OutputTable, UsageScatter, UsageDailyPeople } from './UsageOutputCharts.js';
 import './usage-metrics.css';
 
 type Props = { request: (path: string, signal?: AbortSignal, method?: 'POST', body?: unknown) => Promise<Response> };
-const params = (query: Partial<MetricsQuery>) => new URLSearchParams(Object.entries(query)
+const params = (query: Partial<UsageQuery>) => new URLSearchParams(Object.entries(query)
   .filter(([, value]) => value !== undefined).map(([key, value]) => [key, String(value)]));
 const selectionKey = (query: MetricsQuery) => { const value = params(query); value.sort(); return value.toString(); };
 const number = (value: number) => value.toLocaleString('zh-CN');
@@ -31,7 +32,7 @@ export function UsageMetrics({ request }: Props) {
   const definitions=useRef<HTMLDetailsElement>(null);
   const [draft, setDraft] = useState<MetricsQuery>(hashMetrics);
   const [query, setQuery] = useState<MetricsQuery>(draft);
-  const [page, setPage] = useState<UsageOutputPage | null>(null);
+  const [page, setPage] = useState<UsageReadingPage | null>(null);
   const [complete, setComplete] = useState<UsageOutputPage | null>(null);
   const [employees, setEmployees] = useState<Array<{ employeeId: string; employee: string }>>([]);
   const [projects, setProjects] = useState<string[]>([]); const [customProject, setCustomProject] = useState(false); const [advanced, setAdvanced] = useState(false);
@@ -40,9 +41,10 @@ export function UsageMetrics({ request }: Props) {
   const [peopleChart, setPeopleChart] = useState(true);
   const [chartError, setChartError] = useState(''); const [chartRetry, setChartRetry] = useState(0);
   const [exporting, setExporting] = useState(false); const [message, setMessage] = useState('');
+  const [sessionOffset,setSessionOffset]=useState(0);
   useEffect(() => {
     const abort = new AbortController(); setBusy(true); setError(''); setPage(null); setMessage('');
-    request(`/api/usage-output?${params(query)}`, abort.signal).then(value => value.json()).then((data: UsageOutputPage) => {
+    request(`/api/usage-output?${params(query)}`, abort.signal).then(value => value.json()).then((data: UsageReadingPage) => {
       if (abort.signal.aborted) return;
       setPage(data);
       setEmployees(previous => [...new Map([...previous, ...data.employees].map(person => [person.employeeId, { employeeId: person.employeeId, employee: person.employee }])).values()]
@@ -54,11 +56,10 @@ export function UsageMetrics({ request }: Props) {
   useEffect(() => {
     if (!page || complete?.version === page.version) return;
     const abort = new AbortController(); setChartError('');
-    if (query.offset === 0 && page.nextOffset === null) { setComplete(page); return; }
-    // A session page is never a complete employee/Agent distribution. Read
-    // the same persisted version's bounded full export to draw this chart.
-    request(`/api/usage-output/export?${params({ ...query, offset: 0, version: page.version })}`, abort.signal)
-      .then(response => response.json()).then((data: UsageOutputPage) => { if (!abort.signal.aborted) setComplete(data); })
+    readUsageCollections(page,async(section,offset)=>(await request(`/api/usage-output?${params({...query,version:page.version,section,offset})}`,abort.signal)).json(),abort.signal)
+      .then(data => { if (!abort.signal.aborted) {setComplete(data);setSessionOffset(0);
+        setEmployees(previous=>[...new Map([...previous,...data.employees].map(person=>[person.employeeId,{employeeId:person.employeeId,employee:person.employee}])).values()].sort((a,b)=>a.employee.localeCompare(b.employee,'zh-CN')||a.employeeId.localeCompare(b.employeeId)));
+      } })
       .catch(failure => { if (!abort.signal.aborted) setChartError(failure.message); });
     return () => abort.abort();
   }, [page?.version, chartRetry]);
@@ -79,7 +80,7 @@ export function UsageMetrics({ request }: Props) {
   async function recompute() {
     setBusy(true); setError(''); setMessage('');
     try {
-      const data: UsageOutputPage = await (await request('/api/usage-output/recompute', undefined, 'POST', { ...query, offset: 0, version: undefined })).json();
+      const data: UsageReadingPage = await (await request('/api/usage-output/recompute', undefined, 'POST', { ...query, offset: 0, version: undefined })).json();
       setQuery({ ...query, offset: 0, version: data.version });
     } catch (failure) { setError((failure as Error).message); }
     finally { setBusy(false); }
@@ -96,14 +97,16 @@ export function UsageMetrics({ request }: Props) {
     finally { setExporting(false); }
   }
   const allSessions = complete?.version === page?.version ? complete?.sessions : undefined;
-  const displayedAgents = agents.filter(source => page?.employees.some(row => row.agents.some(agent => agent.source === source && (agent.sessions > 0 || agent.knownInputTokens > 0))));
-  const people = page?.employees.map(person => ({ ...person, agents: displayedAgents.map(source => {
-    const rows = allSessions?.filter(session => session.employeeId === person.employeeId && session.source === source) ?? [];
-    return { source, input: rows.reduce((sum, session) => sum + session.knownInputTokens, 0), unknown: rows.some(session => session.inputTokens === null) };
+  const loaded=complete?.version===page?.version?complete:null;
+  const displayedAgents = agents.filter(source => loaded?.employees.some(row => row.agents.some(agent => agent.source === source && (agent.sessions > 0 || agent.knownInputTokens > 0))));
+  const people = loaded?.employees.map(person => ({ ...person, agents: displayedAgents.map(source => {
+    const aggregate=person.agents.find(agent=>agent.source===source);
+    return { source, input:aggregate?.knownInputTokens??0, unknown:aggregate?.inputTokens===null };
   }) })) ?? [];
-  const hasInput = page && (page.sessions.length > 0 || page.totals.knownInputTokens > 0);
-  const hasOutput = page && (page.sessions.length > 0 || page.totals.knownOutputTokens > 0);
-  const hasUsage = page && page.employees.length > 0 && (page.totals.sessions > 0 || page.totals.userTurns > 0 || page.totals.toolCalls > 0 || hasInput || hasOutput);
+  const hasInput = page && (page.totals.sessions > 0 || page.totals.knownInputTokens > 0);
+  const hasOutput = page && (page.totals.sessions > 0 || page.totals.knownOutputTokens > 0);
+  const hasUsage = page && (page.totals.sessions > 0 || page.totals.userTurns > 0 || page.totals.toolCalls > 0 || hasInput || hasOutput || !page.sourceInputsComplete);
+  const sessions=loaded?.sessions.filter(session=>session.selected),sessionRows=(sessions??page?.sessions.filter(session=>session.selected)??[]).slice(sessionOffset,sessionOffset+20);
   const employeeMaximum = Math.max(1, ...people.map(person => person.knownInputTokens));
   return <section className="usage-metrics workspace-page" aria-label="用量指标" aria-busy={busy}>
     <div className="usage-page-head"><h1>用量与产出</h1>{page && <div className="usage-export-actions">{!query.week&&<button disabled={busy} onClick={recompute}>从原件重算</button>}<button disabled={busy || exporting} onClick={download}>{exporting ? '正在导出…' : '导出当前版本'}</button></div>}</div>
@@ -145,17 +148,17 @@ export function UsageMetrics({ request }: Props) {
           {agentTooltip && peopleChart && <p className="usage-chart-tooltip" role="tooltip">{agentTooltip}</p>}
           <ul className="usage-legend">{displayedAgents.map(source => <li key={source}><i data-series={sourceSeries(source)} />{sourceLabel(source)}</li>)}</ul>
         </section>}
-      <OutputTable page={page}/>
+      {loaded&&<OutputTable page={loaded}/>}
       </div>}
       {complete?.version === page.version && <><UsageScatter page={complete}/><UsageDailyPeople page={complete}/></>}
       <section className="usage-figure" aria-label="会话用量"><div className="usage-figure-head"><div><h2>会话明细</h2></div></div>
-        <div className="usage-table-scroll"><table><caption>当前指标版本的会话分页</caption><thead><tr><th>员工 / 项目</th><th>Agent</th><th>轮次 / 工具</th><th>输入 Token</th><th>输出 Token</th><th>原件</th></tr></thead><tbody>{page.sessions.filter(session => session.selected).map(session => <tr key={`${session.sessionId}:${session.employeeId}:${session.project}`}><th scope="row">{session.employee}<span className="usage-cell-detail">{session.project || '未归类项目'}</span></th><td>{sourceLabel(session.source)}</td><td>{session.userTurns} / {session.toolCalls}</td><td><TokenValue value={session.knownInputTokens} unknown={tokenUnknown(session, 'Input')} /></td><td><TokenValue value={session.knownOutputTokens} unknown={tokenUnknown(session, 'Output')} /></td><td><a href={session.webPath}>查看会话</a></td></tr>)}</tbody></table></div>
-        {page.sessions.length === 0 && <p className="usage-empty">没有符合条件的会话。</p>}
-        <div className="usage-pagination"><button disabled={busy || query.offset === 0} onClick={() => setQuery({ ...query, version: page.version, offset: Math.max(0, query.offset - 20) })}>上一页会话</button><span>版本 {page.revision} · 第 {Math.floor(query.offset / 20) + 1} 页</span><button disabled={busy || page.nextOffset === null} onClick={() => setQuery({ ...query, version: page.version, offset: page.nextOffset! })}>下一页会话</button></div>
+        <div className="usage-table-scroll"><table><caption>当前指标版本的会话分页</caption><thead><tr><th>员工 / 项目</th><th>Agent</th><th>轮次 / 工具</th><th>输入 Token</th><th>输出 Token</th><th>原件</th></tr></thead><tbody>{sessionRows.map(session => <tr key={`${session.sessionId}:${session.employeeId}:${session.project}`}><th scope="row">{session.employee}<span className="usage-cell-detail">{session.project || '未归类项目'}</span></th><td>{sourceLabel(session.source)}</td><td>{session.userTurns} / {session.toolCalls}</td><td><TokenValue value={session.knownInputTokens} unknown={tokenUnknown(session, 'Input')} /></td><td><TokenValue value={session.knownOutputTokens} unknown={tokenUnknown(session, 'Output')} /></td><td><a href={session.webPath}>查看会话</a></td></tr>)}</tbody></table></div>
+        {sessions?.length === 0 && <p className="usage-empty">没有符合条件的会话。</p>}
+        <div className="usage-pagination"><button disabled={busy || !sessions || sessionOffset===0} onClick={() => setSessionOffset(offset=>Math.max(0,offset-20))}>上一页会话</button><span>版本 {page.revision} · 第 {Math.floor(sessionOffset / 20) + 1} 页{sessions&&<> · 共 {sessions.length} 个会话</>}</span><button disabled={busy || !sessions || sessionOffset+20>=sessions.length} onClick={() => setSessionOffset(offset=>offset+20)}>下一页会话</button></div>
       </section>
     </>}
     {page && <details ref={definitions} className="usage-data-status"><summary>指标口径 · 版本 {page.revision}</summary><p>按 eventId 去重，归属原员工和北京时间来源日期。Token 来自已支持原生版本；未知会话单列，不进入每日趋势。</p><p>已验证与仅声称结果由模型提取并绑定原文证据；代码、测试和提交来自会话内工具记录，按各自单位展示。点击会话可核查固定分析版本。</p><p>{page.catalogVersion}</p></details>}
-    {page && !page.sourceInputsComplete && page.unknownReasons.length > 0 && <details className="usage-data-status"><summary>数据缺口 · {page.unknownReasons.length}</summary><ul>{page.unknownReasons.map(reason => <li key={reason}>{reason}</li>)}</ul></details>}
+    {page && !page.sourceInputsComplete && <details className="usage-data-status"><summary>来源不完整 · {page.pages.unknownReasons.total}</summary><ul>{(loaded?.unknownReasons??page.unknownReasons).map(reason => <li key={reason}>{reason}</li>)}</ul></details>}
     </div>
   </section>;
 }

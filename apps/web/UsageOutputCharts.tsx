@@ -7,7 +7,7 @@ const compact = (n: number) => n >= 1e6 ? `${Number((n / 1e6).toFixed(2))}M` : n
 export function Amount({ amount, children }: { amount: OutputAmount; children?: ReactNode }) {
   return <span>{amount.value === null && !amount.known ? '未知' : <>{children ?? number(amount.known)}{amount.value === null && <span className="usage-cell-detail">+ {amount.unknownSessions} 会话未知</span>}</>}</span>;
 }
-export function OutputKpis({ page }: { page: UsageOutputPage }) {
+export function OutputKpis({ page }: { page: Pick<UsageOutputPage,'outputs'|'totals'> }) {
   const { outputs: o, totals: t } = page;
   return <dl className="usage-stats">
     <div className="usage-stat"><dt>输入 Token</dt><dd>{t.inputTokens === null && !t.knownInputTokens ? '未知' : compact(t.knownInputTokens)}{t.inputTokens === null && t.knownInputTokens > 0 && <sup>*</sup>}</dd><div className="usage-stat-sub">输出 {t.outputTokens === null && !t.knownOutputTokens ? '未知' : compact(t.knownOutputTokens)}{t.unknownTokenSessions > 0 && <> · {t.unknownTokenSessions} 个会话未知</>}</div></div>

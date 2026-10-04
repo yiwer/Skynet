@@ -24,6 +24,7 @@ import { workViewQuery } from '../../packages/contracts/work-views.js';
 import type { ServerOperationsService } from './server-operations.js';
 import { conversationInputSchema, conversationTraceInputSchema } from '../../packages/contracts/conversation.js';
 import { metricsQuerySchema } from '../../packages/contracts/metrics.js';
+import { usageQuerySchema } from '../../packages/contracts/usage-output.js';
 import type { conversationQuery } from './conversation.js';
 import type { metricsService } from './metrics.js';
 import type { assemblyService, processingService } from './assembly.js';
@@ -86,8 +87,8 @@ export async function registerMcp(app: FastifyInstance, db: Database, archive: A
       inputSchema: processingQuery }, input => result(() => processing(input)));
     mcp.registerTool('get_report_summary', { description: '读取来源日期归期、去重且版本化的基础用量。Token 未知单列；会话可下钻原件。后续页传入同一 version 和 nextOffset，不混用新版本。',
       annotations, inputSchema: metricsQuerySchema }, input => result(() => metrics.readMetrics(input)));
-    mcp.registerTool('read_usage_output', { description: '读取用量与产出的固定版本，与 HTTP、Web、导出同源。产出按原始事件去重、员工及来源日期归期，未知单列。选员工时 totals/employees 仅该员工；sessions 保留 selected=false 的灰色散点参照，其他筛选共享。分页携带同一 version 和 nextOffset。',
-      annotations, inputSchema: metricsQuerySchema }, input => result(() => usage.read(input)));
+    mcp.registerTool('read_usage_output', { description: '读取用量与产出的固定版本，与 HTTP、Web、导出同源。totals/outputs 为完整合计；各数组仅为当前页，pages[section] 给总数与 nextOffset。后续页必须携带同一 version、section、offset，包括 offset=0；员工每日、活跃日期和未知原因分别在 employeeDaily/employeeActiveDates/employeeUnknownReasons。选员工时 totals/employees 仅该员工，sessions 仍保留 selected=false 的团队参照。',
+      annotations, inputSchema: usageQuerySchema }, input => result(() => usage.read(input)));
     mcp.registerTool('read_wait_report', { description:'按固定等待来源读取中位数/P90、长等待与并行占比、星期小时热力表和姓名顺序人员分布。保留分子分母，权限未知单列。等待不用于考勤，建议不更改宿主权限。', annotations, inputSchema:waitReportQuerySchema }, input=>result(()=>waitReport.read(input)));
     mcp.registerTool('read_team_report',{description:'读取团队与员工周使用概况的固定同源指标、每日趋势与姓名顺序人员汇总，保留覆盖和未知状态。',annotations,inputSchema:fixedTeamReportQuerySchema},input=>result(()=>team.read(input)));
     mcp.registerTool('read_session_efficiency',{description:'读取固定会话产效、同类任务分布及严格 P75/声称/返工复盘条件。比值保留分子分母，未知与零分母不计算，时间分段绑定同一批原件与等待版本。sort/direction 只排序会话；后续页传同一 version 与 nextOffset。每会话先返回 5 段；完整分段用同一 version、sessionId 与 nextSegmentOffset 作为 segmentOffset，每页 20 段。',annotations,inputSchema:efficiencyQuerySchema},input=>result(()=>efficiency.read(input)));
