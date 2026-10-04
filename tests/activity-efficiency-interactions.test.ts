@@ -27,13 +27,33 @@ test('dense recorded activity remains touch reachable with its exact original de
     const target=rhythm.getByRole('button',{name:'活动触屏合成员工 · 4 条活动',exact:true});await expect(target).toBeVisible();
     await target.tap();const details=rhythm.getByRole('dialog',{name:'活动详情',exact:true});await expect(details).toBeInViewport({ratio:1});
     await expect(details.getByRole('link')).toHaveCount(4);
-    const point=details.getByRole('link',{name:'活动触屏合成员工 · 提问 · 10:00:00',exact:true});
+    const point=details.getByRole('link',{name:/^活动触屏合成员工 · 提问 · 10:00:00 ·/});
     const bounds=await point.boundingBox();assert.ok(bounds);assert.ok(bounds.width>=44&&bounds.height>=44);const href=await point.getAttribute('href');assert.equal(href,first.evidence.conversationPath??first.evidence.webPath);
     await page.screenshot({path:join(directory,'activity-dense-before-touch.png'),animations:'disabled'});
     await point.tap();await expect(page.getByRole('region',{name:'对话阅读',exact:true})).toBeVisible();
     await writeFile(join(directory,'activity-dense-touch.json'),JSON.stringify({version:report.version,expected:href,actual:new URL(page.url()).hash,point:bounds,errors},null,2));
     assert.equal(new URL(page.url()).hash,new URL(href!,f.origin).hash,'touching the requested activity must open that original, not a neighboring record');
     await expect(page.getByRole('region',{name:'对话阅读',exact:true}).getByText('会话1 请求 0 elements=3',{exact:true})).toBeVisible();assert.deepEqual(errors,[]);
+  }finally{await browser?.close();await f.close();}
+});
+
+test('simultaneous activity identifies each project and session before original navigation',{timeout:120000},async()=>{
+  const f=await assessmentFixture();let browser:Browser|undefined;
+  const directory=process.env.SKYNET_ACTIVITY_EFFICIENCY_EVIDENCE??join(f.directory,'activity-efficiency');await mkdir(directory,{recursive:true});
+  try{
+    const owner=await f.owner('同秒活动合成员工');
+    for(const project of ['/activity/alpha','/activity/beta']){const source=f.rows({prompts:1,verified:0,claimed:0});await f.upload(owner,source.rows,source.sessionId,{project});}
+    const date=beijingDate(f.base),response=await f.api(owner,'/api/activity?date='+date);assert.equal(response.status,200);const report=await response.json();
+    const expected=report.events.filter((event:any)=>event.type==='prompt');assert.equal(expected.length,2);
+    browser=await chromium.launch();const page=await browser.newPage({ignoreHTTPSErrors:true,hasTouch:true,viewport:{width:320,height:900},reducedMotion:'reduce'});
+    await page.goto(f.origin+'/#activity?date='+date+'&version='+report.version);await page.getByLabel('个人读取凭据').fill(owner.readerCredential);await page.getByRole('button',{name:'进入存档',exact:true}).click();
+    const rhythm=page.getByRole('region',{name:'对话节奏',exact:true}),target=rhythm.getByRole('button',{name:'同秒活动合成员工 · 4 条活动',exact:true});await target.tap();
+    const details=rhythm.getByRole('dialog',{name:'活动详情',exact:true}),links=details.getByRole('link'),labels=await links.allTextContents();
+    await writeFile(join(directory,'activity-same-time-labels.json'),JSON.stringify({version:report.version,labels},null,2));
+    assert.equal(new Set(labels).size,4,'same-second records must have distinguishable visible identities');
+    for(const event of expected){const link=details.getByRole('link').filter({hasText:'提问'}).filter({hasText:event.project});await expect(link).toHaveCount(1);await expect(link).toHaveAttribute('href',event.evidence.conversationPath??event.evidence.webPath);}
+    await page.setViewportSize({width:1280,height:900});await expect(details).toHaveCount(0);
+    for(const event of expected){await target.tap();const original=details.getByRole('link').filter({hasText:'提问'}).filter({hasText:event.project});await original.tap();await expect(page.getByRole('region',{name:'对话阅读',exact:true})).toBeVisible();assert.equal(new URL(page.url()).hash,new URL(event.evidence.conversationPath??event.evidence.webPath,f.origin).hash);await page.goBack();await expect(target).toBeVisible();}
   }finally{await browser?.close();await f.close();}
 });
 

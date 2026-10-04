@@ -16,15 +16,19 @@ function Rhythm({page}:{page:ActivityPage}){
   const chart=useRef<HTMLDivElement>(null),[width,setWidth]=useState(800),[now,setNow]=useState(()=>new Date());
   useEffect(()=>{const timer=setInterval(()=>setNow(new Date()),30000);return()=>clearInterval(timer);},[]);
   useEffect(()=>{if(!chart.current)return;const observer=new ResizeObserver(entries=>setWidth(Math.max(180,entries[0]!.contentRect.width)));observer.observe(chart.current);return()=>observer.disconnect();},[table]);
+  useEffect(()=>{detail.close();},[width,page]);
   const left=width<400?84:128,plot=width-left-20,start=Date.parse(page.scope.date+'T00:00:00+08:00'),px=(value:string)=>left+Math.max(0,Math.min(1,(Date.parse(value)-start)/86400000))*plot;
   const height=page.lanes.length*48+40,nowX=beijingDate(now)===page.scope.date?px(now.toISOString()):null;
   const cells=Math.max(1,Math.floor(plot/44)),cellWidth=plot/cells,cell=(value:string)=>Math.min(cells-1,Math.floor((px(value)-left)/cellWidth));
   const targets=page.lanes.flatMap((lane,index)=>{
+    const identities=new Map(lane.sessions.map((session,n)=>[session.id,`${sourceLabel(session.source)} · ${session.project||'未归类项目'} · 会话 ${n+1}`]));
+    const snapshotSessions=new Map([...lane.sessions.map(session=>[session.evidence.snapshotId,session.id] as const),...lane.points.map(point=>[point.evidence.snapshotId,point.sessionId] as const)]);
+    const identity=(evidence:ActivityEvidence,id=snapshotSessions.get(evidence.snapshotId))=>`${id?identities.get(id)??'会话来源':'会话来源'} · 原件 #${evidence.line}:${evidence.block}`;
     const groups=new Map<number,{id:string;label:string;evidence:ActivityEvidence}[]>();
     const add=(id:string,label:string,evidence:ActivityEvidence,from:string,to=from)=>{for(let n=cell(from);n<=cell(to);n++){const items=groups.get(n)??[];items.push({id,label,evidence});groups.set(n,items);}};
-    for(const session of lane.sessions)add('session:'+session.id,`${lane.employee} · 会话 · ${sourceLabel(session.source)} · ${time(session.observedFrom)} — ${time(session.observedTo)}`,session.evidence,session.observedFrom,session.observedTo);
-    for(const segment of lane.segments)add('wait:'+segment.id,`${lane.employee} · 长等待 · ${time(segment.startedAt)} — ${time(segment.endedAt)}`,segment.evidence,segment.startedAt,segment.endedAt);
-    for(const point of lane.points)add('point:'+point.id,`${lane.employee} · ${activityLabels[point.type]} · ${time(point.timestamp)}`,point.evidence,point.timestamp!);
+    for(const session of lane.sessions)add('session:'+session.id,`${lane.employee} · 会话记录 · ${time(session.observedFrom)} — ${time(session.observedTo)} · ${identity(session.evidence,session.id)}`,session.evidence,session.observedFrom,session.observedTo);
+    for(const segment of lane.segments)add('wait:'+segment.id,`${lane.employee} · 长等待 · ${time(segment.startedAt)} — ${time(segment.endedAt)} · ${identity(segment.evidence)}`,segment.evidence,segment.startedAt,segment.endedAt);
+    for(const point of lane.points)add('point:'+point.id,`${lane.employee} · ${activityLabels[point.type]} · ${time(point.timestamp)} · ${identity(point.evidence,point.sessionId)}`,point.evidence,point.timestamp!);
     return [...groups].map(([column,items])=>({key:lane.employeeId+':'+column,left:left+column*cellWidth,top:index*48+2,label:`${lane.employee} · ${items.length} 条活动`,items}));
   });
   return <section className="activity-rhythm" aria-label="对话节奏"><div className="activity-section-head"><h2>对话节奏</h2><div className="activity-view-switch" role="group" aria-label="节奏视图"><button aria-pressed={!table} onClick={()=>{detail.close();setTable(false);}}>节奏图表</button><button aria-pressed={table} onClick={()=>{detail.close();setTable(true);}}>节奏表格</button></div></div>
