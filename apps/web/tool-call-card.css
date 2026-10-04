@@ -1,0 +1,18 @@
+.platform-main .tool-call-card{min-width:0;margin:0;border:1px solid var(--color-rule);border-radius:12px;background:var(--color-card);overflow:hidden}
+.platform-main .tool-call-card>summary{display:flex;align-items:center;flex-wrap:wrap;gap:6px 10px;min-height:44px;padding:10px 12px;list-style:none;cursor:pointer;background:var(--color-paper-2);font:400 12px/1.65 var(--font-sans);color:var(--color-muted)}
+.platform-main .tool-call-card>summary::-webkit-details-marker{display:none}
+.platform-main .tool-call-card>summary::before{content:'›';font:500 20px/1 var(--font-sans);color:var(--color-muted);transform:rotate(0);transition:transform var(--dur-short) var(--ease-out)}
+.platform-main .tool-call-card[open]>summary::before{transform:rotate(90deg)}
+.platform-main .tool-call-card>summary strong{font:500 13px/1.65 var(--font-mono);color:var(--color-ink);overflow-wrap:anywhere;min-width:0}
+.platform-main .tool-call-icon{width:16px;height:16px;flex:none;fill:none;stroke:var(--color-ink-2);stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round}
+.platform-main .tool-call-status{padding:1px 7px;border:1px solid var(--color-rule);border-radius:5px;color:var(--color-ink-2);font-size:11px;background:var(--color-card)}
+.platform-main .tool-call-fact{font:400 11px/1.6 var(--font-mono);font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
+.platform-main .tool-call-card .conversation-tool-content{padding:0 12px 8px}
+.platform-main .tool-call-card .tool-call-body{margin:0;padding:12px 0 0;min-width:0}
+.platform-main .tool-call-card .tool-call-body h4{font:500 11px/1.6 var(--font-sans);letter-spacing:.06em;color:var(--color-muted);margin:0 0 6px}
+.platform-main .tool-call-card .tool-call-body>.conversation-tool-text{font:400 12px/1.75 var(--font-mono);white-space:pre-wrap;overflow-wrap:anywhere;word-break:normal;max-width:100%;max-height:none;border:0;border-radius:6px;padding:10px 12px;margin:0;background:var(--color-paper-2);color:var(--color-ink)}
+.platform-main .tool-call-actions{display:flex;align-items:center;flex-wrap:wrap;gap:0 16px;min-width:0;margin-top:4px}
+.platform-main .tool-call-actions a{min-height:44px;min-width:44px;display:inline-flex;align-items:center;font-size:12px;color:var(--color-accent-strong);text-underline-offset:3px}
+.platform-main .tool-call-card>summary:focus-visible{outline:2px solid var(--color-focus);outline-offset:-2px;border-radius:10px}
+@media(prefers-reduced-motion:reduce){.platform-main .tool-call-card>summary::before{transition:none}}
+@media(max-width:639px){.platform-main .tool-call-card>summary{gap:6px 8px}.platform-main .tool-call-card .conversation-tool-content{padding:0 10px 6px}}

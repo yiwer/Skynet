@@ -14,6 +14,8 @@ import { EvidenceReader } from './EvidenceReader.js';
 import type { selectedEvidence } from './EvidenceReader.js';
 import type { MetricTotals } from '../../packages/contracts/metrics.js';
 import { AssemblyPanel } from './Assembly.js';
+import {ToolCallCard,isToolRole} from './ToolCallCard.js';
+import {evidenceLink} from '../../packages/contracts/search.js';
 export type Detail = { snapshotId:string; employee:string; manifest:Manifest; committedAt:string; events:ActivityEvent[]; activity:ActivitySummary;
  unrecognizedLines:number; partialLine:boolean; nextOffset:number|null; total:number; captureHealth:Coverage; provenance:Provenance;
  recovery:{nativeRuntimeVersion:string|null; preparation:string; nativeBackend:string; limitation:string} };
@@ -55,7 +57,8 @@ export function SessionDetail({detail,reading,conversationHash,refresh,offset,ev
  {reading==='timeline'&&evidenceLocation&&<EvidenceReader key={selected+':'+JSON.stringify(evidenceLocation)+':'+refresh} snapshotId={selected} location={evidenceLocation} request={request}/>}
           {reading === 'timeline' && <>
           {detail.events.map(event => <section className="message" key={`${event.line}:${event.block ?? 0}`}><div className="message-meta"><strong>{event.role}</strong><span>{contextLabel[event.context]}</span><span>原件第 {event.line} 行 · 来源时间：{event.timestamp ? date(event.timestamp) : '未知'}</span></div>
-            {event.origin && <p className="muted small">原始归属：{event.origin.employee} · {event.origin.project || '未归类项目'} · 设备 {event.origin.deviceId} · <a href={event.origin.webPath ?? `#${event.origin.snapshotId}`}>原始{event.origin.materialId ? '材料' : '快照'}第 {event.origin.line} 行</a></p>}<QualificationProof origin={event.origin} /><pre>{event.text}</pre></section>)}
+            {event.origin && <p className="muted small">原始归属：{event.origin.employee} · {event.origin.project || '未归类项目'} · 设备 {event.origin.deviceId} · <a href={event.origin.webPath ?? `#${event.origin.snapshotId}`}>原始{event.origin.materialId ? '材料' : '快照'}第 {event.origin.line} 行</a></p>}<QualificationProof origin={event.origin} />
+            {isToolRole(event.role)?<ToolCallCard kind={event.role==='tool request'?'request':'result'} open evidencePath={evidenceLink(selected,{kind:'raw',line:event.line,textOffset:0})}>{event.text}</ToolCallCard>:<pre>{event.text}</pre>}</section>)}
           {!evidenceLocation && detail.events.length === 0 && <p>暂无消息</p>}
           {!evidenceLocation && <div className="pagination"><button disabled={offset === 0} onClick={() => setOffset(value => Math.max(0, value - 100))}>上一页</button><button disabled={detail.nextOffset === null} onClick={() => setOffset(detail.nextOffset ?? 0)}>下一页</button></div>}</>}
 </section><aside className="session-side" data-scroll-region="session-inspector" aria-label="会话数据与存档">

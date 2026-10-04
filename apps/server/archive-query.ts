@@ -260,7 +260,7 @@ export function archiveQuery(db: Database, raw: RawStore) {
     const { evidence } = await evidenceCache.get(`${id}:${beijingDate(new Date())}`, () => parsed(id));
     if (location.parserVersion && location.parserVersion !== evidence.parserVersion) throw new HttpError(409,
       `证据解析版本已改变；原件未变，请重新搜索，或下载原件查看第 ${location.line ?? 1} 行`);
-    const offset = location.line === undefined ? location.offset : evidence.events.findIndex(event => event.line === location.line && event.block === location.block);
+    const offset = location.line === undefined ? location.offset : evidence.events.findIndex(event => event.line === location.line && (event.block ?? 0) === (location.block ?? 0));
     if (offset < 0) throw new HttpError(400, '该原件行或 block 没有对应的已解析记录');
     const page = await evidencePage(id, offset, location.textOffset);
     const nextEvent = page.next ? evidence.events[page.next.offset] : undefined;

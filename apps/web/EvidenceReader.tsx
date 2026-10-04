@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from 'react';
 import { locationSchema, type EvidenceLocation } from '../../packages/contracts/search.js';
 import type { EventOrigin } from '../../packages/contracts/provenance.js';
 import { QualificationProof } from './QualificationProof.js';
+import {ToolCallCard,isToolRole} from './ToolCallCard.js';
+import {evidenceLink} from '../../packages/contracts/search.js';
 
 export function selectedEvidence(hash: string) {
   const params = new URLSearchParams(hash.split('?')[1]);
@@ -33,7 +35,8 @@ export function EvidenceReader({ snapshotId, location, request }: { snapshotId: 
     {error && <><p className="error" role="alert">{error}</p><button onClick={() => setRetry(value => value + 1)}>重试证据</button></>}
     {page?.events?.map(event => <section className="message" key={`${event.line}:${event.block ?? 0}:${event.textOffset}`}><div className="message-meta">
       <strong>{event.role}</strong><span>原件第 {event.line} 行{event.block === undefined ? '' : ` / block ${event.block}`} · 文字位置 {event.textOffset}</span></div>
-      {event.origin && <p className="muted small">原始归属：{event.origin.employee} · {event.origin.project || '未归类项目'} · <a href={event.origin.webPath ?? `#${event.origin.snapshotId}`}>原始{event.origin.materialId ? '材料' : '快照'}第 {event.origin.line} 行</a></p>}<QualificationProof origin={event.origin} /><pre>{event.text}</pre></section>)}
+      {event.origin && <p className="muted small">原始归属：{event.origin.employee} · {event.origin.project || '未归类项目'} · <a href={event.origin.webPath ?? `#${event.origin.snapshotId}`}>原始{event.origin.materialId ? '材料' : '快照'}第 {event.origin.line} 行</a></p>}<QualificationProof origin={event.origin} />
+      {isToolRole(event.role)?<ToolCallCard kind={event.role==='tool request'?'request':'result'} open evidencePath={evidenceLink(snapshotId,{kind:'raw',line:event.line,textOffset:0})}>{event.text}</ToolCallCard>:<pre>{event.text}</pre>}</section>)}
     {page?.text !== undefined && <><p>{page.kind === 'raw' ? `原件第 ${page.line} 行` : '关联材料'} · 文字位置 {page.textOffset}</p><pre>{page.text}</pre></>}
     <div className="export-actions"><button disabled={busy || positions.length === 1} onClick={() => setPositions(previous => previous.slice(0, -1))}>上一段原文</button>
       <button disabled={busy || !page?.next} onClick={() => setPositions(previous => [...previous, page!.next!])}>继续读取原文</button>
