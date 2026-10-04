@@ -1,4 +1,5 @@
-import {digest,type Database} from './database.js';
+import type {Database} from './database.js';
+import {efficiencyRevisions,efficiencyVersion,migrateEfficiencyRevisions,type EfficiencyRevision} from './efficiency-revisions.js';
 import {HttpError} from './identities.js';
 import type {usageOutputService} from './usage-output.js';
 import type {UsageSession} from '../../packages/contracts/usage-output.js';
@@ -43,14 +44,14 @@ function applyInferences(row:EfficiencySession,parts:UsageSession[],views:Map<st
   row.rework=nonfirst.filter(prompt=>prompt.rework).length;
   row.reworkEvidence=nonfirst.filter(prompt=>prompt.rework).flatMap(prompt=>prompt.citations).slice(0,3);
 }
-export async function migrateSessionEfficiency(db:Database){await db.query('CREATE TABLE IF NOT EXISTS session_efficiency_revisions(version text PRIMARY KEY,request jsonb NOT NULL,payload jsonb NOT NULL)');}
+export async function migrateSessionEfficiency(db:Database){await db.query('CREATE TABLE IF NOT EXISTS session_efficiency_revisions(version text PRIMARY KEY,request jsonb NOT NULL,payload jsonb NOT NULL)');await migrateEfficiencyRevisions(db);}
 export function sessionEfficiencyService(db:Database,usage:ReturnType<typeof usageOutputService>,insights:ReturnType<typeof sessionInsightsService>,raw:RawStore,clock:()=>Date=()=>new Date()){
-  async function load(input:unknown,full=false,metricVersion?:string):Promise<{q:EfficiencyQuery;value:SessionEfficiencyPage}>{
+  const revisions=efficiencyRevisions(db);
+  async function load(input:unknown,full=false,metricVersion?:string):Promise<{q:EfficiencyQuery;revision:EfficiencyRevision}>{
     const q=efficiencyQuerySchema.parse(input),request=selection(q);
     if(metricVersion!==undefined&&q.version)throw new HttpError(400,'固定产效版本不能混用新的指标输入');
     if(full&&(q.version||q.offset||q.sessionId||q.segmentOffset))throw new HttpError(400,'重算不能指定固定版本或分页');
-    if(q.version){const row=(await db.query('SELECT request,payload FROM session_efficiency_revisions WHERE version=$1',[q.version])).rows[0];if(!row)throw new HttpError(404,'会话产效版本不存在');
-      if(Object.keys(row.request).length!==Object.keys(request).length||Object.entries(request).some(([key,value])=>row.request[key]!==value))throw new HttpError(409,'会话产效版本与筛选不一致');return{q,value:row.payload};}
+    if(q.version){const revision=await revisions.open(q.version,request);if(!revision)throw new HttpError(404,'会话产效版本不存在');return{q,revision};}
     const source=metricVersion===undefined?await usage.complete(request,{full}):await usage.forMetric(request,metricVersion,full);
     const grouped=new Map<string,UsageSession[]>();for(const row of source.sessions.filter(row=>row.selected&&row.sessions)){if(!grouped.has(row.sessionId))grouped.set(row.sessionId,[]);grouped.get(row.sessionId)!.push(row);}
     const sessions=[...grouped.values()].map(combine).sort((a,b)=>(b.dates.at(-1)??'').localeCompare(a.dates.at(-1)??'')||a.sessionId.localeCompare(b.sessionId)),tokenP75=quantile(sessions.flatMap(row=>row.tokens===null?[]:[row.tokens]),.75);
@@ -70,22 +71,20 @@ export function sessionEfficiencyService(db:Database,usage:ReturnType<typeof usa
       return[{taskType,count:values.length,unknownCount:members.length-values.length,median:quantile(values,.5),minimum:values.length?Math.min(...values):null,maximum:values.length?Math.max(...values):null,points:[...points].sort((a,b)=>a[0]-b[0]).map(([value,count])=>({value,count}))}];});
     const content={algorithmVersion,usageVersion:source.version,metricVersion:source.metricVersion,scope:source.scope,createdAt:source.createdAt,dataAsOf:timingAsOf&&timingAsOf>source.dataAsOf?timingAsOf:source.dataAsOf,
       total:sessions.length,reviewCount:sessions.filter(row=>row.reviewReasons.length).length,tokenP75,sessions,distributions,nextOffset:null,filteredTotal:sessions.length,definition};
-    // PostgreSQL jsonb and a fresh projection can order object keys differently.
-    // Their identical semantic content must retain the same public revision.
-    const version=digest(JSON.stringify(content,(_key,value)=>value&&typeof value==='object'&&!Array.isArray(value)
-      ?Object.fromEntries(Object.entries(value).sort(([a],[b])=>a.localeCompare(b))):value)),value:SessionEfficiencyPage={version,...content};
-    if(Buffer.byteLength(JSON.stringify(value))>16*1024*1024)throw new HttpError(413,'会话产效导出超过范围上限');
-    await db.query('INSERT INTO session_efficiency_revisions(version,request,payload) VALUES($1,$2,$3) ON CONFLICT DO NOTHING',[version,request,value]);return{q,value};
+    const version=efficiencyVersion(content),value:SessionEfficiencyPage={version,...content};
+    return {q,revision:await revisions.save(value,request)};
   }
-  async function read(input:unknown,full=false){const {q,value}=await load(input,full);let sessions=value.sessions.filter(row=>q.reviewOnly!=='true'||row.reviewReasons.length);
+  async function read(input:unknown,full=false){const {q,revision}=await load(input,full),value=revision.header;let sessions=revision.sessions.filter(row=>q.reviewOnly!=='true'||row.reviewReasons.length);
     const get=(row:EfficiencySession)=>q.sort==='date'?row.dates.at(-1)??'':q.sort==='prompts'?row.userTurns:q.sort==='code'?row.codeChanges:q.sort==='efficiency'?row.efficiency.value:row[q.sort];
     sessions=[...sessions].sort((a,b)=>{const x=get(a),y=get(b);if(x===null)return y===null?a.sessionId.localeCompare(b.sessionId):1;if(y===null)return-1;return(x<y?-1:x>y?1:0)*(q.direction==='asc'?1:-1)||a.sessionId.localeCompare(b.sessionId);});
-    const selected=q.sessionId?value.sessions.filter(row=>row.sessionId===q.sessionId):sessions.slice(q.offset,q.offset+20);
+    let selected=q.sessionId?revision.sessions.filter(row=>row.sessionId===q.sessionId):sessions.slice(q.offset,q.offset+20);
     if(q.sessionId&&!selected.length)throw new HttpError(404,'该固定版本没有所选会话');
-    const result={...value,sessions:selected.map(row=>{if(!row.timing)return row;const offset=q.sessionId?q.segmentOffset:0,limit=q.sessionId?20:5;
-      return {...row,timing:{...row.timing,segments:row.timing.segments.slice(offset,offset+limit),segmentTotal:row.timing.segments.length,nextSegmentOffset:row.timing.segments.length>offset+limit?offset+limit:null}};}),
-      filteredTotal:q.sessionId?1:sessions.length,nextOffset:!q.sessionId&&sessions.length>q.offset+20?q.offset+20:null};
-    if(Buffer.byteLength(JSON.stringify(result))>80*1024)throw new HttpError(413,'会话产效响应超过范围上限，请缩小筛选');return result;}
-  return{read,recompute:(input:unknown)=>read(input,true),export:async(input:unknown)=>(await load(input)).value,
-    exportFromMetric:async(input:unknown,metricVersion:string,full=false)=>(await load(input,full,metricVersion)).value};
+    const projected=await Promise.all(selected.map(async row=>{if(!row.timing)return row;const offset=q.sessionId?q.segmentOffset:0,limit=q.sessionId?20:5;
+      return {...row,timing:{...row.timing,segments:await revision.segments(row.sessionId,offset,limit),segmentTotal:row.timing.segmentTotal,nextSegmentOffset:row.timing.segmentTotal>offset+limit?offset+limit:null}};}));
+    const result={...value,sessions:projected,filteredTotal:q.sessionId?1:sessions.length,nextOffset:!q.sessionId&&sessions.length>q.offset+selected.length?q.offset+selected.length:null};
+    while(Buffer.byteLength(JSON.stringify(result))>80*1024&&result.sessions.length>1){result.sessions.pop();if(!q.sessionId)result.nextOffset=q.offset+result.sessions.length;}
+    if(Buffer.byteLength(JSON.stringify(result))>80*1024)throw new HttpError(413,'会话产效单项响应超过范围上限');return result;}
+
+  return{read,recompute:(input:unknown)=>read(input,true),export:async(input:unknown)=>(await load(input)).revision.complete(),
+    exportFromMetric:async(input:unknown,metricVersion:string,full=false)=>(await load(input,full,metricVersion)).revision.complete()};
 }
