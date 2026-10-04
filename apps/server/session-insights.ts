@@ -34,7 +34,7 @@ export function sessionInsightsService(db: Database, archive: ArchiveQuery, anal
       return row.payload;
     }
     if(selection.analysisId){
-      const row=(await db.query("SELECT payload FROM session_insight_revisions WHERE snapshot_id=$1 AND analysis_id=$2 AND payload->'inferences' <> 'null'::jsonb ORDER BY created_at DESC,version DESC LIMIT 1",[snapshotId,selection.analysisId])).rows[0];
+      const row=(await db.query("SELECT payload FROM session_insight_revisions WHERE snapshot_id=$1 AND analysis_id=$2 AND payload->'inferences' <> 'null'::jsonb AND NOT(payload ? 'corrections') ORDER BY created_at DESC,version DESC LIMIT 1",[snapshotId,selection.analysisId])).rows[0];
       if(row)return row.payload;
     }
     if (!selection.analysisId) {

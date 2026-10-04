@@ -47,6 +47,7 @@ import { migrateCapabilityPeople, capabilityPeopleService } from './capability-p
 import { migrateWaitReports, waitReportService } from './wait-report.js';
 import { migrateActivity,activityService } from './activity.js';
 import { migrateCapabilityProfiles, capabilityProfileService } from './capability-profile.js';
+import {migrateInferenceCorrections,inferenceCorrectionsService} from './inference-corrections.js';
 
 export async function createApp(options: { db: Database; rawDirectory: string; webDirectory?: string; publicOrigin?: string; reportClock?: () => Date }) {
   const { db } = options;
@@ -55,6 +56,7 @@ export async function createApp(options: { db: Database; rawDirectory: string; w
   await migrateArchiveSearch(db);
   await migrateAnalysis(db);
   await migrateSessionInsights(db);
+  await migrateInferenceCorrections(db);
   await migrateReports(db);
   await migrateServerOperations(db);
   await migrateCoverage(db);
@@ -280,6 +282,12 @@ export async function createApp(options: { db: Database; rawDirectory: string; w
   });
   const analysis = analysisService(db, archive);
   const insights = sessionInsightsService(db, archive, analysis, raw);
+  const inferenceCorrections=inferenceCorrectionsService(db,insights);
+  app.get('/api/snapshots/:id/inference-corrections',{onRequest:readerGuard},request=>inferenceCorrections.history(z.uuid().parse((request.params as {id:string}).id),request.query));
+  app.post('/api/snapshots/:id/inference-corrections',{onRequest:readerGuard},async(request,reply)=>{
+    const result=await inferenceCorrections.correct(z.uuid().parse((request.params as {id:string}).id),request.headers.authorization,request.body);
+    return reply.code(result.created?201:200).send(result);
+  });
   const activity = activityService(db,raw,insights,options.reportClock);
   app.get('/api/activity',{onRequest:readerGuard},request=>activity.read(request.query));
   app.post('/api/activity/recompute',{onRequest:readerGuard},request=>activity.recompute(request.body));

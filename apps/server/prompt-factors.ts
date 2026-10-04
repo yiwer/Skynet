@@ -5,7 +5,7 @@ import type {PromptFraction,PromptExample,PromptSuggestion} from '../../packages
 export const fraction=(numerator:number,denominator:number,unknown:number):PromptFraction=>({numerator,denominator,unknown,value:denominator?numerator/denominator:null});
 const keys=['goal','constraints','context','acceptance'] as const;
 type Elements=Record<keyof typeof promptElementLabels,boolean|null>;
-type Prompt=RecordedMessage&{sessionId:string;elements:Elements;rework:boolean|null;citations:InsightCitation[];analysisVersions:string[];task:typeof taskTypes[number];clarifications:number|null};
+type Prompt=RecordedMessage&{sessionId:string;elements:Elements;rework:boolean|null;citations:InsightCitation[];analysisVersions:string[];correctionIds:string[];task:typeof taskTypes[number];clarifications:number|null;clarificationCitations:InsightCitation[]};
 const votes=(values:(boolean|null)[])=>values.length&&values.every(value=>value===values[0])?values[0]!:null;
 // Different text blocks belong to one native message. Any positive block proves presence;
 // absence requires every block to have a complete negative observation.
@@ -27,11 +27,12 @@ export function promptFactors(rows:UsageSession[],views:SessionInsights[],messag
     }
     const taskValues=new Set(leaves.map(view=>view.state==='complete'?view.inferences?.taskType.value??'unknown':'unknown')),task=taskValues.size===1?[...taskValues][0]!:'unknown';
     function model(message:RecordedMessage){const records=message.eventIds.map(id=>promptEntries.get(id)??[]);const elements=Object.fromEntries(keys.map(key=>[key,blocks(records.map(entries=>votes(entries.map(entry=>entry.complete?entry.elements[key]:null))))])) as Elements;
-      return {elements,rework:blocks(records.map(entries=>votes(entries.map(entry=>entry.complete?entry.rework:null)))),citations:uniqueCites(records.flatMap(entries=>entries.flatMap(entry=>entry.citations.filter(c=>c.event===entry.event)))),analysisVersions:leaves.flatMap(v=>v.analysisVersion?[v.analysisVersion.id]:[])};}
+      return {elements,rework:blocks(records.map(entries=>votes(entries.map(entry=>entry.complete?entry.rework:null)))),citations:uniqueCites(records.flatMap(entries=>entries.flatMap(entry=>entry.citations.filter(c=>c.event===entry.event)))),analysisVersions:leaves.flatMap(v=>v.analysisVersion?[v.analysisVersion.id]:[]),correctionIds:[...new Set(records.flatMap(entries=>entries.flatMap(entry=>Object.values(entry.corrections??{}))))]};}
     for(const message of selected.filter(m=>m.role==='user')){
       const replies=current.filter(reply=>reply.role==='assistant'&&reply.previousPromptId===message.id);
       const clarifications=replies.map(reply=>blocks(reply.eventIds.map(id=>votes((replyEntries.get(id)??[]).map(entry=>entry.complete?entry.clarification:null)))));
-      prompts.push({...message,sessionId,...model(message),task,clarifications:complete&&clarifications.length&&clarifications.every(v=>v!==null)?clarifications.filter(Boolean).length:null});
+      prompts.push({...message,sessionId,...model(message),task,clarifications:complete&&clarifications.length&&clarifications.every(v=>v!==null)?clarifications.filter(Boolean).length:null,
+        clarificationCitations:uniqueCites(replies.flatMap(reply=>reply.eventIds.flatMap(id=>(replyEntries.get(id)??[]).flatMap(entry=>entry.citations.filter(c=>c.event===entry.event)))))});
     }
     sessionCompleteness.set(sessionId,complete&&selected.filter(m=>m.role==='user').length===group.reduce((sum,row)=>sum+row.userTurns,0));
     // A scoped subsequent prompt may refer to the previous prompt outside its date/owner
@@ -56,6 +57,7 @@ export function promptFactors(rows:UsageSession[],views:SessionInsights[],messag
   }
   for(const previous of dedup){const next=dedup.filter(p=>p.previousPromptId===previous.id&&p.first===false);if(next.length!==1||next[0]!.rework===null||!previous.citations.length||!next[0]!.citations.length||Object.values(previous.elements).some(v=>v===null))continue;
     const present=keys.filter(key=>previous.elements[key]),example:PromptExample={employeeId:previous.employeeId,employee:rows.find(row=>row.employeeId===previous.employeeId)!.employee,messageId:previous.id,citations:previous.citations,followingCitations:next[0]!.citations,elements:present,analysisVersions:[...new Set([...previous.analysisVersions,...next[0]!.analysisVersions])]};
+    const correctionIds=[...new Set([...previous.correctionIds,...next[0]!.correctionIds])];if(correctionIds.length)example.correctionIds=correctionIds;
     if(present.length>=3&&!next[0]!.rework)positive.push(example);if(present.length<4&&next[0]!.rework)negative.push(example);
   }
   return {prompts:dedup,rework,context:boolFraction(dedup.map(p=>p.elements.context)),cleanSessions:boolFraction(clean),

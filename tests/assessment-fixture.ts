@@ -51,7 +51,7 @@ export async function assessmentFixture() {
     original.push(counter(input.tokens ?? 1000, timestamp((input.prompts ?? 5) * (input.long ? 601_100 : 1100))));
     return { rows: original, sessionId: id };
   }
-  async function analyze(person: Owner, snapshotId: string) {
+  async function analyze(person: Owner, snapshotId: string, options:{beforeFinish?:()=>Promise<void>;expectedState?:string;taskCitations?:number;clarification?:boolean}={}) {
     await sandbox.testDatabase.query("UPDATE analysis_workers SET updated_at=now() WHERE id='assessment-fixture'");
     const response = await api(person, `/api/snapshots/${snapshotId}/analysis`, {}); assert.equal(response.status, 202, await response.clone().text());
     const job = await response.json(), claim = await queue.claim(); assert.equal(claim?.id, job.id);
@@ -60,14 +60,15 @@ export async function assessmentFixture() {
       const cite = (index: number) => ({ event: index, textOffset: 0, quote: input.events[index]!.text.slice(0, 512) });
       const first = input.events.findIndex(event => event.role === 'user'), items = [{ category: 'topic', assessment: 'inferred', text: '合成测试实现', citations: [cite(first)] }];
       return { usage: { inputTokens: 100, outputTokens: 20, runtimeCostUsd: null, providerBilledCny: null, requests: 1 }, output: input.analysisContext?.phase === 'aggregate' ? { items } : { items, insights: {
-        version: 'session-insights-1', taskType: { value: 'implementation', citations: [cite(first)] },
+        version: 'session-insights-1', taskType: { value: 'implementation', citations: input.events.flatMap((event,index)=>event.role==='user'?[cite(index)]:[]).slice(0,options.taskCitations??1) },
         prompts: input.events.flatMap((event, index) => event.role === 'user' ? [{ event: index, elements: Object.fromEntries(['goal','constraints','context','acceptance'].map((key, n) => [key, n < Number(/elements=(\d)/.exec(event.text)?.[1] ?? 3)])), rework: event.text.startsWith('返工'), citations: [cite(index)] }] : []),
-        replies: input.events.flatMap((event, index) => event.role === 'assistant' ? [{ event: index, clarification: false, citations: [cite(index)] }] : []),
+        replies: input.events.flatMap((event, index) => event.role === 'assistant' ? [{ event: index, clarification: options.clarification??false, citations: [cite(index)] }] : []),
         outcomes: input.events.flatMap((event, index) => event.role === 'tool result' ? [{ status: 'verified', text: event.text, citations: [cite(index)] }]
           : event.role === 'assistant' && event.text.startsWith('声称 ') && !event.text.startsWith('声称 0') ? [{ status: 'claimed', text: event.text, citations: [cite(index)] }] : []), suggestions: [] } } };
     });
+    await options.beforeFinish?.();
     assert.equal(await queue.finish(claim!, result), true);
-    const view = await (await api(person, `/api/snapshots/${snapshotId}/insights`)).json(); assert.equal(view.state, 'complete');
+    const view = await (await api(person, `/api/snapshots/${snapshotId}/insights`)).json(); assert.equal(view.state, options.expectedState??'complete');
     return job.id as string;
   }
   async function session(person: Owner, input: Parameters<typeof rows>[0] = {}) { const record = rows(input); const result = await upload(person, record.rows, record.sessionId); await analyze(person, result.snapshotId); return result; }
