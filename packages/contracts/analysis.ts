@@ -27,24 +27,25 @@ export type AnalysisRun = { id: string; snapshotId: string; state: 'queued' | 'r
   attempts: number; maxAttempts: number; nextAttemptAt: string; leaseUntil: string | null; deadline: string | null; generation: number;
   trigger: 'manual' | 'incremental' | 'scheduled'; applicable: boolean; desiredSnapshotId: string | null; targetError: string | null;
   actorId: string | null; actorKind: 'user' | 'system';
-  attemptHistory: { number: number; state: string; reservedCny: number; requests: number | null; usage: unknown;
+  attemptHistory: { number: number; state: string; reservedCny: number; reservedRequests?:number; requests: number | null; usage: unknown;
     error: string | null; startedAt: string; finishedAt: string | null }[];
-  config: { mode: 'qwen-payg' | 'fixture'; model: string; runtimeVersion: string; promptVersion: string; configurationHash: string;
+  config: { mode: 'qwen-payg' | 'fixture' | 'qoder-cn'; model: string; runtimeVersion: string; promptVersion: string; configurationHash: string;
+    sdkVersion?:string; requestBudget?:number; reservationRequests?:number; requireFreeModel?:boolean;
     maxInputBytes: number; maxSessionBytes: number; maxSegments: number; maxRequests: number; maxOutputTokens: number; timeoutSeconds: number; reservationCny: number; budgetCny: number; budgetId: string;
     maxAttempts: number; concurrency: number; leaseSeconds: number; retryDelaySeconds: number; autoAnalyzeUpdates: boolean; autoDebounceSeconds: number };
   input: { snapshotId: string; hash: string; parserVersion: string; eventCount: number; source: string; sourceVersion: string;
     attributionRevision?: string;
     coverage: { unrecognizedLines: number; partialLine: boolean; excludedMaterials: number; captureGaps: unknown[]; scope: string } };
   result: { items: AnalysisItem[]; usage: { inputTokens: number | null; outputTokens: number | null; runtimeCostUsd: number | null;
-    providerBilledCny: null; requests: number }; fixture: boolean; processing?: AnalysisProcessing; insights?:SessionInferences } | null;
+    providerBilledCny: null; providerCredits?:number|null; requests: number }; fixture: boolean; processing?: AnalysisProcessing; insights?:SessionInferences } | null;
 };
 export type AnalysisPage = { runs: AnalysisRun[]; nextOffset: number | null; availability: {
-  ready: boolean; reason: string; mode?: 'qwen-payg' | 'fixture'; model?: string; runtimeVersion?: string;
+  ready: boolean; reason: string; mode?: 'qwen-payg' | 'fixture' | 'qoder-cn'; model?: string; runtimeVersion?: string; sdkVersion?:string;
 } };
 export type AnalysisOperations = {
   availability: AnalysisPage['availability']; counts: {state: AnalysisRun['state']; count: number}[];
   workers: {id: string; config: AnalysisRun['config']; updatedAt: string; online: boolean}[];
-  budgets: {id: string; reservedCny: string}[];
+  budgets: {id: string; reservedCny: string; reservedRequests?:string}[];
   targets: {id: string; desiredSnapshotId: string; generation: number; configurationHash: string; applicableJobId: string | null; error: string | null}[];
   runs: (AnalysisRun & {resultAvailable: boolean})[]; nextOffset: number | null; providerBilledCny: null; definition: string;
 };

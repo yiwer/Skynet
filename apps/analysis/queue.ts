@@ -40,6 +40,8 @@ export async function migrateQueue(client: PoolClient) {
     CREATE TABLE IF NOT EXISTS analysis_actions(id uuid PRIMARY KEY,job_id uuid NOT NULL REFERENCES analysis_jobs(id),
       actor_id uuid NOT NULL REFERENCES employees(id),action text NOT NULL,created_at timestamptz NOT NULL DEFAULT now());
     CREATE INDEX IF NOT EXISTS analysis_due ON analysis_jobs(next_attempt_at,created_at) WHERE state IN ('queued','retry-wait');`);
+  await client.query(`ALTER TABLE analysis_budgets ADD COLUMN IF NOT EXISTS reserved_requests bigint NOT NULL DEFAULT 0;
+    ALTER TABLE analysis_attempts ADD COLUMN IF NOT EXISTS reserved_requests integer;`);
   await client.query(`CREATE TABLE IF NOT EXISTS analysis_recomputations(target_id uuid NOT NULL REFERENCES analysis_targets(id),request_id uuid NOT NULL,
     created_at timestamptz NOT NULL DEFAULT now(),PRIMARY KEY(target_id,request_id));`);
   for (const table of ['analysis_jobs', 'analysis_targets', 'analysis_actions']) {
@@ -95,7 +97,7 @@ export const analysisProjection = `j.id,j.snapshot_id AS "snapshotId",j.state,j.
   (SELECT desired_snapshot_id FROM analysis_targets WHERE id=j.target_id) AS "desiredSnapshotId",
   (SELECT error FROM analysis_targets WHERE id=j.target_id) AS "targetError",
   COALESCE((SELECT jsonb_agg(jsonb_build_object('number',number,'state',state,'reservedCny',reserved_cny,'requests',requests,'usage',usage,'error',error,
-    'startedAt',started_at,'finishedAt',finished_at) ORDER BY number) FROM analysis_attempts WHERE job_id=j.id),'[]'::jsonb) AS "attemptHistory"`;
+    'startedAt',started_at,'finishedAt',finished_at)||CASE WHEN reserved_requests IS NULL THEN '{}'::jsonb ELSE jsonb_build_object('reservedRequests',reserved_requests) END ORDER BY number) FROM analysis_attempts WHERE job_id=j.id),'[]'::jsonb) AS "attemptHistory"`;
 
 export type ClaimedAnalysis = { id: string; run_token: string; input: AnalysisInput; attempts: number; target_generation: number };
 export function analysisQueue(db: Database, config: AnalysisConfig, workerId: string) {
@@ -112,15 +114,16 @@ export function analysisQueue(db: Database, config: AnalysisConfig, workerId: st
       if (!selected.rows[0]) return null;
       const job = selected.rows[0]; const token = randomUUID();
       await client.query('INSERT INTO analysis_budgets(id) VALUES($1) ON CONFLICT DO NOTHING', [config.budgetId]);
-      const reserved = await client.query(`UPDATE analysis_budgets SET reserved_cny=reserved_cny+$2 WHERE id=$1 AND reserved_cny+$2<=$3 RETURNING id`,
-        [config.budgetId, config.reservationCny, config.budgetCny]);
+      const reserved = config.mode==='qoder-cn'
+        ?await client.query(`UPDATE analysis_budgets SET reserved_requests=reserved_requests+$2 WHERE id=$1 AND reserved_requests+$2<=$3 RETURNING id`,[config.budgetId,config.reservationRequests,config.requestBudget])
+        :await client.query(`UPDATE analysis_budgets SET reserved_cny=reserved_cny+$2 WHERE id=$1 AND reserved_cny+$2<=$3 RETURNING id`,[config.budgetId, config.reservationCny, config.budgetCny]);
       if (!reserved.rows.length) {
-        await client.query("UPDATE analysis_jobs SET state='failed',error='预算已耗尽；未追加模型调用，已有未知预留保留',finished_at=now() WHERE id=$1", [job.id]); return null;
+        await client.query("UPDATE analysis_jobs SET state='failed',error=$2,finished_at=now() WHERE id=$1", [job.id,config.mode==='qoder-cn'?'请求额度已耗尽；未追加模型调用，已有预留保留':'预算已耗尽；未追加模型调用，已有未知预留保留']); return null;
       }
       await client.query(`UPDATE analysis_jobs SET state='running',attempts=attempts+1,run_token=$2,worker_id=$3,lease_until=now()+$4*interval '1 second',
         deadline=now()+$5*interval '1 second',started_at=now(),finished_at=NULL,error=NULL WHERE id=$1`, [job.id, token, workerId, config.leaseSeconds, config.timeoutSeconds + 5]);
-      await client.query(`INSERT INTO analysis_attempts(id,job_id,number,run_token,worker_id,state,reserved_cny)
-        VALUES($1,$2,$3,$4,$5,'running',$6)`, [randomUUID(), job.id, job.attempts + 1, token, workerId, config.reservationCny]);
+      await client.query(`INSERT INTO analysis_attempts(id,job_id,number,run_token,worker_id,state,reserved_cny,reserved_requests)
+        VALUES($1,$2,$3,$4,$5,'running',$6,$7)`, [randomUUID(), job.id, job.attempts + 1, token, workerId, config.reservationCny,config.reservationRequests??null]);
       return { ...job, run_token: token, attempts: job.attempts + 1 };
     });
   }
