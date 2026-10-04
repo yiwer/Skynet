@@ -4,6 +4,7 @@ import type { UsageEmployee } from './usage-output.js';
 import type { EfficiencySession, EfficiencyTiming } from './session-efficiency.js';
 import type { ActivityEvent } from './activity.js';
 import type { DailyItem, DailyReport } from './reports.js';
+import type {ProfileCoaching} from './profile-coaching.js';
 
 export const profileSections = ['daily', 'devices', 'sessions', 'work', 'reports', 'activity'] as const;
 export const profileQuery = z.object({ period: assessmentPeriod.optional(), preset: assessmentPreset.optional(),
@@ -13,6 +14,7 @@ export type CapabilityProfile = {
   version: string; algorithmVersion: string; generatedAt: string; frontierVersion: string;
   employeeId: string; employee: string; range: CapabilityAssessment['range'];
   assessment: CapabilityAssessment;
+  coaching?:ProfileCoaching;
   header: { deviceCount: number; enrolledAt: string | null; lastSyncedAt: string | null;
     devices: { id: string; name: string; active: boolean; enrolledAt: string | null; lastSyncedAt: string | null }[] };
   kpis: Omit<UsageEmployee, 'employeeId' | 'employee' | 'daily' | 'agents' | 'activeDates'> & { activeDays: number };

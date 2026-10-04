@@ -7,6 +7,7 @@ import type { sessionEfficiencyService } from './session-efficiency.js';
 import type { activityService } from './activity.js';
 import type { ReportService } from './reports.js';
 import type { workViewService } from './work-views.js';
+import type {profileCoachingService} from './profile-coaching.js';
 import { dailyPath, monday, addDays } from '../../packages/contracts/work-views.js';
 import { beijingDate, type DailyItem } from '../../packages/contracts/reports.js';
 import { profileQuery, profileSections, type CapabilityProfile, type CapabilityProfilePage } from '../../packages/contracts/capability-profile.js';
@@ -17,7 +18,7 @@ export async function migrateCapabilityProfiles(db: Database) {
 }
 export function capabilityProfileService(db: Database, assessments: ReturnType<typeof assessmentService>, usage: ReturnType<typeof usageOutputService>,
   efficiency: ReturnType<typeof sessionEfficiencyService>, activity: ReturnType<typeof activityService>,
-  reports: ReportService, workViews: ReturnType<typeof workViewService>, clock: () => Date = () => new Date()) {
+  reports: ReportService, workViews: ReturnType<typeof workViewService>, coaching:ReturnType<typeof profileCoachingService>, clock: () => Date = () => new Date()) {
   async function workContent(employeeId: string, from: string | null, to: string, activeDates: string[]): Promise<CapabilityProfile['work']> {
     const scheduled = (await db.query('SELECT date FROM daily_report_periods WHERE employee_id=$1 AND date BETWEEN $2 AND $3 ORDER BY date', [employeeId, from ?? to, to])).rows;
     const dates = [...new Set([...activeDates, ...scheduled.map(row => row.date as string)])].sort().reverse();
@@ -113,7 +114,7 @@ export function capabilityProfileService(db: Database, assessments: ReturnType<t
         for (const event of events.slice(0, remaining)) seenActivity.add(event.id);
         if (recentActivity.events.length >= 20) { recentActivity.hasEarlier = events.length > remaining || index + 1 < dates.length; break; }
       }
-      return { algorithmVersion: 'capability-profile-1', employeeId, employee: assessment.employee, range: assessment.range, assessment,
+      return { algorithmVersion: 'capability-profile-2', employeeId, employee: assessment.employee, range: assessment.range, assessment, coaching:await coaching.read(assessment,report),
         header: await header(employeeId), kpis: { ...totals, activeDays: activeDates.length }, usage: { version: report.version, metricVersion: report.metricVersion, daily, agents,
           sourceInputsComplete: mine?.sourceInputsComplete ?? true, unknownReasons: mine?.unknownReasons ?? [], unscopedSources: mine?.unscopedSources ?? 0 },
         sessions, taskDistribution: [...taskCounts].sort(([a], [b]) => a.localeCompare(b)).map(([taskType, sessions]) => ({ taskType, sessions })), recentActivity,
@@ -127,6 +128,10 @@ export function capabilityProfileService(db: Database, assessments: ReturnType<t
       weekly: (await client.query("SELECT r.period_id,r.revision,r.version FROM work_view_revisions r JOIN work_view_periods p ON p.id=r.period_id WHERE p.selection->>'kind'='weekly' AND p.selection->>'subject'=$1 ORDER BY r.period_id,r.revision", [employeeId])).rows,
       weeklyPending: (await client.query("SELECT id,generation,refresh_pending,qualification_revision,candidate_revision FROM work_view_periods WHERE selection->>'kind'='weekly' AND selection->>'subject'=$1 ORDER BY id", [employeeId])).rows,
     }));
+    const {previous,current}=content.coaching.trend;
+    if(previous.modelVersion!==current.modelVersion||current.modelVersion!==content.assessment.modelVersion||previous.baselineVersion!==current.baselineVersion
+      ||current.baselineVersion!==content.assessment.inputs.baselineVersion||previous.frontierVersion!==current.frontierVersion||current.frontierVersion!==content.assessment.inputs.frontierVersion)
+      throw new HttpError(409,'画像周趋势的模型或来源正在更新，请重新读取');
     const version = digest(JSON.stringify(content, (_key, value) => value && typeof value === 'object' && !Array.isArray(value)
       ? Object.fromEntries(Object.entries(value).sort(([a], [b]) => a.localeCompare(b))) : value));
     const value: CapabilityProfile = { ...content, version, generatedAt: clock().toISOString() };
@@ -149,8 +154,8 @@ export function capabilityProfileService(db: Database, assessments: ReturnType<t
       rows.splice(0, offset); rows.splice(limit);
       value.pages[section] = { total, offset, nextOffset: offset + rows.length < total ? offset + rows.length : null };
     }
-    // Leave room for the MCP text envelope, including worst-case JSON escaping.
-    while (Buffer.byteLength(JSON.stringify(value)) > 48 * 1024 - 512) {
+    // Bound both the shared page and its actual MCP JSON text envelope.
+    while (Buffer.byteLength(JSON.stringify(value)) > 32 * 1024 || Buffer.byteLength(JSON.stringify({content:[{type:'text',text:JSON.stringify(value)}]})) > 48 * 1024) {
       const section = profileSections.filter(key => sections[key].length > (q.section === key ? 1 : 0))
         .sort((a, b) => Buffer.byteLength(JSON.stringify(sections[b])) - Buffer.byteLength(JSON.stringify(sections[a])))[0];
       if (!section) throw new HttpError(413, '画像单条内容超过响应上限，请使用完整导出');
