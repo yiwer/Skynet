@@ -4,6 +4,8 @@ import {createHash} from 'node:crypto';
 import {mkdtemp,rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join,dirname,resolve,basename} from 'node:path';
+import {request as httpRequest} from 'node:http';
+import {setTimeout} from 'node:timers/promises';
 import {restoreBundle,seedBundle,disposeOwned,appendLate} from './ac32-fixture.js';
 import {mcpSandbox} from './mcp-support.js';
 
@@ -35,8 +37,39 @@ test('the complete fixed wait download retains all 19,000 intervals beyond the o
     assert.deepEqual(complete.intervals.slice(0,25),first.intervals);
     const tail=await read('/api/waits?'+query+'&version='+first.version+'&offset=18975');
     assert.deepEqual(complete.intervals.slice(-25),tail.intervals);assert.equal(tail.nextOffset,null);
+    for(const section of ['intervals','daily','unavailableSources']){
+      const values:unknown[]=[];let offset=0;
+      do{
+        const result=await api('/api/waits?'+query+'&version='+first.version+'&section='+section+'&offset='+offset),text=await result.text();
+        assert.equal(result.status,200,text.slice(0,1000));assert.ok(Buffer.byteLength(text)<=32*1024);
+        const page=JSON.parse(text);assert.equal(page.version,first.version);assert.equal(page.pages[section].offset,offset);values.push(...page[section]);
+        if(page.pages[section].nextOffset===null)break;
+        assert.ok(page.pages[section].nextOffset>offset);offset=page.pages[section].nextOffset;
+      }while(true);
+      assert.deepEqual(values,complete[section]);
+    }
     for(const extra of ['employeeId='+bundle.people[0]!.employeeId,'source=claude-code-cli','project=/different','week=2026-01-05'])
       assert.equal((await api('/api/waits/export?'+query+'&version='+first.version+'&'+extra)).status,400);
+    // Corrupt only this owned fixture's derived revision header, never raw
+    // originals. All observations stay at the authenticated download boundary.
+    await f.testDatabase.query("UPDATE wait_revisions SET payload=jsonb_set(payload,'{total}','19001') WHERE version=$1",[first.version]);
+    try{
+      const broken=await api('/api/waits/export?'+query+'&version='+first.version);assert.equal(broken.status,503);
+      assert.match((await broken.json()).error,/等待记录版本不完整/);assert.equal(broken.headers.get('content-disposition'),null);
+    }finally{await f.testDatabase.query("UPDATE wait_revisions SET payload=jsonb_set(payload,'{total}','19000') WHERE version=$1",[first.version]);}
+    const server=await f.startServer(),download=server+'/api/waits/export?'+query+'&version='+first.version;
+    try{
+      for(let index=0;index<10;index++)await new Promise<void>((resolve,reject)=>{
+        const request=httpRequest(download,{headers:{Authorization:'Bearer '+bundle.people[0]!.readerCredential}},response=>{
+          response.on('error',()=>{});
+          try{assert.equal(response.statusCode,200);assert.equal(Number(response.headers['content-length']),bytes.length);response.pause();request.destroy();resolve();}catch(error){request.destroy();reject(error);}
+        });request.setTimeout(30000,()=>request.destroy(new Error('wait download deadline')));request.on('error',reject);request.end();
+      });
+      const afterAbort=await fetch(download,{headers:{Authorization:'Bearer '+bundle.people[0]!.readerCredential},signal:AbortSignal.timeout(60000)});
+      assert.equal(afterAbort.status,200);const reader=afterAbort.body!.getReader(),parts:Buffer[]=[];let slow=true;
+      while(true){const part=await reader.read();if(part.done)break;parts.push(Buffer.from(part.value));if(slow){await setTimeout(50);slow=false;}}
+      assert.deepEqual(Buffer.concat(parts),bytes);
+    }finally{await f.stopServer();}
     await appendLate(f.api,source,bundle);
     const next=await read('/api/waits?'+query);assert.equal(next.total,19001);assert.notEqual(next.version,first.version);
     assert.deepEqual(await read('/api/waits/recompute',{period:'since-enrollment'}),next);

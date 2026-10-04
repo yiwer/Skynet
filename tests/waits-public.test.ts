@@ -44,7 +44,13 @@ test('waits use native turn completion and the next real user message, never ass
     assert.equal(waits.summary.replyWaitCount, 1); assert.equal(waits.summary.knownReplyWaitMs, 600_000);
     assert.equal(waits.summary.permissionWaitMs, null); assert.equal(waits.summary.permissionWaitCount, null);
     assert.deepEqual((await api('/api/waits/recompute', { snapshotId }, employee.readerCredential, 'POST')).json(), waits);
-    assert.deepEqual((await api(`/api/waits/export?snapshotId=${snapshotId}&version=${waits.version}`)).json(), waits);
+    const {readingVersion,pages,employees,...complete}=waits;
+    assert.equal(readingVersion,'wait-page-1');assert.equal(pages.intervals.total,1);assert.equal(employees.length,1);
+    assert.deepEqual((await api(`/api/waits/export?snapshotId=${snapshotId}&version=${waits.version}`)).json(), complete);
+    // Conversation lines select their complete matching labels, independently
+    // of the interval-list offset retained in a previously opened report URL.
+    const labels=await api(`/api/waits?snapshotId=${snapshotId}&version=${waits.version}&lines=7&offset=100000`);
+    assert.equal(labels.statusCode,200,labels.body);assert.deepEqual(labels.json().intervals,waits.intervals);assert.equal(labels.json().nextOffset,null);
     assert.deepEqual((await api(`/api/snapshots/${snapshotId}/raw`)).rawPayload, raw);
   } finally { await app?.close(); await db.end(); await sandbox.close(); }
 });

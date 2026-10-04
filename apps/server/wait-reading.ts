@@ -66,10 +66,11 @@ export async function readWaitPage(reader:ReportReader,q:WaitsReadingQuery):Prom
   const employeeCount=Number((await reader.query(`SELECT count(*) AS total FROM (${employeeRows}) AS employees`,[q.version])).rows[0].total);
   const totals={...revision.counts,unavailableSources:revision.counts.unavailableSources??0,employees:employeeCount};
   const selected=q.section??'intervals';
-  if(q.offset>totals[selected]!)throw new HttpError(400,'等待记录分页位置超过总量');
+  const requestedOffset=q.lines?0:q.offset;
+  if(requestedOffset>totals[selected]!)throw new HttpError(400,'等待记录分页位置超过总量');
   const value:WaitsReadingPage={...revision.header,readingVersion:'wait-page-1',intervals:[],daily:[],unavailableSources:[],employees:[],pages:{} as WaitsReadingPage['pages']};
   for(const section of waitSections){
-    const offset=section===selected?q.offset:0;
+    const offset=section===selected?requestedOffset:0;
     value.pages[section]={total:totals[section]!,offset,nextOffset:null};
     if(q.section&&section!==q.section||q.lines&&section!=='intervals')continue;
     if(section==='employees'){

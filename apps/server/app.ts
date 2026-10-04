@@ -1,4 +1,5 @@
 import Fastify from 'fastify';
+import {sendReportDownload} from './report-download.js';
 import fastifyStatic from '@fastify/static';
 import { resolve } from 'node:path';
 import { z } from 'zod';
@@ -486,4 +487,3 @@ export async function createApp(options: { db: Database; rawDirectory: string; w
   }
   return app;
 }
-import {sendReportDownload} from './report-download.js';
