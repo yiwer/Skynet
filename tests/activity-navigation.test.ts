@@ -5,7 +5,7 @@ import { chromium, expect, type Browser } from '@playwright/test';
 import { mcpSandbox } from './mcp-support.js';
 import { digest } from '../apps/server/database.js';
 
-test('applying activity filters immediately after changing the date keeps the newly selected date and matching records', { timeout: 120_000 }, async () => {
+for (const initialMode of ['fixed', 'current']) test(`applying activity filters immediately after changing the date keeps the newly selected date and matching records (${initialMode})`, { timeout: 120_000 }, async () => {
   const base = new Date(Date.now() + 86400000); base.setUTCHours(2, 0, 0, 0);
   const firstDate = base.toISOString().slice(0, 10), secondDate = new Date(+base + 86400000).toISOString().slice(0, 10);
   const sandbox = await mcpSandbox({ reportClock: () => new Date(+base + 2 * 86400000) });
@@ -24,12 +24,16 @@ test('applying activity filters immediately after changing the date keeps the ne
       assert.equal(response.status, 200, await response.clone().text());
     }
     assert.equal((await (await api('/api/activity?date=' + firstDate)).json()).total, 2);
-    const initial = await (await api('/api/activity?date=' + secondDate)).json(); assert.equal(initial.total, 2);
+    const initial = initialMode === 'fixed' ? await (await api('/api/activity?date=' + secondDate)).json() : undefined;
+    if (initial) assert.equal(initial.total, 2);
     browser = await chromium.launch(); const page = await browser.newPage({ ignoreHTTPSErrors: true });
-    await page.goto(sandbox.origin + '/#activity?date=' + secondDate + '&version=' + initial.version);
+    const initialReads: string[] = [];
+    page.on('request', request => { const url = new URL(request.url()); if (url.pathname === '/api/activity' && url.searchParams.get('date') === secondDate) initialReads.push(url.pathname + url.search); });
+    await page.goto(sandbox.origin + '/#activity?date=' + secondDate + (initial ? '&version=' + initial.version : ''));
     await page.getByLabel('个人读取凭据').fill(person.readerCredential); await page.getByRole('button', { name: '进入存档', exact: true }).click();
     await expect(page.locator('.activity-scope')).toContainText(secondDate);
     await expect(page.getByRole('table', { name: '活动记录', exact: true })).toContainText('第二天的真实活动');
+    if (initialMode === 'current') assert.equal(initialReads.length, 1, 'one initial navigation must not send competing identical report reads: ' + JSON.stringify(initialReads));
     // A date change and immediate submit are public DOM events in one browser task;
     // the hashchange render must not be required before the next user action.
     const navigation = await page.getByLabel('活动日期').evaluate((input, value) => {

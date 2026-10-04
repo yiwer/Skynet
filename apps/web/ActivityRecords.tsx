@@ -1,4 +1,4 @@
-import { useEffect,useRef,useState,type KeyboardEvent } from 'react';
+import { useEffect,useMemo,useRef,useState,type KeyboardEvent } from 'react';
 import { activityLabels,activityTypes,type ActivityPage,type ActivityQuery,type ActivityEvidence } from '../../packages/contracts/activity.js';
 import { sourceLabel } from '../../packages/contracts/archive.js';
 import { beijingDate } from '../../packages/contracts/reports.js';
@@ -37,8 +37,9 @@ function Rhythm({page}:{page:ActivityPage}){
   </section>;
 }
 export function ActivityRecords({request,hash}:{request:Request;hash:string}){
-  const [query,setQuery]=useState<ActivityQuery>(()=>fromHash(hash)),[page,setPage]=useState<ActivityPage>(),[facets,setFacets]=useState<ActivityPage['lanes']>([]),[error,setError]=useState(''),[busy,setBusy]=useState(false),[retry,setRetry]=useState(0),[project,setProject]=useState(query.project??'');
-  useEffect(()=>{const selection=fromHash(hash);setQuery(selection);setProject(selection.project??'');},[hash]);
+  const query=useMemo(()=>fromHash(hash),[hash]);
+  const [page,setPage]=useState<ActivityPage>(),[facets,setFacets]=useState<ActivityPage['lanes']>([]),[error,setError]=useState(''),[busy,setBusy]=useState(false),[retry,setRetry]=useState(0),[project,setProject]=useState(query.project??'');
+  useEffect(()=>{setProject(query.project??'');},[query]);
   useEffect(()=>{const abort=new AbortController();setBusy(true);setError('');setPage(undefined);request('/api/activity?'+params(query),abort.signal).then(response=>response.json()).then(async(result:ActivityPage)=>{
       const lanes=new Map(result.lanes.map(lane=>[lane.employeeId,lane]));let offset=result.nextLaneOffset;
       while(offset!==null&&!abort.signal.aborted){const next:ActivityPage=await(await request('/api/activity?'+params({...query,version:result.version,section:'lanes',offset}),abort.signal)).json();
