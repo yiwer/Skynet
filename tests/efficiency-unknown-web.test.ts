@@ -41,6 +41,9 @@ test('unknown efficiency keeps a compact state and evidence while known zero rem
     const tableLinks=await segments.getByRole('link').evaluateAll(nodes=>nodes.map(node=>node.getAttribute('href')));
     assert.deepEqual(tableLinks,unknown.sessions[0].timing.segments.flatMap((segment:any)=>segment.evidence.map((item:any)=>item.conversationPath??item.webPath)));
     await page.setViewportSize({width:320,height:900});await segments.scrollIntoViewIfNeeded();assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth||document.documentElement.scrollHeight>innerHeight),false);
+    const scrolling=segments.locator('..');assert.equal(await scrolling.evaluate(node=>node.scrollWidth>node.clientWidth),true,'The table must overflow its own scroll container');
+    await scrolling.hover({position:{x:40,y:40}});await page.mouse.wheel(1200,0);await expect.poll(()=>scrolling.evaluate(node=>node.scrollLeft)).toBeGreaterThan(0);
+    const rightColumn=await segments.locator('thead th').last().boundingBox();assert.ok(rightColumn&&rightColumn.x>=0&&rightColumn.x+rightColumn.width<=320,'The rightmost column is reachable within the viewport');
     await page.screenshot({path:join(directory,'segment-table-320-dark.png'),animations:'disabled'});screenshots.push('segment-table-320-dark.png');
     await selected.getByRole('button',{name:'会话分段图表',exact:true}).click();await expect(segments).toHaveCount(0);await expect(selected.getByRole('img',{name:/已确认分段/})).toBeVisible();
     const knownOwner=await f.owner('产效零值员工');await f.session(knownOwner,{prompts:3,tokens:1000,verified:0,claimed:0});
