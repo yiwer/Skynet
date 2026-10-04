@@ -13,6 +13,7 @@ import type { ConversationPage } from '../packages/contracts/conversation.js';
 import type { MetricsPage } from '../packages/contracts/metrics.js';
 import type { SearchPage } from '../packages/contracts/search.js';
 import { readRecoveryPackage } from '../packages/recovery.js';
+import {collectUsage} from './usage-pages-support.js';
 
 const json = (value: unknown): RequestInit => ({ method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(value) });
 const params = (value: object) => new URLSearchParams(Object.entries(value).filter(([, v]) => v !== undefined).map(([key, v]) => [key, String(v)]));
@@ -266,7 +267,8 @@ test('V2 public originals → conversation and metrics Web → real HTTPS OAuth 
     const downloadPending = page.waitForEvent('download'); await usagePage.getByRole('button', { name: '导出当前版本', exact: true }).click();
     const download = await downloadPending; const downloadPath = await download.path(); assert.ok(downloadPath);
     const downloadedUsage=JSON.parse(await readFile(downloadPath!, 'utf8'));
-    assert.deepEqual(downloadedUsage, await (await api('/api/usage-output/export?' + params({...filteredSelection,version:downloadedUsage.version}))).json());
+    const usageHead=await(await api('/api/usage-output?'+params({...filteredSelection,version:downloadedUsage.version}))).json();
+    assert.deepEqual(downloadedUsage,await collectUsage(usageHead,async(section,offset)=>(await api('/api/usage-output?'+params({...filteredSelection,version:downloadedUsage.version,section,offset}))).json()));
     const addedId = randomUUID(); await upload(encoded([native('user', '后续新增会话，不应改变旧指标版本', undefined, addedId)]), addedId);
     await usagePage.getByRole('button', { name: '从原件重算', exact: true }).click();
     await expect(usagePage.getByRole('region', { name: '会话用量', exact: true }).getByRole('link', { name: '查看会话', exact: true })).toHaveCount(2);

@@ -16,7 +16,7 @@ import {collectUsage} from './usage-pages-support.js';
 
 const json = (body: unknown): RequestInit => ({ method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
 const hash = (bytes: Buffer) => createHash('sha256').update(bytes).digest('hex');
-test('usage output exposes the same verified contributions over HTTP, OAuth MCP, export and keyboard-accessible charts', { timeout: 150000 }, async () => {
+test('usage output exposes the same verified contributions over HTTP, OAuth MCP, export and keyboard-accessible charts', { timeout: 150000 }, async t => {
   const sandbox = await mcpSandbox({reportClock:()=>new Date(Date.now()+2*86400000)});
   const first = '实现缓存接口；保留旧接口。上下文是缓存服务；验收为三个测试通过。';
   const correction = '不对，请保留旧接口，重新实现缓存。';
@@ -32,8 +32,11 @@ test('usage output exposes the same verified contributions over HTTP, OAuth MCP,
       suggestions: [{ text: '在开始前确认旧接口兼容要求。', citations: [quote(0, first)] }] } };
   const fixture = analysisFixture(output, join(sandbox.directory, 'forbidden')); fixture.server.listen(0, '127.0.0.1'); await once(fixture.server, 'listening');
   let child: ReturnType<typeof spawn> | undefined; let log = '';let client:Client|undefined;let browser:Browser|undefined;
+  const observed:{pages:any[];errors:string[]}={pages:[],errors:[]};
+  let peerSnapshotId:string|undefined,readerCredential:string|undefined;
   try {
     const employee = await sandbox.provision('真实链合成洞察');
+    readerCredential=employee.readerCredential;
     const enrollment = await (await sandbox.api('/api/devices/enroll', employee.enrollmentCredential, json({ installationId: randomUUID(), name: 'insights' }))).json();
     const message = (role: string, text: string) => ({ type: 'response_item', payload: { type: 'message', role, content: [{ type: role === 'user' ? 'input_text' : 'output_text', text }] } });
     const call = (name: string, args: string, id: string) => ({ type: 'response_item', payload: { type: 'function_call', name, arguments: args, call_id: id } });
@@ -93,16 +96,24 @@ test('usage output exposes the same verified contributions over HTTP, OAuth MCP,
     assert.deepEqual(await(await sandbox.api('/api/usage-output/export?period=since-enrollment&version='+report.version,employee.readerCredential)).json(),complete);
     const peer=await sandbox.provision('参照员工');
     const peerDevice=await(await sandbox.api('/api/devices/enroll',peer.enrollmentCredential,json({installationId:randomUUID(),name:'reference'}))).json();
-    const peerBytes=Buffer.from(JSON.stringify({...message('user','另一个合成任务'),timestamp:new Date().toISOString()})+'\n');
-    await sandbox.api('/api/chunks/'+hash(peerBytes),peerDevice.deviceCredential,{method:'PUT',headers:{'Content-Type':'application/octet-stream'},body:peerBytes});
-    await sandbox.api('/api/snapshots',peerDevice.deviceCredential,json({protocolVersion:1,sourceSessionId:randomUUID(),source:'codex-desktop',sourceVersion:'unsupported-synthetic',sourceOs:'win32',project:'/synthetic/reference',hash:hash(peerBytes),byteLength:peerBytes.length,qualifiedAt:new Date().toISOString(),capability:'unverified'}));
+    // Windows Node and PostgreSQL wall clocks can differ by a few milliseconds.
+    // This reference is deliberately post-enrollment, not a boundary fixture.
+    const peerTimestamp=new Date(Date.parse(peerDevice.enrolledAt)+60000).toISOString();
+    const peerBytes=Buffer.from(JSON.stringify({...message('user','另一个合成任务'),timestamp:peerTimestamp})+'\n');
+    const stagedPeer=await sandbox.api('/api/chunks/'+hash(peerBytes),peerDevice.deviceCredential,{method:'PUT',headers:{'Content-Type':'application/octet-stream'},body:peerBytes});assert.ok([200,201].includes(stagedPeer.status),await stagedPeer.clone().text());
+    const uploadedPeer=await sandbox.api('/api/snapshots',peerDevice.deviceCredential,json({protocolVersion:1,sourceSessionId:randomUUID(),source:'codex-desktop',sourceVersion:'unsupported-synthetic',sourceOs:'win32',project:'/synthetic/reference',hash:hash(peerBytes),byteLength:peerBytes.length,qualifiedAt:peerTimestamp,capability:'unverified'}));
+    assert.equal(uploadedPeer.status,200,await uploadedPeer.clone().text());peerSnapshotId=(await uploadedPeer.json()).snapshotId;
+    const peerEvidence=await(await sandbox.api('/api/snapshots/'+peerSnapshotId,employee.readerCredential)).json();assert.equal(peerEvidence.events[0].context,'after-enrollment');
     browser=await chromium.launch({headless:true});const context=await browser.newContext();const page=await context.newPage();
+    page.on('pageerror',error=>observed.errors.push(error.message));
     const automaticExports:string[]=[];page.on('request',request=>{if(new URL(request.url()).pathname==='/api/usage-output/export')automaticExports.push(request.url());});
     await context.route('**/*',async route=>{
       if(new URL(route.request().url()).origin!==sandbox.origin)return route.abort();
       const response=await sandbox.fetchTls(route.request().url(),{method:route.request().method(),headers:await route.request().allHeaders(),body:route.request().postData()});
       const headers:Record<string,string>={};response.headers.forEach((value,key)=>{headers[key]=value;});
-      await route.fulfill({status:response.status,headers,body:Buffer.from(await response.arrayBuffer())});
+      const bytes=Buffer.from(await response.arrayBuffer());
+      if(new URL(route.request().url()).pathname==='/api/usage-output')observed.pages.push({query:new URL(route.request().url()).search,status:response.status,value:JSON.parse(bytes.toString())});
+      await route.fulfill({status:response.status,headers,body:bytes});
     });
     await page.goto(sandbox.origin+'/#usage'); await page.getByLabel('个人读取凭据').fill(employee.readerCredential); await page.getByRole('button',{name:'进入存档',exact:true}).click();
     await page.getByRole('button',{name:'接入至今',exact:true}).click();
@@ -119,7 +130,9 @@ test('usage output exposes the same verified contributions over HTTP, OAuth MCP,
     const point=panel.getByRole('region',{name:'会话散点',exact:true}).getByRole('link').first();
     await point.focus(); await expect(point).toBeFocused(); await expect(panel.getByRole('tooltip')).toBeVisible();
     await page.keyboard.press('Escape'); await expect(panel.getByRole('tooltip')).toHaveCount(0);
+    const selectedResponse=page.waitForResponse(response=>{const url=new URL(response.url());return url.pathname==='/api/usage-output'&&url.searchParams.get('employeeId')===employee.employeeId&&!url.searchParams.has('section');});
     await panel.getByRole('combobox',{name:/^员工/}).selectOption(employee.employeeId);
+    const selectedPage=await(await selectedResponse).json();assert.equal(selectedPage.pages.sessions.total,2,'both current public source sessions are in the selected scope');assert.equal(selectedPage.sessions.filter((row:any)=>!row.selected).length,1);
     await expect(panel.getByRole('region',{name:'每人产出',exact:true}).getByRole('row')).toHaveCount(2);
     await expect(panel.getByRole('region',{name:'会话散点',exact:true}).locator('[data-reference="true"]')).toHaveCount(1);
     await panel.getByRole('combobox',{name:/^Agent/}).selectOption('claude-code-cli');
@@ -135,6 +148,8 @@ test('usage output exposes the same verified contributions over HTTP, OAuth MCP,
       await page.screenshot({path:join(sandbox.directory,'usage-'+width+'-'+theme+'.png'),animations:'disabled'});
     }
     await writeFile(join(sandbox.directory,'usage-output-public.json'),JSON.stringify(report,null,2));
+    assert.deepEqual(observed.errors,[]);await writeFile(join(sandbox.directory,'usage-reading-observed.json'),JSON.stringify(observed,null,2));
     console.log('Usage output public evidence: '+sandbox.directory);
+  } catch(error){if(peerSnapshotId)observed.pages.push({peerDetail:await(await sandbox.api('/api/snapshots/'+peerSnapshotId,readerCredential)).json()});await writeFile(join(sandbox.directory,'usage-reading-failure.json'),JSON.stringify(observed,null,2));t.diagnostic('Usage failure evidence: '+sandbox.directory);throw error;
   } finally { await client?.close();await browser?.close();await stop(child); fixture.server.closeAllConnections(); await new Promise<void>(resolve => fixture.server.close(() => resolve())); await sandbox.close(); }
 });

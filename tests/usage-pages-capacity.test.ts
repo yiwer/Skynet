@@ -3,8 +3,12 @@ import assert from 'node:assert/strict';
 import {mkdtemp,rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join,dirname,resolve,basename} from 'node:path';
-import {restoreBundle,seedBundle,disposeOwned} from './ac32-fixture.js';
+import {randomBytes,randomUUID,createHash} from 'node:crypto';
+import {Client} from '@modelcontextprotocol/sdk/client/index.js';
+import {StreamableHTTPClientTransport} from '@modelcontextprotocol/sdk/client/streamableHttp.js';
+import {restoreBundle,seedBundle,disposeOwned,appendLate} from './ac32-fixture.js';
 import {mcpSandbox} from './mcp-support.js';
+import {collectUsage,sections} from './usage-pages-support.js';
 
 test('a 1,000-session usage report has a bounded first page and complete fixed sections', {timeout:600000}, async t=>{
   const directory=process.env.SKYNET_CAPACITY_SOURCE??await mkdtemp(join(tmpdir(),'skynet-usage-pages-'));
@@ -12,6 +16,7 @@ test('a 1,000-session usage report has a bounded first page and complete fixed s
   if(!process.env.SKYNET_CAPACITY_SOURCE)await seedBundle(source,'usage-pages-functional',false,true);
   const {sandbox,owner,bundle}=await restoreBundle(source);
   const f=await mcpSandbox({sandbox,reportClock:()=>new Date(bundle.clock)}).catch(async error=>{await disposeOwned(sandbox,owner);throw error;});
+  let client:Client|undefined;
   try{
     assert.deepEqual([bundle.dataset.sessions,bundle.dataset.businessEvents,bundle.dataset.waits],[1000,80000,19000]);
     const response=await f.api('/api/usage-output?period=since-enrollment',bundle.people[0]!.readerCredential);
@@ -21,6 +26,40 @@ test('a 1,000-session usage report has a bounded first page and complete fixed s
     assert.deepEqual([head.outputs.verified.known,head.outputs.verified.value,head.outputs.verified.unknownSessions],[20,null,980]);
     assert.equal(head.pages.sessions.total,1000);assert.equal(head.pages.employees.total,10);
     assert.ok(Buffer.byteLength(text)<=32*1024);
+    const read=async(params:Record<string,string|number>)=>{
+      const response=await f.api('/api/usage-output?'+new URLSearchParams(Object.entries({period:'since-enrollment',...params}).map(([k,v])=>[k,String(v)])),bundle.people[0]!.readerCredential);
+      const text=await response.text();assert.equal(response.status,200,text);assert.ok(Buffer.byteLength(text)<=32*1024);return JSON.parse(text);
+    };
+    const complete=await collectUsage(head,(section,offset)=>read({version:head.version,section,offset}));
+    const exported=await f.api('/api/usage-output/export?period=since-enrollment&version='+head.version,bundle.people[0]!.readerCredential);
+    assert.equal(exported.status,200);assert.deepEqual(complete,await exported.json());
+    for(const section of sections)assert.equal((await f.api('/api/usage-output?period=since-enrollment&section='+section+'&offset=0',bundle.people[0]!.readerCredential)).status,400);
+    const credential=bundle.people[0]!.readerCredential;
+    const api=(path:string,body?:object)=>f.api(path,credential,body?{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}:{});
+    for(const extra of ['employeeId='+bundle.people[0]!.employeeId,'source=claude-code-cli','project=/different','week=2020-01-06'])assert.equal((await api('/api/usage-output?period=since-enrollment&version='+head.version+'&section=sessions&'+extra)).status,409);
+    assert.equal((await api('/api/usage-output?period=since-enrollment&version='+head.version+'&section=sessions&offset=1001')).status,400);
+    assert.equal((await api('/api/usage-output/export?period=since-enrollment&version='+head.version+'&section=sessions')).status,400);
+    assert.equal((await api('/api/usage-output/recompute',{period:'since-enrollment',version:head.version,section:'sessions'})).status,400);
+    const resource=f.origin+'/mcp',registration=await(await api('/oauth/register',{client_name:'Usage section reader',redirect_uris:['http://127.0.0.1:47128/callback'],token_endpoint_auth_method:'none'})).json();
+    const verifier=randomBytes(48).toString('base64url');
+    const callback=new URL(await f.authorizationPage(f.origin+'/oauth/authorize?'+new URLSearchParams({response_type:'code',client_id:registration.client_id,redirect_uri:registration.redirect_uris[0],scope:'archive:read',resource,state:randomUUID(),code_challenge_method:'S256',code_challenge:createHash('sha256').update(verifier).digest('base64url')}),credential));
+    const token=await(await f.api('/oauth/token',undefined,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:new URLSearchParams({grant_type:'authorization_code',client_id:registration.client_id,code:callback.searchParams.get('code')!,redirect_uri:registration.redirect_uris[0],code_verifier:verifier,resource}).toString()})).json();
+    client=new Client({name:'usage-pages-public',version:'1'});await client.connect(new StreamableHTTPClientTransport(new URL(resource),{fetch:f.fetchTls,requestInit:{headers:{Authorization:'Bearer '+token.access_token}}}));
+    let maxMcpBytes=0;
+    const mcpRead=async(section?:string,offset=0)=>{const result=await client!.callTool({name:'read_usage_output',arguments:{period:'since-enrollment',version:head.version,...(section?{section,offset}:{})}});
+      assert.notEqual(result.isError,true,JSON.stringify(result));const size=Buffer.byteLength(JSON.stringify(result));maxMcpBytes=Math.max(maxMcpBytes,size);assert.ok(size<=48*1024);return JSON.parse((result.content as {text:string}[])[0]!.text);};
+    const mcpHead=await mcpRead();assert.deepEqual(mcpHead,head);assert.deepEqual(await collectUsage(mcpHead,mcpRead),complete);
+    await client.close();client=undefined;
+    const selected=await read({employeeId:bundle.people[0]!.employeeId});
+    const selectedFull=await collectUsage(selected,(section,offset)=>read({employeeId:bundle.people[0]!.employeeId,version:selected.version,section,offset}));
+    assert.equal(selectedFull.sessions.length,1000);assert.equal(selectedFull.sessions.filter((row:any)=>row.selected).length,100);assert.equal(selectedFull.employees.length,1);assert.equal(selectedFull.totals.sessions,100);
+    await appendLate(f.api,source,bundle);
+    const next=await read({});assert.notEqual(next.version,head.version);assert.equal(next.totals.userTurns,20001);
+    assert.deepEqual(await(await api('/api/usage-output/recompute',{period:'since-enrollment'})).json(),next);
+    await f.restart();
+    assert.deepEqual(await read({version:head.version}),head);
+    assert.deepEqual(await collectUsage(head,(section,offset)=>read({version:head.version,section,offset})),complete);
+    t.diagnostic(JSON.stringify({maxMcpBytes,sections:sections.length,selected:100,references:900,historyPreserved:true}));
     t.diagnostic(JSON.stringify({kind:'capacity-functional-not-ac32',sourceBundleHash:bundle.bundleHash,dataset:bundle.dataset}));
-  }finally{await disposeOwned(f,owner);if(!process.env.SKYNET_CAPACITY_SOURCE){assert.equal(dirname(resolve(directory)),resolve(tmpdir()));assert.match(basename(directory),/^skynet-usage-pages-/);await rm(directory,{recursive:true,force:true});}}
+  }finally{await client?.close();await disposeOwned(f,owner);if(!process.env.SKYNET_CAPACITY_SOURCE){assert.equal(dirname(resolve(directory)),resolve(tmpdir()));assert.match(basename(directory),/^skynet-usage-pages-/);await rm(directory,{recursive:true,force:true});}}
 });

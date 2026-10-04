@@ -191,3 +191,8 @@
   .usage-unavailable { padding: 16px; min-height: 200px; }
 }
 @media (prefers-reduced-motion: reduce) { .usage-metrics * { transition: none; } }
+
+/* Fixed-section reading controls retain the same target at every viewport. */
+.platform-main .usage-metrics :is(button, select, summary) { min-height:44px; min-width:44px; height:auto; }
+.platform-main .usage-metrics summary { padding-block:10px; }
+.platform-main .usage-metrics :is(.usage-table-scroll a, .usage-scatter-unknown a) { display:inline-flex; align-items:center; min-height:44px; min-width:44px; }
