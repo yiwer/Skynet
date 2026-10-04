@@ -1,6 +1,6 @@
 import { digest, type Database } from './database.js';
 import { HttpError } from './identities.js';
-import type { RawStore } from './raw-store.js';
+import { RawUnavailableError, type RawStore } from './raw-store.js';
 import type { Manifest, Source } from '../../packages/contracts/archive.js';
 import type { Provenance } from '../../packages/contracts/provenance.js';
 import { metricsQuerySchema, coverageMetricsQuerySchema, type MetricsQuery, type MetricsPage, type MetricsScope, type MetricTotals, type SessionMetrics, type MetricCatalog } from '../../packages/contracts/metrics.js';
@@ -9,15 +9,18 @@ import { beijingDate } from '../../packages/contracts/reports.js';
 import { monday, addDays } from '../../packages/contracts/work-views.js';
 import { inputIntegrityVersion } from './evidence-integrity.js';
 import { materialSource } from './material-provenance.js';
-import { metricInputBatch, type MetricInputFacts } from './metric-inputs.js';
+import { metricInputBatch, metricExcludedUserLines, type MetricInputFacts } from './metric-inputs.js';
 import { attributionRevisions } from './qualification.js';
 import { currentMetricInputs } from './metric-current-inputs.js';
+import { readMetricEvents, type MetricEventGroup } from './metric-events.js';
 
 const catalogVersion = `recorded-metrics-3/${statisticsExtractorVersion}`;
 const employeeNames = new Intl.Collator('zh-CN');
 const definition = '仅统计已验证原件中接入后、按北京时间来源日期归期的活动。eventId 去重；已验证服务器恢复链归为同一会话，未确认副本保持独立。员工和项目沿用每条活动的原始归属。会话数为所选范围内有业务事件的去重会话数，跨日或多人参与的会话不可直接相加；仅有原生 Token 记录的日期保留用量，不增加会话、轮次或调用。轮次、调用和已知 Token 可相加。Token 未知单列，不当作零或参加比值。';
 const limits = { snapshots: 20000, events: 100000, rawBytes: 128 * 1024 * 1024, sessions: 10000, exportBytes: 16 * 1024 * 1024 };
 const bounded = () => new HttpError(413, '指标范围超过单次计算上限，请缩小日期、员工或项目范围；未返回截断汇总');
+const metricSourceUnavailable = (error: unknown) => error instanceof RawUnavailableError
+  || (error instanceof TypeError && (error as NodeJS.ErrnoException).code === 'ERR_ENCODING_INVALID_ENCODED_DATA');
 function boundedPage<T>(value: T): T {
   if (Buffer.byteLength(JSON.stringify(value)) > 80 * 1024) throw new HttpError(413, '指标响应超过 Web/MCP 共用的 80 KiB 上限，请缩小日期、员工或项目范围；未返回截断汇总');
   return value;
@@ -47,9 +50,6 @@ export async function migrateMetrics(db: Database) {
 
 type Snapshot = { id: string; device_id: string; employee_id: string; employee: string; source: Source; source_session_id: string;
   manifest: Manifest; hash: string; committed_at: Date; enrolled_at: Date | null; provenance: Provenance | null; attribution_revision: string };
-type Event = { event_id: string; snapshot_id: string; employee_id: string; employee: string; device_id: string; source: Source;
-  source_session_id: string; project: string; source_date: string; role: string; line: number; block: number; material_id: string | null;
-  qualification_revision: string; proof_snapshot_id: string | null };
 type Slice = { sessionId: string; employeeId: string; employee: string; source: Source; project: string; sourceSessionId: string;
   snapshotId: string; snapshotIds: Set<string>; date: string; businessEvents: boolean; turns: Set<string>; tools: Set<string>; usage: Map<string, TokenComponents | null>; reasons: Set<string> };
 const nativeKey = (device: string, source: Source, session: string) => JSON.stringify([device, source, session]);
@@ -162,13 +162,9 @@ export function metricsService(db: Database, raw: RawStore, clock: () => Date = 
         try { const bytes = await raw.read(device, hash); checkedOriginals.set(`${device}/${hash}`, { device, hash }); return bytes; }
         catch (error) { originalsReadable = false; throw error; }
       };
-      const events = (await client.query(`SELECT o.event_id,o.snapshot_id,o.employee_id,e.name AS employee,o.device_id,o.source,
-        o.source_session_id,o.project,o.source_date,o.role,o.line,o.block,o.material_id,o.qualification_revision,o.proof_snapshot_id
-        FROM effective_event_origins o JOIN employees e ON e.id=o.employee_id
-        WHERE o.context='after-enrollment' AND o.source_date BETWEEN $1 AND $2
-        AND ($3::uuid IS NULL OR o.employee_id=$3) AND ($4::text IS NULL OR o.source=$4) AND ($5::text IS NULL OR o.project=$5)
-        ORDER BY o.event_id LIMIT ${limits.events + 1}`, [scope.from, scope.to, q.employeeId ?? null, q.source ?? null, q.project ?? null])).rows as Event[];
-      if (events.length > limits.events) throw bounded();
+      const eventInputs = await readMetricEvents(client, scope, limits.events);
+      if (!eventInputs) throw bounded();
+      const { users, groups: eventGroups } = eventInputs;
       // Token metadata does not become a business event, so event dates cannot
       // select its originals. Discover scoped native identities independently,
       // then inspect source timestamps within the same bounded raw-read budget.
@@ -181,8 +177,8 @@ export function metricsService(db: Database, raw: RawStore, clock: () => Date = 
         ORDER BY s.device_id,s.source,s.source_session_id LIMIT ${limits.snapshots + 1}`,
       [q.employeeId ?? null, q.source ?? null, q.project ?? null])).rows as { device: string; source: Source; session: string }[];
       if (discovered.length > limits.snapshots) throw bounded();
-      const nativeInputs = [...new Map([...discovered, ...events.map(event =>
-        ({ device: event.device_id, source: event.source, session: event.source_session_id }))]
+      const nativeInputs = [...new Map([...discovered, ...eventGroups.map(group =>
+        ({ device: group.device_id, source: group.source, session: group.source_session_id }))]
         .map(input => [nativeKey(input.device, input.source, input.session), input])).values()];
       // Metadata is needed to follow verified restoration chains. No native home
       // or employee source file is read: all bytes come from committed raw storage.
@@ -195,7 +191,7 @@ export function metricsService(db: Database, raw: RawStore, clock: () => Date = 
           WHERE s.provenance->>'relation' IN ('verified-restoration','same-device-continuation')
       ) SELECT s.*,d.employee_id,d.enrolled_at,e.name AS employee FROM selected x JOIN snapshots s ON s.id=x.id
         JOIN devices d ON d.id=s.device_id JOIN employees e ON e.id=d.employee_id ORDER BY s.committed_at,s.id LIMIT ${limits.snapshots + 1}`,
-      [JSON.stringify(nativeInputs), [...new Set(events.map(event => event.snapshot_id))]])).rows as Snapshot[];
+      [JSON.stringify(nativeInputs), [...new Set(eventGroups.map(group => group.snapshot_id))]])).rows as Snapshot[];
       if (snapshots.length > limits.snapshots) throw bounded();
       const revisions = await attributionRevisions(client, snapshots.map(snapshot => snapshot.id));
       for (const snapshot of snapshots) snapshot.attribution_revision = revisions.get(snapshot.id)!;
@@ -233,19 +229,25 @@ export function metricsService(db: Database, raw: RawStore, clock: () => Date = 
       for (const snapshot of latest.values()) identity(snapshot);
       const slices = new Map<string, Slice>(), relevantNative = new Set(nativeInputs.map(input => nativeKey(input.device, input.source, input.session)));
       const sliceKey = (session: string, employee: string, project: string, date: string) => JSON.stringify([session, employee, project, date]);
-      for (const event of events) {
-        const native = nativeKey(event.device_id, event.source, event.source_session_id), record = latest.get(native) ?? byId.get(event.snapshot_id)!;
-        const session = event.material_id && record.source_session_id !== event.source_session_id ? digest(native) : identity(record);
-        const key = sliceKey(session, event.employee_id, event.project, event.source_date);
+      // These groups share every field used for slice/native identity. Their
+      // first ordinals retain the original first-carrier choice; each event
+      // still contributes its own message anchor, tool ID and proof status.
+      for (const group of eventGroups) {
+        const first = group;
+        const native = nativeKey(first.device_id, first.source, first.source_session_id), record = latest.get(native) ?? byId.get(first.snapshot_id)!;
+        const session = first.material_id && record.source_session_id !== first.source_session_id ? digest(native) : identity(record);
+        const key = sliceKey(session, first.employee_id, first.project, first.source_date);
         let slice = slices.get(key);
-        if (!slice) { slice = { sessionId: session, employeeId: event.employee_id, employee: event.employee, source: event.source, project: event.project,
-          sourceSessionId: event.source_session_id, snapshotId: event.snapshot_id, snapshotIds: new Set(), date: event.source_date, businessEvents: true, turns: new Set(), tools: new Set(), usage: new Map(), reasons: new Set() }; slices.set(key, slice); }
+        if (!slice) { slice = { sessionId: session, employeeId: first.employee_id, employee: first.employee, source: first.source, project: first.project,
+          sourceSessionId: first.source_session_id, snapshotId: first.snapshot_id, snapshotIds: new Set(), date: first.source_date, businessEvents: true, turns: new Set(), tools: new Set(), usage: new Map(), reasons: new Set() }; slices.set(key, slice); }
         if (slices.size > limits.sessions) throw bounded();
-        slice.snapshotIds.add(event.snapshot_id);
-        if (event.role === 'user') slice.turns.add(JSON.stringify([event.snapshot_id, event.material_id, event.line]));
-        if (event.role === 'tool request') slice.tools.add(event.event_id);
+        slice.snapshotIds.add(first.snapshot_id);
         relevantNative.add(native);
-        if (event.material_id && !event.proof_snapshot_id) slice.reasons.add('关联材料缺少独立普通来源资格，Token 未知');
+        for (const [, eventId, role, line, , , proof] of group.events) {
+          if (role === 'user') slice.turns.add(JSON.stringify([group.snapshot_id, group.material_id, line]));
+          if (role === 'tool request') slice.tools.add(eventId);
+          if (group.material_id && !proof) slice.reasons.add('关联材料缺少独立普通来源资格，Token 未知');
+        }
       }
       for (const native of relevantNative) {
         let record = latest.get(native); const seen = new Set<string>();
@@ -330,14 +332,14 @@ export function metricsService(db: Database, raw: RawStore, clock: () => Date = 
             bytes: content, hash: record.hash, source: record.source, sourceVersion: record.manifest.sourceVersion, manifest: record.manifest, baselineContinuity: baselineContinuity(record) });
         }
         catch (error) {
-          // A competing scope can materialize this same input after our
-          // repeatable-read snapshot. Retry the whole transaction, never label
-          // that serialization conflict as an original-storage gap.
-          if (['40001', '40P01'].includes((error as { code?: string }).code ?? '')) throw error;
+          // Only source availability/encoding belongs to this owner's gap.
+          // Database, limit and concurrency failures retain their own boundary.
+          if (!metricSourceUnavailable(error)) throw error;
           for (const slice of relevant) slice.reasons.add('已存档原件不可读取或含无效编码');
           if (ownerSelected) gapForOwner(record, '已存档原件不可读取或含无效编码，无法确认所选日期的 Token');
           continue;
         }
+        await inputBatch.checkpoint();
         rawBuffers.set(record.id, content);
         materialized.set(record.id, parsed);
         const reasons = new Set<string>();
@@ -377,16 +379,22 @@ export function metricsService(db: Database, raw: RawStore, clock: () => Date = 
           usageOrigins.set(key, { slice, value: item.value });
         }
       }
+      // Observe the original SQL failure before a material-source query can
+      // replace it with an aborted-transaction error and hide retry semantics.
+      await inputBatch.drainFacts();
       // The evidence reader intentionally preserves compacted text as evidence.
       // A native, explicit summary/meta flag prevents counting that preserved
       // text as a new user submission; never guess from message wording.
-      const userSources = new Map<string, Event[]>();
-      for (const event of events) if (event.role === 'user') {
-        const key = JSON.stringify([event.snapshot_id, event.material_id]); userSources.set(key, [...userSources.get(key) ?? [], event]);
+      const userSources = new Map<string, { first: MetricEventGroup; lines: number[] }>();
+      for (const { group, event } of users) {
+        const key = JSON.stringify([group.snapshot_id, group.material_id]);
+        let source = userSources.get(key);
+        if (!source) { source = { first: group, lines: [] }; userSources.set(key, source); }
+        source.lines.push(event[3]);
       }
       const excludedTurns = new Set<string>();
       for (const sourceEvents of userSources.values()) {
-        const first = sourceEvents[0]!, record = byId.get(first.snapshot_id)!;
+        const first = sourceEvents.first, record = byId.get(first.snapshot_id)!;
         let key = record.id, device = record.device_id, hash = record.hash, length = record.manifest.byteLength;
         if (first.material_id) {
           const source = await materialSource(client, record, first.material_id);
@@ -396,17 +404,30 @@ export function metricsService(db: Database, raw: RawStore, clock: () => Date = 
         if (!content) {
           totalBytes += length; if (totalBytes > limits.rawBytes) throw bounded();
           try { content = await readOriginal(device, hash); rawBuffers.set(key, content); }
-          catch { continue; } // Validated event remains an observed row; completeness is reported separately.
+          catch (error) {
+            if (!(error instanceof RawUnavailableError)) throw error;
+            continue; // Validated event remains observed; completeness is reported separately.
+          }
         }
         let facts = materialized.get(key);
         if (!facts) {
-          facts = inputBatch.read({ snapshotId: record.id, attributionRevision: record.attribution_revision,
-            materialId: first.material_id ?? undefined, bytes: content, hash, source: record.source, sourceVersion: record.manifest.sourceVersion });
-          materialized.set(key, facts);
+          try {
+            facts = inputBatch.read({ snapshotId: record.id, attributionRevision: record.attribution_revision,
+              materialId: first.material_id ?? undefined, bytes: content, hash, source: record.source, sourceVersion: record.manifest.sourceVersion });
+            materialized.set(key, facts);
+          } catch (error) {
+            if (!metricSourceUnavailable(error)) throw error;
+            for (const slice of slices.values()) if (slice.employeeId === first.employee_id && slice.snapshotIds.has(first.snapshot_id)) {
+              slice.reasons.add('已存档原件不可读取或含无效编码');
+            }
+            gapForOwner({ ...record, employee_id: first.employee_id }, '已存档原件含无效编码，无法确认所选日期的 Token');
+            // Preserve exact readable user/environment classification, without
+            // writing a statistics projection for the rejected original.
+          }
         }
-        const excluded = new Set(facts.excludedUserLines);
-        for (const event of sourceEvents) {
-          if (excluded.has(event.line)) excludedTurns.add(JSON.stringify([event.snapshot_id, event.material_id, event.line]));
+        const excluded = new Set(facts?.excludedUserLines ?? metricExcludedUserLines(content, record.source));
+        for (const line of sourceEvents.lines) {
+          if (excluded.has(line)) excludedTurns.add(JSON.stringify([first.snapshot_id, first.material_id, line]));
         }
       }
       await inputBatch.flush();
@@ -463,7 +484,7 @@ export function metricsService(db: Database, raw: RawStore, clock: () => Date = 
       }).sort((a, b) => employeeNames.compare(a.employee, b.employee) || a.employeeId.localeCompare(b.employeeId));
       const unknownReasons = [...new Set([...sessions.flatMap(s => s.unknownReasons), ...discoveryGaps, ...(unscoped.length ? ['存在来源日期不能确定的原件缺口，范围完整性未知'] : [])])].sort();
       const dataAsOf = new Date(Math.max(0, ...candidates.map(s => s.committed_at.getTime()), ...unscoped.map(s => (s.committed_at as Date).getTime()))).toISOString();
-      const inputVersion = digest(JSON.stringify([events, rawInputs, unscoped]));
+      const inputVersion = digest(JSON.stringify(['metric-inputs-2', eventInputs.identity, rawInputs, unscoped]));
       const totals = total(sessions);
       if (unscoped.length || discoveryGaps.size) { totals.inputTokens = null; totals.outputTokens = null; }
       const content = { scope, totals, sessions, daily, employeeDaily, employees, sources, dataAsOf,

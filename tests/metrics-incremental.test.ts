@@ -44,6 +44,17 @@ test('recorded metrics count human submissions while retaining machine context a
     assert.deepEqual((await api(`/api/metrics/export?period=since-enrollment&version=${metrics.version}`)).json(), metrics);
     const raw = await api(`/api/snapshots/${committed.json().snapshotId}/raw`);
     assert.deepEqual(raw.rawPayload, bytes);
+    const corrupt = Buffer.concat([bytes, Buffer.from('{"invalid":"'), Buffer.from([255]), Buffer.from('"}\n')]);
+    assert.equal((await api(`/api/chunks/${digest(corrupt)}`, corrupt, device.deviceCredential, 'PUT')).statusCode, 201);
+    const corruptUpload = await api('/api/snapshots', { ...manifest, hash: digest(corrupt), byteLength: corrupt.length }, device.deviceCredential, 'POST');
+    assert.equal(corruptUpload.statusCode, 200, corruptUpload.body);
+    const unavailable = await api('/api/metrics?period=since-enrollment');assert.equal(unavailable.statusCode, 200, unavailable.body);
+    const gap = unavailable.json<MetricsPage>();
+    assert.deepEqual([gap.totals.sessions, gap.totals.userTurns, gap.totals.toolCalls, gap.totals.inputTokens], [1, 3, 1, null], 'readable machine context remains excluded beside invalid bytes');
+    assert.equal(gap.sourceInputsComplete, false);assert.notEqual(gap.version, metrics.version);
+    assert.deepEqual((await api('/api/metrics/recompute', { period: 'since-enrollment' }, employee.readerCredential, 'POST')).json(), gap);
+    assert.deepEqual((await api(`/api/metrics/export?period=since-enrollment&version=${metrics.version}`)).json(), metrics);
+    assert.deepEqual((await api(`/api/snapshots/${corruptUpload.json().snapshotId}/raw`)).rawPayload, corrupt);
   } finally { await app?.close(); await db.end(); await sandbox.close(); }
 });
 

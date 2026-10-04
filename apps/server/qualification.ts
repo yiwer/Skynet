@@ -36,23 +36,29 @@ export async function attributionRevision(q:Query,snapshotId:string) {
 /** Resolve a report's carriers together. Correlating the scalar expression per
  * snapshot can scan all integrity rows once for every newly uploaded snapshot
  * before PostgreSQL has table statistics. Keep the same three maxima and both
- * base/effective event mappings, with one set-based join for the selected scope. */
+ * base/effective event mappings, with one set-based join for the selected scope.
+ * Effective events are COALESCE(override, base): adding only matched non-null
+ * overrides to every base event has the same union. These consumers only take
+ * MAX, so repeated event identities do not need another deduplication sort. */
 export async function attributionRevisions(q:Query,snapshotIds:string[]):Promise<Map<string,string>> {
   if(!snapshotIds.length)return new Map();
-  const rows=(await q.query(`WITH carriers AS MATERIALIZED (
+  const rows=(await q.query(`WITH carriers AS (
     SELECT snapshot_id,event_id FROM snapshot_events WHERE snapshot_id=ANY($1::uuid[])
-    UNION SELECT snapshot_id,event_id FROM effective_snapshot_events WHERE snapshot_id=ANY($1::uuid[])
-  ), qualifications AS (
-    SELECT se.snapshot_id,MAX(c.revision) AS revision FROM carriers se JOIN event_qualifications c ON c.event_id=se.event_id GROUP BY se.snapshot_id
-  ), integrity AS (
-    SELECT se.snapshot_id,MAX(i.revision) AS revision FROM carriers se JOIN event_integrity i ON i.event_id=se.event_id
-    WHERE i.version='original-utf8-1' GROUP BY se.snapshot_id
+    UNION ALL
+    SELECT v.snapshot_id,v.event_id FROM event_origin_overrides v
+      JOIN snapshot_events s ON s.snapshot_id=v.snapshot_id AND s.line=v.line AND s.block=v.block
+      WHERE v.snapshot_id=ANY($1::uuid[]) AND v.version='original-utf8-1' AND v.event_id IS NOT NULL
+  ), revisions AS (
+    SELECT se.snapshot_id,MAX(c.revision) AS qualification,MAX(i.revision) AS integrity
+    FROM carriers se LEFT JOIN event_qualifications c ON c.event_id=se.event_id
+      LEFT JOIN event_integrity i ON i.event_id=se.event_id AND i.version='original-utf8-1'
+    GROUP BY se.snapshot_id
   ), overrides AS (
     SELECT snapshot_id,MAX(revision) AS revision FROM event_origin_overrides
     WHERE snapshot_id=ANY($1::uuid[]) AND version='original-utf8-1' GROUP BY snapshot_id
-  ) SELECT s.snapshot_id,(COALESCE(c.revision,0)+COALESCE(i.revision,0)+COALESCE(v.revision,0))::text AS revision
+  ) SELECT s.snapshot_id,(COALESCE(r.qualification,0)+COALESCE(r.integrity,0)+COALESCE(v.revision,0))::text AS revision
     FROM unnest($1::uuid[]) AS s(snapshot_id)
-    LEFT JOIN qualifications c USING(snapshot_id) LEFT JOIN integrity i USING(snapshot_id) LEFT JOIN overrides v USING(snapshot_id)`,[snapshotIds])).rows;
+    LEFT JOIN revisions r USING(snapshot_id) LEFT JOIN overrides v USING(snapshot_id)`,[snapshotIds])).rows;
   return new Map(rows.map(row=>[row.snapshot_id as string,row.revision as string]));
 }
 
