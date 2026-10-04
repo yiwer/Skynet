@@ -5,6 +5,8 @@ import type {UsageSession} from '../../packages/contracts/usage-output.js';
 import type {sessionInsightsService} from './session-insights.js';
 import {taskTypes,type SessionInsights,type InsightCitation} from '../../packages/contracts/session-insights.js';
 import type {MetricsScope} from '../../packages/contracts/metrics.js';
+import type {RawStore} from './raw-store.js';
+import {efficiencyTiming} from './efficiency-timing.js';
 import {efficiencyQuerySchema,type EfficiencyQuery,type EfficiencySession,type SessionEfficiencyPage} from '../../packages/contracts/session-efficiency.js';
 
 const algorithmVersion='session-efficiency-1';
@@ -45,7 +47,7 @@ function applyInferences(row:EfficiencySession,parts:UsageSession[],views:Map<st
   row.reworkEvidence=nonfirst.filter(prompt=>prompt.rework).flatMap(prompt=>prompt.citations).slice(0,3);
 }
 export async function migrateSessionEfficiency(db:Database){await db.query('CREATE TABLE IF NOT EXISTS session_efficiency_revisions(version text PRIMARY KEY,request jsonb NOT NULL,payload jsonb NOT NULL)');}
-export function sessionEfficiencyService(db:Database,usage:ReturnType<typeof usageOutputService>,insights:ReturnType<typeof sessionInsightsService>){
+export function sessionEfficiencyService(db:Database,usage:ReturnType<typeof usageOutputService>,insights:ReturnType<typeof sessionInsightsService>,raw:RawStore,clock:()=>Date=()=>new Date()){
   async function load(input:unknown,full=false):Promise<{q:EfficiencyQuery;value:SessionEfficiencyPage}>{
     const q=efficiencyQuerySchema.parse(input),request=selection(q);
     if(full&&(q.version||q.offset))throw new HttpError(400,'重算不能指定固定版本或分页');
@@ -57,6 +59,7 @@ export function sessionEfficiencyService(db:Database,usage:ReturnType<typeof usa
     const inputs=[...new Map(sessions.flatMap(row=>row.inputVersions).map(input=>[input.snapshotId+'/'+input.version,input])).values()];
     const views=new Map((await insights.readVersions(inputs)).map(view=>[view.snapshotId,view]));
     for(const row of sessions)applyInferences(row,grouped.get(row.sessionId)!,views,source.scope);
+    const timingAsOf=await efficiencyTiming(db,raw,sessions,grouped,views,source.scope,q,full,clock);
     for(const row of sessions){if(row.tokens!==null&&tokenP75!==null&&row.tokens>tokenP75&&row.verified===0)row.reviewReasons.push('Token 高于 P75 且没有已验证结果');
       if(row.claimed!==null&&row.verified!==null&&row.claimed>row.verified)row.reviewReasons.push('声称多于已验证');
       if(row.rework!==null&&row.rework>=2)row.reviewReasons.push(`返工 ${row.rework} 次`);}
@@ -64,7 +67,7 @@ export function sessionEfficiencyService(db:Database,usage:ReturnType<typeof usa
       const values=members.flatMap(row=>taskType!=='unknown'&&row.efficiency.value!==null?[row.efficiency.value]:[]),points=new Map<number,number>();
       for(const value of values)points.set(value,(points.get(value)??0)+1);
       return[{taskType,count:values.length,unknownCount:members.length-values.length,median:quantile(values,.5),minimum:values.length?Math.min(...values):null,maximum:values.length?Math.max(...values):null,points:[...points].sort((a,b)=>a[0]-b[0]).map(([value,count])=>({value,count}))}];});
-    const content={algorithmVersion,usageVersion:source.version,metricVersion:source.metricVersion,scope:source.scope,createdAt:source.createdAt,dataAsOf:source.dataAsOf,
+    const content={algorithmVersion,usageVersion:source.version,metricVersion:source.metricVersion,scope:source.scope,createdAt:source.createdAt,dataAsOf:timingAsOf&&timingAsOf>source.dataAsOf?timingAsOf:source.dataAsOf,
       total:sessions.length,reviewCount:sessions.filter(row=>row.reviewReasons.length).length,tokenP75,sessions,distributions,nextOffset:null,filteredTotal:sessions.length,definition};
     const version=digest(JSON.stringify(content)),value:SessionEfficiencyPage={version,...content};
     if(Buffer.byteLength(JSON.stringify(value))>16*1024*1024)throw new HttpError(413,'会话产效导出超过范围上限');

@@ -273,7 +273,7 @@ export async function createApp(options: { db: Database; rawDirectory: string; w
   const analysis = analysisService(db, archive);
   const insights = sessionInsightsService(db, archive, analysis, raw);
   const usage = usageOutputService(db, metrics, insights);
-  const efficiency=sessionEfficiencyService(db,usage,insights);
+  const efficiency=sessionEfficiencyService(db,usage,insights,raw,options.reportClock);
   app.get('/api/session-efficiency',{onRequest:readerGuard},request=>efficiency.read(request.query));
   app.post('/api/session-efficiency/recompute',{onRequest:readerGuard},request=>efficiency.recompute(request.body));
   app.get('/api/session-efficiency/export',{onRequest:readerGuard},async(request,reply)=>{
