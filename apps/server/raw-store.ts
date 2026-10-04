@@ -4,6 +4,12 @@ import { randomUUID } from 'node:crypto';
 import { digest } from './database.js';
 import { syncDirectory } from '../../packages/filesystem.js';
 
+export class RawUnavailableError extends Error {
+  constructor(readonly device: string, readonly hash: string, readonly reason: 'missing'|'unreadable'|'hash-mismatch', options?: ErrorOptions) {
+    super('Stored original unavailable: '+reason, options); this.name = 'RawUnavailableError';
+  }
+}
+
 export class RawStore {
   constructor(private root: string) {}
   async write(device: string, hash: string, bytes: Buffer) {
@@ -27,8 +33,14 @@ export class RawStore {
     } finally { await unlink(temporary); }
   }
   async read(device: string, hash: string) {
-    const bytes = await readFile(join(this.root, device, hash));
-    if (digest(bytes) !== hash) throw new Error('Stored artifact integrity failure');
+    let bytes: Buffer;
+    try { bytes = await readFile(join(this.root, device, hash)); }
+    catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (!['ENOENT','ENOTDIR','EACCES','EPERM','EIO','EISDIR','EMFILE','ENFILE','EBUSY'].includes(code ?? '')) throw error;
+      throw new RawUnavailableError(device, hash, code === 'ENOENT' || code === 'ENOTDIR' ? 'missing' : 'unreadable', { cause: error });
+    }
+    if (digest(bytes) !== hash) throw new RawUnavailableError(device, hash, 'hash-mismatch');
     return bytes;
   }
 }
