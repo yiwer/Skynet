@@ -77,7 +77,19 @@ export function usageOutputService(db: Database, metrics: MetricsService, insigh
       }
     }
     const rows: UsageSession[] = metric.sessions.map(row => ({ ...row, selected: !q.employeeId || row.employeeId === q.employeeId, outputs: emptyOutputs(), insightVersions: [], latestCarrierSnapshotIds: [] }));
-    const rowViews = rows.map(row => views.filter(view => row.snapshotIds.some(id => carrierOrigins.get(view.snapshotId)?.has(originKey(id,row.source,row.sourceSessionId)))));
+    const rowsByOrigin = new Map<string, Set<number>>();
+    for (const [index,row] of rows.entries()) for (const id of row.snapshotIds) {
+      const key=originKey(id,row.source,row.sourceSessionId), indices=rowsByOrigin.get(key)??new Set<number>();
+      indices.add(index);rowsByOrigin.set(key,indices);
+    }
+    const rowViews:SessionInsights[][]=rows.map(()=>[]);
+    // Keep every matching row, including separate employee/project projections,
+    // and the original view order. Multiple origin matches include a view once.
+    for (const view of views) {
+      const matched=new Set<number>();
+      for (const key of carrierOrigins.get(view.snapshotId)??[]) for (const index of rowsByOrigin.get(key)??[]) matched.add(index);
+      for (const index of matched) rowViews[index]!.push(view);
+    }
     for (const [index, row] of rows.entries()) {
       const inputs = rowViews[index]!;
       row.insightVersions = inputs.map(view => ({ snapshotId: view.snapshotId, version: view.version }));
