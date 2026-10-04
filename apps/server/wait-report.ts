@@ -29,15 +29,15 @@ function summarize(input:WaitsPage):Omit<WaitReport,'version'> {
 export async function migrateWaitReports(db:Database){await db.query('CREATE TABLE IF NOT EXISTS wait_report_revisions(version text PRIMARY KEY,payload jsonb NOT NULL)');}
 export function waitReportService(db:Database,waits:ReturnType<typeof waitsService>){
   const selection=(q:WaitReportQuery)=>({period:q.period,...(q.employeeId?{employeeId:q.employeeId}:{}),...(q.source?{source:q.source}:{}),...(q.project!==undefined?{project:q.project}:{})});
-  async function read(input:unknown):Promise<WaitReport>{
+  async function read(input:unknown,range?:{from:string;to:string}):Promise<WaitReport>{
     const q=waitReportQuerySchema.parse(input);
     if(q.version){const row=(await db.query('SELECT payload FROM wait_report_revisions WHERE version=$1',[q.version])).rows[0];if(!row)throw new HttpError(404,'等待报表版本不存在');
-      const value:WaitReport=row.payload;for(const key of ['period','employeeId','source','project'] as const)if(value.scope[key]!==selection(q)[key])throw new HttpError(400,'等待报表版本不属于当前范围');
+      const value:WaitReport=row.payload;if(q.week&&value.scope.from!==q.week)throw new HttpError(400,'等待报表版本与指定周不一致');for(const key of ['period','employeeId','source','project'] as const)if(value.scope[key]!==selection(q)[key])throw new HttpError(400,'等待报表版本不属于当前范围');
       if(q.waitVersion&&q.waitVersion!==value.waitVersion)throw new HttpError(400,'等待来源版本不匹配');return value;}
-    const source=await waits.export({...selection(q),...(q.waitVersion?{version:q.waitVersion}:{})}),content=summarize(source);
-    const version=digest(JSON.stringify(content)),value:WaitReport={version,...content};
+    const source=range?await waits.forScope(selection(q),range):await waits.export({...selection(q),...(q.waitVersion?{version:q.waitVersion,...(q.week?{week:q.week}:{})}:{})}),content=summarize(source);
+    const version=digest(JSON.stringify(content,(_,value)=>value&&typeof value==='object'&&!Array.isArray(value)?Object.fromEntries(Object.entries(value).sort(([a],[b])=>a.localeCompare(b))):value)),value:WaitReport={version,...content};
     if(Buffer.byteLength(JSON.stringify(value))>80*1024)throw new HttpError(413,'等待报表范围过大，请缩小员工范围');
     await db.query('INSERT INTO wait_report_revisions(version,payload) VALUES($1,$2) ON CONFLICT DO NOTHING',[version,value]);return value;
   }
-  return {read};
+  return {read,forScope:(input:unknown,range:{from:string;to:string})=>read(input,range)};
 }

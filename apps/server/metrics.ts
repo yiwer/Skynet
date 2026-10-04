@@ -434,6 +434,7 @@ export function metricsService(db: Database, raw: RawStore, clock: () => Date = 
     if (!q.version) return { q, payload: await compute(q) };
     const row = (await db.query('SELECT request,payload FROM metric_revisions WHERE version=$1', [q.version])).rows[0];
     if (!row) throw new HttpError(404, '固定指标版本不存在');
+    if(q.week&&row.payload.scope.from!==q.week)throw new HttpError(409,'指标版本与指定周不一致');
     if (JSON.stringify(row.request) !== JSON.stringify(JSON.parse(JSON.stringify(requestSelection(q))))) {
       // PostgreSQL jsonb does not retain object key order.
       const wanted = requestSelection(q) as Record<string, unknown>, saved = row.request as Record<string, unknown>;

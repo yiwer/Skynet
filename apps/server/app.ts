@@ -36,6 +36,7 @@ import { migrateSessionInsights,sessionInsightsService } from './session-insight
 import { sessionInsightsQuery } from '../../packages/contracts/session-insights.js';
 import { migrateUsageOutput, usageOutputService } from './usage-output.js';
 import {migratePromptReports,promptReportService} from './prompt-report.js';
+import {migrateTeamReports,teamReportService} from './team-report.js';
 import { migrateDeliveryReceipts, saveDeliveryReceipt } from './delivery-receipts.js';
 import { migrateAssembly, assemblyService, processingService, recordAssemblyRecipe } from './assembly.js';
 import { migrateWaits, waitsService } from './waits.js';
@@ -56,6 +57,7 @@ export async function createApp(options: { db: Database; rawDirectory: string; w
   await migrateMetrics(db);
   await migrateUsageOutput(db);
   await migratePromptReports(db);
+  await migrateTeamReports(db);
   await migrateDeliveryReceipts(db);
   await migrateAssembly(db);
   await migrateWaits(db);
@@ -274,6 +276,10 @@ export async function createApp(options: { db: Database; rawDirectory: string; w
   app.get('/api/activity/export',{onRequest:readerGuard},async(request,reply)=>{const data=await activity.export(request.query);return reply.header('Content-Disposition',`attachment; filename="skynet-activity-${data.version}.json"`).type('application/json').send(data);});
   const usage = usageOutputService(db, metrics, insights);
   const prompts=promptReportService(db,usage,insights);
+  const team=teamReportService(db,usage,prompts,waitReport,options.reportClock);
+  app.get('/api/team-report/weekly',{onRequest:readerGuard},request=>team.weekly(request.query));
+  app.get('/api/team-report',{onRequest:readerGuard},request=>team.read(request.query));
+  app.get('/api/team-report/export',{onRequest:readerGuard},async(request,reply)=>{const data=await team.read(request.query);return reply.header('Content-Disposition',`attachment; filename="skynet-team-${data.version}.json"`).type('application/json').send(data);});
   app.get('/api/prompt-report',{onRequest:readerGuard},request=>prompts.read(request.query));
   app.post('/api/prompt-report/recompute',{onRequest:readerGuard},request=>prompts.recompute(request.body));
   app.get('/api/prompt-report/export',{onRequest:readerGuard},async(request,reply)=>{

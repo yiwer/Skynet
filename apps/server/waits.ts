@@ -14,7 +14,7 @@ export async function migrateWaits(db: Database) {
     CREATE TABLE IF NOT EXISTS wait_revisions(version text PRIMARY KEY,scope_key text NOT NULL,revision integer NOT NULL,payload jsonb NOT NULL,UNIQUE(scope_key,revision));`);
 }
 export function waitsService(db: Database, raw: RawStore, clock: () => Date = () => new Date()) {
-  async function computeOnce(q: WaitsQuery, full: boolean): Promise<WaitsPage> {
+  async function computeOnce(q: WaitsQuery, full: boolean, range?:{from:string;to:string}): Promise<WaitsPage> {
     const client = await db.connect();
     try {
       await client.query('BEGIN ISOLATION LEVEL REPEATABLE READ');
@@ -28,6 +28,7 @@ export function waitsService(db: Database, raw: RawStore, clock: () => Date = ()
         } else { scope.from = addDays(monday(today), q.period === 'last-week' ? -7 : 0); scope.to = addDays(scope.from, 6); }
         if (Date.parse(scope.to!) - Date.parse(scope.from!) > 3660 * 86400_000) throw waitBounded();
       }
+      if(range){scope.from=range.from;scope.to=range.to;}
       const scopeKey = digest(JSON.stringify(scope));
       const lock = (await client.query('SELECT pg_try_advisory_xact_lock(hashtextextended($1,3701)) AS locked', [scopeKey])).rows[0];
       if (!lock.locked) throw new HttpError(409, '等待记录正在计算，请稍后重试');
@@ -41,8 +42,8 @@ export function waitsService(db: Database, raw: RawStore, clock: () => Date = ()
       await client.query('COMMIT');return result;
     } catch (error) { await client.query('ROLLBACK'); throw error; } finally { client.release(); }
   }
-  async function compute(q: WaitsQuery, full: boolean) {
-    for (let attempt = 0; ; attempt++) try { return await computeOnce(q, full); }
+  async function compute(q: WaitsQuery, full: boolean, range?:{from:string;to:string}) {
+    for (let attempt = 0; ; attempt++) try { return await computeOnce(q, full,range); }
     catch (error) {
       if (!['40001', '40P01'].includes((error as { code?: string }).code ?? '')) throw error;
       if (attempt >= 2) throw new HttpError(409, '等待来源正在更新，请稍后重试');
@@ -54,7 +55,7 @@ export function waitsService(db: Database, raw: RawStore, clock: () => Date = ()
       if (full) throw new HttpError(400, '重算请使用当前范围，固定版本保持不变');
       const row = (await db.query('SELECT payload FROM wait_revisions WHERE version=$1', [q.version])).rows[0];
       if (!row) throw new HttpError(404, '等待记录版本不存在');
-      result = row.payload;
+      result = row.payload;if(q.week&&result.scope.from!==q.week)throw new HttpError(400,'等待版本与指定周不一致');
       // Fixed dates remain readable after the week rolls over; compare selection,
       // not the newly resolved current date window.
       const requested = selection(q);
@@ -67,5 +68,5 @@ export function waitsService(db: Database, raw: RawStore, clock: () => Date = ()
     if (Buffer.byteLength(JSON.stringify(page)) > (exporting ? 16 * 1024 * 1024 : 80 * 1024)) throw waitBounded();
     return page;
   }
-  return { read, recompute: (input: unknown) => read(input, true), export: (input: unknown) => read(input, false, true) };
+  return {forScope:(input:unknown,range:{from:string;to:string})=>compute(waitsQuerySchema.parse(input),false,range), read, recompute: (input: unknown) => read(input, true), export: (input: unknown) => read(input, false, true) };
 }

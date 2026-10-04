@@ -1,14 +1,15 @@
+import {fixedWeek} from './fixed-week.js';
 import { z } from 'zod';
 import { sourceSchema, type Source } from './archive.js';
 
 export const waitsQuerySchema = z.object({
   snapshotId: z.uuid().optional(), period: z.enum(['this-week', 'last-week', 'since-enrollment']).default('this-week'),
-  employeeId: z.uuid().optional(), source: sourceSchema.optional(), project: z.string().max(1024).optional(),
+  week:fixedWeek.optional(), employeeId: z.uuid().optional(), source: sourceSchema.optional(), project: z.string().max(1024).optional(),
   version: z.string().regex(/^[a-f0-9]{64}$/).optional(),
   lines: z.string().regex(/^\d+(,\d+){0,24}$/).optional(),
   contextSnapshotId: z.uuid().optional(),
   offset: z.coerce.number().int().min(0).max(100000).default(0),
-}).strict().refine(q => q.offset === 0 || !!q.version, '后续页必须固定版本')
+}).strict().refine(q=>!q.week||!!q.version,'指定周只可读取固定版本').refine(q => q.offset === 0 || !!q.version, '后续页必须固定版本')
   .refine(q => !q.lines || !!q.snapshotId || !!q.contextSnapshotId, '对话行筛选需要固定原件')
   .refine(q => !q.contextSnapshotId || !!q.version && !!q.lines && !q.snapshotId && !q.employeeId && !q.source && q.project === undefined, '版本内对话标签需要 version 与 lines');
 export type WaitsQuery = z.infer<typeof waitsQuerySchema>;
