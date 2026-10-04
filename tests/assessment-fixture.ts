@@ -29,12 +29,17 @@ export async function assessmentFixture() {
   type Owner = Awaited<ReturnType<typeof owner>>;
   const api = (person: Owner, path: string, body?: object) => sandbox.api(path, person.readerCredential, body ? json(body) : {});
   async function upload(person: Owner, rows: object[], sessionId: string, extra = {}) {
+    const errorsBefore = sandbox.serverErrors.length;
+    // Preserve safe server error classes when a concurrent CI upload fails.
+    // Messages and request data may contain credentials or original content.
+    const errorCodes = () => sandbox.serverErrors.slice(errorsBefore).map(error =>
+      error.code && /^[A-Z0-9_]{1,64}$/i.test(error.code) ? error.code : 'unclassified').slice(-8);
     const bytes = Buffer.from(rows.map(row => JSON.stringify(row)).join('\n') + '\n');
     const staged = await sandbox.api('/api/chunks/' + digest(bytes), person.deviceCredential, { method: 'PUT', headers: { 'Content-Type': 'application/octet-stream' }, body: bytes });
-    assert.ok([200,201].includes(staged.status));
+    assert.ok([200,201].includes(staged.status), `chunk HTTP ${staged.status}; observed server error codes: ${JSON.stringify(errorCodes())}`);
     const response = await sandbox.api('/api/snapshots', person.deviceCredential, json({ protocolVersion: 1, sourceSessionId: sessionId, source: 'codex-cli', sourceVersion: '0.157.1', sourceOs: process.platform,
       project: '/synthetic/assessment-model', hash: digest(bytes), byteLength: bytes.length, qualifiedAt: base.toISOString(), capability: 'unverified', ...extra }));
-    assert.equal(response.status, 200, await response.clone().text()); return { snapshotId: (await response.json()).snapshotId as string, bytes, rows, sessionId };
+    assert.equal(response.status, 200, `${await response.clone().text()}; observed server error codes: ${JSON.stringify(errorCodes())}`); return { snapshotId: (await response.json()).snapshotId as string, bytes, rows, sessionId };
   }
   function rows(input: { id?: string; prompts?: number; tokens?: number; elements?: number; rework?: boolean; verified?: number; claimed?: number; long?: boolean; active?: boolean } = {}) {
     const id = input.id ?? randomUUID(), timestamp = (ms: number) => new Date(base.getTime() + ms).toISOString();
