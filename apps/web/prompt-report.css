@@ -6,3 +6,5 @@
 .prompt-chart-tooltip{position:absolute;left:0;right:0;margin:0;overflow:auto;max-height:180px;z-index:2}
 
 .prompt-heat-chart,.prompt-task-chart{position:relative}
+
+[data-theme="dark"] .prompt-heat button{background:color-mix(in srgb,var(--color-accent) calc(var(--heat)*50%),var(--color-card))}
