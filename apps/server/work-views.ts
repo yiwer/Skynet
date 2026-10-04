@@ -48,7 +48,7 @@ export function workItems(days: DailyReport[], project?: string): WorkViewItem[]
     || a.employeeId.localeCompare(b.employeeId) || a.category.localeCompare(b.category));
 }
 export function workViewService(db: Database, daily: ReportService, clock: () => Date = () => new Date()) {
-  async function validate(input: WorkViewSelection) {
+  async function validate(input: WorkViewSelection, reader: Pick<Database, 'query'> = db) {
     const parsed = workViewQuery.parse(input); const { kind, subject, from, to } = parsed;
     if (to < from || to > addDays(from, 30)) throw new HttpError(422, '工作视图日期区间须为 1–31 个自然日');
     let label = subject || '未归类项目';
@@ -56,18 +56,18 @@ export function workViewService(db: Database, daily: ReportService, clock: () =>
       weekDate.parse(from);
       if (to !== addDays(from, 6)) throw new HttpError(422, '周报必须覆盖周一至周日');
       z.uuid().parse(subject);
-      const employee = (await db.query('SELECT name FROM employees WHERE id=$1', [subject])).rows[0];
+      const employee = (await reader.query('SELECT name FROM employees WHERE id=$1', [subject])).rows[0];
       if (!employee) throw new HttpError(404, '员工不存在'); label = employee.name;
     }
     return { selection: { kind, subject, from, to }, label };
   }
-  async function read(input: WorkViewSelection, offset = 0, revision?: number): Promise<WorkView> {
-    const { selection, label } = await validate(input); const id = identity(selection);
-    const row = (await db.query(`SELECT r.*,(p.refresh_pending OR p.candidate_revision<>${candidateRevisionSql} OR p.qualification_revision<${qualificationForView} OR ${changedDays}) AS refresh_pending FROM work_view_revisions r JOIN work_view_periods p ON p.id=r.period_id
+  async function readAt(reader: Pick<Database, 'query'>, input: WorkViewSelection, offset = 0, revision?: number): Promise<WorkView> {
+    const { selection, label } = await validate(input, reader); const id = identity(selection);
+    const row = (await reader.query(`SELECT r.*,(p.refresh_pending OR p.candidate_revision<>${candidateRevisionSql} OR p.qualification_revision<${qualificationForView} OR ${changedDays}) AS refresh_pending FROM work_view_revisions r JOIN work_view_periods p ON p.id=r.period_id
       WHERE r.period_id=$1 AND ($2::integer IS NULL OR r.revision=$2) ORDER BY r.revision DESC LIMIT 1`, [id, revision ?? null])).rows[0];
     if (!row) {
       if (revision !== undefined) throw new HttpError(404, '工作视图版本不存在');
-      const queued = !!(await db.query('SELECT 1 FROM work_view_periods WHERE id=$1', [id])).rowCount;
+      const queued = !!(await reader.query('SELECT 1 FROM work_view_periods WHERE id=$1', [id])).rowCount;
       return { ...selection, subjectLabel: label, timeZone: 'Asia/Shanghai', revision: 0, version: null, createdAt: null,
         state: queued ? 'queued' : 'not-scheduled', refreshPending: queued, items: [], nextOffset: null, participants: [], statistics: null, coverage: null };
     }
@@ -79,6 +79,7 @@ export function workViewService(db: Database, daily: ReportService, clock: () =>
     return { ...view, revision: row.revision, version: row.version, createdAt: row.created_at.toISOString(), items: page,
       nextOffset: offset + page.length < view.items.length ? offset + page.length : null, refreshPending: revision === undefined ? row.refresh_pending : false };
   }
+  const read = (input: WorkViewSelection, offset = 0, revision?: number) => readAt(db, input, offset, revision);
   async function request(input: WorkViewSelection) {
     const { selection } = await validate(input);
     if (selection.from > beijingDate(clock())) throw new HttpError(422, '尚未到来的区间不能生成工作视图');
@@ -226,6 +227,6 @@ export function workViewService(db: Database, daily: ReportService, clock: () =>
     for (const row of rows.slice(0, 50)) { const size = Buffer.byteLength(JSON.stringify(row)); if (views.length && bytes + size > 48 * 1024) break; views.push(row); bytes += size; }
     return { views, nextOffset: rows.length > views.length ? offset + views.length : null, timeZone: 'Asia/Shanghai' };
   }
-  return { read, request, tick, projects, list };
+  return { read, readAt, request, tick, projects, list };
 }
 export type WorkViewService = ReturnType<typeof workViewService>;

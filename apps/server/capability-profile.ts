@@ -20,7 +20,18 @@ export function capabilityProfileService(db: Database, assessments: ReturnType<t
   efficiency: ReturnType<typeof sessionEfficiencyService>, activity: ReturnType<typeof activityService>,
   reports: ReportService, workViews: ReturnType<typeof workViewService>, coaching:ReturnType<typeof profileCoachingService>, clock: () => Date = () => new Date()) {
   async function workContent(employeeId: string, from: string | null, to: string, activeDates: string[]): Promise<CapabilityProfile['work']> {
-    const scheduled = (await db.query('SELECT date FROM daily_report_periods WHERE employee_id=$1 AND date BETWEEN $2 AND $3 ORDER BY date', [employeeId, from ?? to, to])).rows;
+    const reader = await db.connect();
+    try {
+      await reader.query('BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY');
+      const result = await workSnapshot(reader, employeeId, from, to, activeDates);
+      await reader.query('COMMIT');
+      return result;
+    } catch (error) { await reader.query('ROLLBACK'); throw error; } finally { reader.release(); }
+  }
+  // A derived report refresh may proceed independently of source ingestion.
+  // Pin dates, current revisions, pending state and all pages together.
+  async function workSnapshot(reader: Pick<Database, 'query'>, employeeId: string, from: string | null, to: string, activeDates: string[]): Promise<CapabilityProfile['work']> {
+    const scheduled = (await reader.query('SELECT date FROM daily_report_periods WHERE employee_id=$1 AND date BETWEEN $2 AND $3 ORDER BY date', [employeeId, from ?? to, to])).rows;
     const dates = [...new Set([...activeDates, ...scheduled.map(row => row.date as string)])].sort().reverse();
     if (dates.length > 3660) throw new HttpError(413, '画像工作日期超过范围上限');
     const result: CapabilityProfile['work'] = { reports: [], items: [] }, findings = new Map<string, CapabilityProfile['work']['items'][number]>();
@@ -32,18 +43,18 @@ export function capabilityProfileService(db: Database, assessments: ReturnType<t
       if (findings.size > 10000) throw new HttpError(413, '画像工作条目超过范围上限');
     };
     for (const date of dates) {
-      let page = await reports.read(employeeId, date);
+      let page = await reports.readAt(reader, employeeId, date);
       const id = 'daily/' + date + '/' + page.revision;
       result.reports.push({ id, kind: 'daily', from: date, to: date, version: page.version, revision: page.revision, state: page.state, refreshPending: page.refreshPending, path: dailyPath(employeeId, date, page.revision) });
       for (;;) {
         for (const item of page.items) append(item, date, id);
         if (page.nextOffset === null) break;
-        page = await reports.read(employeeId, date, page.nextOffset, page.revision);
+        page = await reports.readAt(reader, employeeId, date, page.nextOffset, page.revision);
       }
     }
     for (const start of [...new Set(dates.map(monday))]) {
       const selection = { kind: 'weekly' as const, subject: employeeId, from: start, to: addDays(start, 6) };
-      let page = await workViews.read(selection);
+      let page = await workViews.readAt(reader, selection);
       const id = 'weekly/' + start + '/' + page.revision;
       result.reports.push({ id, kind: 'weekly', from: start, to: selection.to, version: page.version, revision: page.revision, state: page.state, refreshPending: page.refreshPending,
         path: '#work?' + new URLSearchParams({ ...selection, ...(page.revision ? { revision: String(page.revision) } : {}) }) });
@@ -51,7 +62,7 @@ export function capabilityProfileService(db: Database, assessments: ReturnType<t
         for (const { employeeId: owner, employee: _name, sourceDate, dailyRevision: _revision, dailyVersion: _version, dailyPath: _path, continuation: _continuation, ...item } of page.items)
           if (owner === employeeId && sourceDate >= (from ?? to) && sourceDate <= to) append(item, sourceDate, id);
         if (page.nextOffset === null) break;
-        page = await workViews.read(selection, page.nextOffset, page.revision);
+        page = await workViews.readAt(reader, selection, page.nextOffset, page.revision);
       }
     }
     return result;
@@ -114,7 +125,7 @@ export function capabilityProfileService(db: Database, assessments: ReturnType<t
         for (const event of events.slice(0, remaining)) seenActivity.add(event.id);
         if (recentActivity.events.length >= 20) { recentActivity.hasEarlier = events.length > remaining || index + 1 < dates.length; break; }
       }
-      return { algorithmVersion: 'capability-profile-2', employeeId, employee: assessment.employee, range: assessment.range, assessment, coaching:await coaching.read(assessment,report),
+      return { algorithmVersion: 'capability-profile-3', employeeId, employee: assessment.employee, range: assessment.range, assessment, coaching:await coaching.read(assessment,report),
         header: await header(employeeId), kpis: { ...totals, activeDays: activeDates.length }, usage: { version: report.version, metricVersion: report.metricVersion, daily, agents,
           sourceInputsComplete: mine?.sourceInputsComplete ?? true, unknownReasons: mine?.unknownReasons ?? [], unscopedSources: mine?.unscopedSources ?? 0 },
         sessions, taskDistribution: [...taskCounts].sort(([a], [b]) => a.localeCompare(b)).map(([taskType, sessions]) => ({ taskType, sessions })), recentActivity,
@@ -123,10 +134,9 @@ export function capabilityProfileService(db: Database, assessments: ReturnType<t
     }, async client => ({
       delivery: (await client.query('SELECT device_id,upload_id,snapshot_id,receipt_hash,received_at FROM delivery_receipts ORDER BY device_id,upload_id')).rows,
       devices: (await client.query('SELECT id,name,active FROM devices WHERE employee_id=$1 ORDER BY id', [employeeId])).rows,
-      daily: (await client.query('SELECT date,revision,version FROM daily_report_revisions WHERE employee_id=$1 ORDER BY date,revision', [employeeId])).rows,
-      dailyPending: (await client.query('SELECT date,generation,refresh_pending,qualification_revision,source_revision FROM daily_report_periods WHERE employee_id=$1 ORDER BY date', [employeeId])).rows,
-      weekly: (await client.query("SELECT r.period_id,r.revision,r.version FROM work_view_revisions r JOIN work_view_periods p ON p.id=r.period_id WHERE p.selection->>'kind'='weekly' AND p.selection->>'subject'=$1 ORDER BY r.period_id,r.revision", [employeeId])).rows,
-      weeklyPending: (await client.query("SELECT id,generation,refresh_pending,qualification_revision,candidate_revision FROM work_view_periods WHERE selection->>'kind'='weekly' AND selection->>'subject'=$1 ORDER BY id", [employeeId])).rows,
+      // Source corrections invalidate the composition; derived preparation is
+      // already frozen by workSnapshot and belongs to the resulting payload.
+      corrections: (await client.query('SELECT id,sequence FROM report_corrections WHERE employee_id=$1 ORDER BY date,sequence,id', [employeeId])).rows,
     }));
     const {previous,current}=content.coaching.trend;
     if(previous.modelVersion!==current.modelVersion||current.modelVersion!==content.assessment.modelVersion||previous.baselineVersion!==current.baselineVersion
