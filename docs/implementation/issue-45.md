@@ -17,6 +17,8 @@
 
 `assessment-factors.ts` 把逻辑会话的项目切片按员工合并，提示词和回复按原始 eventId 去重。引用必须能唯一落在同一员工、接入后、所选来源日期中。复制历史、重复上传、恢复链和旧载体不产生新提示词、会话或产出。任务基线把同一逻辑会话的员工贡献合并，避免接续链重复成为多个团队样本。
 
+首条/非首条边界还需当前原生叶子的 `messageHistoryComplete === true`。该共享确定性事实来自 #42 的服务器核验历史链；截断、改写、压缩及其后续追加不能凭模型的 `first` 标志重建已丢失的起点。边界未知时，首条要素覆盖、返工率、无返工会话占比均未知，首条/非首条样本只统计起点可信的会话；实际观察到的会话和提示词仍保留。旧固定洞察缺少字段时也不推为已知；固定旧评估保持原样可读。
+
 完整实现 13 项指标、6 个维度及 PRD 固定锚点。单项原值未知和样本不足分别表示，不用零填补；维度取可计分项平均，再按默认权重 20/20/20/20/15/5 加权，缺失维度权重比例重分配。综合指数先取整再按 72/60 分档；低可信度等级待定。会话/提示词数量决定基础可信度，真实采集缺口降一级；未知 Token 本身不冒充采集缺口。误差为估计值 `round(26 / sqrt(N))`，无会话时指数与误差为空。
 
 已结束样本需要所有当前原生叶子的最后一轮均为 `waiting-input`。它只说明当前处于轮次之间，不声称会话永久结束；后续 `task_started` 即移出已结束样本。缺少原生轮次边界时产出指标为未知，已知仍在进行中的样本不足则保持样本不足。已验证结果均值基线下限为 0.5；无有效同类产效比或中位数为零时不计该项。Token 为零不能作为产效比除数。
@@ -45,16 +47,17 @@ RED 依次验证缺少评估入口、只有空分数、缺少 MCP/画像、未�
 - 恢复后只有新 `task_started`、没有新增业务消息也会更新当前叶子；结束后增量与全量相同，历史前缀不增加提示词或会话数。
 - 35 项输入引用跨页无遗漏/重复；后续页要求固定版本；HTTP/MCP/完整导出一致；旧评估和旧基线冻结。
 - 真实公开上传发生在用量读取与等待读取之间，以及原件数量不变但分析在读取期间完成，两种交错均先在旧实现失败，再经完整输入核验通过；固定等待引用必须属于同份用量输入，新分析必须进入该份评估，随后全量重算和历史读取相同。
+- 截断原件先通过公开上传复现首条被错误计分，再核对首条/返工/无返工为未知；继续追加仍不恢复已丢失的起点，已知样本数、历史版本和全量重算保持正确。
 - 真实 HTTPS OAuth/PKCE、浏览器登录、明暗主题 1440/390/320、低于 60 分维度默认展开、对话证据跳转、参数与基线下载、无会话空状态。外层文档不滚动，内容区内部滚动。
 
-测试入口：`tests/assessment-public.test.ts`、`tests/assessment-model-public.test.ts`、`tests/assessment-journey.test.ts`、`tests/assessment-concurrency.test.ts`；合成 fixture 在 `tests/assessment-fixture.ts`。可复现命令：
+测试入口：`tests/assessment-public.test.ts`、`tests/assessment-model-public.test.ts`、`tests/assessment-journey.test.ts`、`tests/assessment-concurrency.test.ts`、`tests/assessment-history.test.ts`；合成 fixture 在 `tests/assessment-fixture.ts`。可复现命令：
 
 ```powershell
 $env:SKYNET_TEST_POSTGRES_BIN='C:/Users/yiwer/AppData/Local/Temp/ticket28-pg-0eb735e987dc48d186870e8a96801e01/bin'
 $env:SKYNET_OPENSSL='D:/DevEnv/Git/usr/bin/openssl.exe'
 $env:SKYNET_ASSESSMENT_EVIDENCE_DIR='E:/GenCode/Skynet-evidence/v2-2026-10-04/45-assessment'
 npm run build
-node --import tsx --test --test-concurrency=1 tests/assessment-public.test.ts tests/assessment-model-public.test.ts tests/assessment-journey.test.ts tests/assessment-concurrency.test.ts
+node --import tsx --test --test-concurrency=1 tests/assessment-public.test.ts tests/assessment-model-public.test.ts tests/assessment-journey.test.ts tests/assessment-concurrency.test.ts tests/assessment-history.test.ts
 ```
 
 原生 fixture 的 wire 名称和持久化范围核对官方 [Codex 0.157.1 protocol.rs](https://raw.githubusercontent.com/openai/codex/rust-v0.157.1/codex-rs/protocol/src/protocol.rs) 与 [rollout policy.rs](https://raw.githubusercontent.com/openai/codex/rust-v0.157.1/codex-rs/rollout/src/policy.rs)，未发明不存在的权限原始事件。0.160.0 Token 与元数据支持沿用 #40 的已验证实现。
