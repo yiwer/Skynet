@@ -11,6 +11,7 @@ import { inputIntegrityVersion } from './evidence-integrity.js';
 import { materialSource } from './material-provenance.js';
 import { metricInputBatch, type MetricInputFacts } from './metric-inputs.js';
 import { attributionRevisions } from './qualification.js';
+import { currentMetricInputs } from './metric-current-inputs.js';
 
 const catalogVersion = `recorded-metrics-3/${statisticsExtractorVersion}`;
 const employeeNames = new Intl.Collator('zh-CN');
@@ -104,6 +105,9 @@ function summarize(slices: Slice[]): SessionMetrics[] {
 }
 
 export function metricsService(db: Database, raw: RawStore, clock: () => Date = () => new Date()) {
+  // Keep only references to immutable saved results, never raw bytes or mutable
+  // payloads. A hit still checks the complete semantic key and every raw object.
+  const currentResults = new Map<string, { inputs: string; version: string; originals: { device: string; hash: string }[] }>();
   async function resolveScope(q: MetricsQuery, client: Pick<Database, 'query'>): Promise<MetricsScope> {
     const today = beijingDate(clock()); let from: string, to: string;
     if (q.period === 'custom') { from = q.from!; to = q.to!; }
@@ -135,6 +139,29 @@ export function metricsService(db: Database, raw: RawStore, clock: () => Date = 
       const scope = await resolveScope(q, client), scopeKey = digest(JSON.stringify(scope));
       const lock = (await client.query('SELECT pg_try_advisory_xact_lock(hashtextextended($1,7402138)) AS locked', [scopeKey])).rows[0];
       if (!lock.locked) throw new HttpError(409, '该指标范围正在计算，请稍后重试；固定版本仍可读取');
+      const currentKey = digest(JSON.stringify([catalogVersion, scope, requestSelection(q)]));
+      const reusable = full ? undefined : currentResults.get(currentKey);
+      if (reusable && await currentMetricInputs(client) === reusable.inputs) {
+        let next = 0, readable = true;
+        await Promise.all(Array.from({ length: Math.min(4, reusable.originals.length) }, async () => {
+          while (next < reusable.originals.length) {
+            const original = reusable.originals[next++]!;
+            try { await raw.read(original.device, original.hash); }
+            catch { readable = false; }
+          }
+        }));
+        if (readable) {
+          const saved = (await client.query('SELECT payload FROM metric_revisions WHERE version=$1', [reusable.version])).rows[0];
+          if (saved) { await client.query('COMMIT'); return saved.payload; }
+        }
+      }
+      currentResults.delete(currentKey);
+      const checkedOriginals = new Map<string, { device: string; hash: string }>();
+      let originalsReadable = true;
+      const readOriginal = async (device: string, hash: string) => {
+        try { const bytes = await raw.read(device, hash); checkedOriginals.set(`${device}/${hash}`, { device, hash }); return bytes; }
+        catch (error) { originalsReadable = false; throw error; }
+      };
       const events = (await client.query(`SELECT o.event_id,o.snapshot_id,o.employee_id,e.name AS employee,o.device_id,o.source,
         o.source_session_id,o.project,o.source_date,o.role,o.line,o.block,o.material_id,o.qualification_revision,o.proof_snapshot_id
         FROM effective_event_origins o JOIN employees e ON e.id=o.employee_id
@@ -269,7 +296,7 @@ export function metricsService(db: Database, raw: RawStore, clock: () => Date = 
       await Promise.all(Array.from({ length: Math.min(4, candidates.length) }, async () => {
         while (nextOriginal < candidates.length) {
           const record = candidates[nextOriginal++]!;
-          try { originals.set(record.id, { content: await raw.read(record.device_id, record.hash) }); }
+          try { originals.set(record.id, { content: await readOriginal(record.device_id, record.hash) }); }
           catch (error) { originals.set(record.id, { error }); }
         }
       }));
@@ -368,7 +395,7 @@ export function metricsService(db: Database, raw: RawStore, clock: () => Date = 
         let content = rawBuffers.get(key);
         if (!content) {
           totalBytes += length; if (totalBytes > limits.rawBytes) throw bounded();
-          try { content = await raw.read(device, hash); rawBuffers.set(key, content); }
+          try { content = await readOriginal(device, hash); rawBuffers.set(key, content); }
           catch { continue; } // Validated event remains an observed row; completeness is reported separately.
         }
         let facts = materialized.get(key);
@@ -451,7 +478,13 @@ export function metricsService(db: Database, raw: RawStore, clock: () => Date = 
         if (Buffer.byteLength(JSON.stringify(payload)) > limits.exportBytes) throw bounded();
         await client.query('INSERT INTO metric_revisions(version,scope_key,revision,request,payload) VALUES($1,$2,$3,$4,$5)', [version, scopeKey, revision, requestSelection(q), payload]);
       }
-      await client.query('COMMIT'); return payload;
+      const inputs = originalsReadable && checkedOriginals.size <= limits.snapshots ? await currentMetricInputs(client) : undefined;
+      await client.query('COMMIT');
+      if (inputs) {
+        currentResults.set(currentKey, { inputs, version: payload.version, originals: [...checkedOriginals.values()] });
+        while (currentResults.size > 4) currentResults.delete(currentResults.keys().next().value!);
+      }
+      return payload;
     } catch (error) { await client.query('ROLLBACK'); throw error; } finally { client.release(); }
   }
   async function load(input: unknown): Promise<{ q: MetricsQuery; payload: MetricsPage }> {
