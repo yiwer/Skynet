@@ -46,3 +46,9 @@
 后续归属查询切片保留全部 base 与匹配 override 事件，在一次载体扫描中分别取资格 MAX 和完整性 MAX，再加独立的 override MAX。完整性版本条件保留在 LEFT JOIN 的 ON 中，无证明、零事件和仅覆写的快照仍从原输入 ID 集合得到正确的字符串修订；没有把两个 MAX 变为逐行和的 MAX。去除仅供重复扫描的 MATERIALIZED 是性能候选，其速度需原程序验证，不能由等价性推断。
 
 该归属切片的旧损坏映射、材料先到后独立资格及超过 16 MiB 回填公开回归 3/3 通过（69.20 秒），TypeScript 构建通过；证据 54-metrics-fused-carriers-public.txt。正式性能尚待固定提交测量。
+
+固定acf9824正式首次3,271.52ms、后续P95509.37ms，正确性全过而首次仍RED。精确诊断首次3,147.07ms；同库读后融合归属为157/121ms、旧708为292/247ms，1,000修订值全部相等。随后4原件lookahead实验虽公开语义3/3通过，正式首次4,382.80ms没有收益证据，已完整撤回（bb5700b），恢复原先全量4lane预读。逐group流式hash微测仅约10–15ms改善，未加入产品。
+
+当前切片直接消费已经存在的完整Group及7字段事件tuple，移除每事件十五字段对象与第二份事件组数组。SQL仍读取全部15列且先执行100,001边界；九项归属字段逐项比较、Group首次任意角色次序、tuple全部字段/原ordinal、属性插入顺序和完整身份编码均相同。用户引用在原SQL循环遇user立即记录，保持userSources的全局第一用户顺序，不从Group顺序推导；每个角色仍参与完整性/证明检查。原件fresh读取、归属、材料与全部未知语义不改。
+
+冻结bb5700b完整Reporting+helper的公开差分覆盖普通/恢复/员工/项目、同原件交错日期，当前/full的完整payload与version全部相同；与材料资格、100,001整份拒绝回归共3/3通过（115.77秒），TypeScript构建通过。证据54-metrics-direct-groups-public.txt、54-metrics-direct-groups-equivalence.test.ts。性能待固定候选原程序测量，不能由分配减少推断已达标。

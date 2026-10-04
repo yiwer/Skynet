@@ -12,7 +12,7 @@ import { materialSource } from './material-provenance.js';
 import { metricInputBatch, metricExcludedUserLines, type MetricInputFacts } from './metric-inputs.js';
 import { attributionRevisions } from './qualification.js';
 import { currentMetricInputs } from './metric-current-inputs.js';
-import { readMetricEvents, type MetricEvent as Event } from './metric-events.js';
+import { readMetricEvents, type MetricEventGroup } from './metric-events.js';
 
 const catalogVersion = `recorded-metrics-3/${statisticsExtractorVersion}`;
 const employeeNames = new Intl.Collator('zh-CN');
@@ -164,7 +164,7 @@ export function metricsService(db: Database, raw: RawStore, clock: () => Date = 
       };
       const eventInputs = await readMetricEvents(client, scope, limits.events);
       if (!eventInputs) throw bounded();
-      const { events, groups: eventGroups } = eventInputs;
+      const { users, groups: eventGroups } = eventInputs;
       // Token metadata does not become a business event, so event dates cannot
       // select its originals. Discover scoped native identities independently,
       // then inspect source timestamps within the same bounded raw-read budget.
@@ -178,7 +178,7 @@ export function metricsService(db: Database, raw: RawStore, clock: () => Date = 
       [q.employeeId ?? null, q.source ?? null, q.project ?? null])).rows as { device: string; source: Source; session: string }[];
       if (discovered.length > limits.snapshots) throw bounded();
       const nativeInputs = [...new Map([...discovered, ...eventGroups.map(group =>
-        ({ device: group[0]!.device_id, source: group[0]!.source, session: group[0]!.source_session_id }))]
+        ({ device: group.device_id, source: group.source, session: group.source_session_id }))]
         .map(input => [nativeKey(input.device, input.source, input.session), input])).values()];
       // Metadata is needed to follow verified restoration chains. No native home
       // or employee source file is read: all bytes come from committed raw storage.
@@ -191,7 +191,7 @@ export function metricsService(db: Database, raw: RawStore, clock: () => Date = 
           WHERE s.provenance->>'relation' IN ('verified-restoration','same-device-continuation')
       ) SELECT s.*,d.employee_id,d.enrolled_at,e.name AS employee FROM selected x JOIN snapshots s ON s.id=x.id
         JOIN devices d ON d.id=s.device_id JOIN employees e ON e.id=d.employee_id ORDER BY s.committed_at,s.id LIMIT ${limits.snapshots + 1}`,
-      [JSON.stringify(nativeInputs), [...new Set(eventGroups.map(group => group[0]!.snapshot_id))]])).rows as Snapshot[];
+      [JSON.stringify(nativeInputs), [...new Set(eventGroups.map(group => group.snapshot_id))]])).rows as Snapshot[];
       if (snapshots.length > limits.snapshots) throw bounded();
       const revisions = await attributionRevisions(client, snapshots.map(snapshot => snapshot.id));
       for (const snapshot of snapshots) snapshot.attribution_revision = revisions.get(snapshot.id)!;
@@ -233,7 +233,7 @@ export function metricsService(db: Database, raw: RawStore, clock: () => Date = 
       // first ordinals retain the original first-carrier choice; each event
       // still contributes its own message anchor, tool ID and proof status.
       for (const group of eventGroups) {
-        const first = group[0]!;
+        const first = group;
         const native = nativeKey(first.device_id, first.source, first.source_session_id), record = latest.get(native) ?? byId.get(first.snapshot_id)!;
         const session = first.material_id && record.source_session_id !== first.source_session_id ? digest(native) : identity(record);
         const key = sliceKey(session, first.employee_id, first.project, first.source_date);
@@ -243,10 +243,10 @@ export function metricsService(db: Database, raw: RawStore, clock: () => Date = 
         if (slices.size > limits.sessions) throw bounded();
         slice.snapshotIds.add(first.snapshot_id);
         relevantNative.add(native);
-        for (const event of group) {
-          if (event.role === 'user') slice.turns.add(JSON.stringify([event.snapshot_id, event.material_id, event.line]));
-          if (event.role === 'tool request') slice.tools.add(event.event_id);
-          if (event.material_id && !event.proof_snapshot_id) slice.reasons.add('关联材料缺少独立普通来源资格，Token 未知');
+        for (const [, eventId, role, line, , , proof] of group.events) {
+          if (role === 'user') slice.turns.add(JSON.stringify([group.snapshot_id, group.material_id, line]));
+          if (role === 'tool request') slice.tools.add(eventId);
+          if (group.material_id && !proof) slice.reasons.add('关联材料缺少独立普通来源资格，Token 未知');
         }
       }
       for (const native of relevantNative) {
@@ -385,13 +385,16 @@ export function metricsService(db: Database, raw: RawStore, clock: () => Date = 
       // The evidence reader intentionally preserves compacted text as evidence.
       // A native, explicit summary/meta flag prevents counting that preserved
       // text as a new user submission; never guess from message wording.
-      const userSources = new Map<string, Event[]>();
-      for (const event of events) if (event.role === 'user') {
-        const key = JSON.stringify([event.snapshot_id, event.material_id]); userSources.set(key, [...userSources.get(key) ?? [], event]);
+      const userSources = new Map<string, { first: MetricEventGroup; lines: number[] }>();
+      for (const { group, event } of users) {
+        const key = JSON.stringify([group.snapshot_id, group.material_id]);
+        let source = userSources.get(key);
+        if (!source) { source = { first: group, lines: [] }; userSources.set(key, source); }
+        source.lines.push(event[3]);
       }
       const excludedTurns = new Set<string>();
       for (const sourceEvents of userSources.values()) {
-        const first = sourceEvents[0]!, record = byId.get(first.snapshot_id)!;
+        const first = sourceEvents.first, record = byId.get(first.snapshot_id)!;
         let key = record.id, device = record.device_id, hash = record.hash, length = record.manifest.byteLength;
         if (first.material_id) {
           const source = await materialSource(client, record, first.material_id);
@@ -423,8 +426,8 @@ export function metricsService(db: Database, raw: RawStore, clock: () => Date = 
           }
         }
         const excluded = new Set(facts?.excludedUserLines ?? metricExcludedUserLines(content, record.source));
-        for (const event of sourceEvents) {
-          if (excluded.has(event.line)) excludedTurns.add(JSON.stringify([event.snapshot_id, event.material_id, event.line]));
+        for (const line of sourceEvents.lines) {
+          if (excluded.has(line)) excludedTurns.add(JSON.stringify([first.snapshot_id, first.material_id, line]));
         }
       }
       await inputBatch.flush();
