@@ -70,7 +70,7 @@ export async function registerMcp(app: FastifyInstance, db: Database, archive: A
     mcp.registerTool('read_wait_report', { description:'按固定等待来源读取中位数/P90、长等待与并行占比、星期小时热力表和姓名顺序人员分布。保留分子分母，权限未知单列。等待不用于考勤，建议不更改宿主权限。', annotations, inputSchema:waitReportQuerySchema }, input=>result(()=>waitReport.read(input)));
     mcp.registerTool('read_waits', { description: '读取与 Web、导出共用的固定等待记录：原生本轮结束至下一条真实用户，末尾空闲排除，满600秒为长等待；权限未知单列。同员工其他逻辑会话活动含其他项目与Agent。后续页固定version；contextSnapshotId与lines可读取该版本的对话行标签。',
       annotations, inputSchema: waitsQuerySchema }, input => result(() => waits.read(input)));
-    mcp.registerTool('read_assessment', { description: '读取一名员工接入至今、默认方案的使用能力评估。与 Web、导出共用指标、证据及固定版本；缺失指标不计分，低可信度等级待定。不是员工排名。',
+    mcp.registerTool('read_assessment', { description: '读取一名员工接入至今、默认方案的使用能力评估。与 Web、导出共用指标、证据及固定版本；缺失指标不计分，低可信度等级待定。输入版本每页32条；沿inputPage.nextOffset作为inputOffset并携带同一version读取全部。',
       annotations, inputSchema: assessmentQuery.extend({ employeeId: z.uuid() }) }, input => result(() => { const { employeeId, ...query } = input; return assessments.read(employeeId, query); }));
     mcp.registerTool('read_assessment_model', { description: '读取评估结果引用的完整参数版本：13 项锚点、样本门槛、权重、分档、可信度与固定建议库。',
       annotations, inputSchema: { version: z.string().regex(/^[a-f0-9]{64}$/) } }, input => result(() => assessments.model(input.version)));

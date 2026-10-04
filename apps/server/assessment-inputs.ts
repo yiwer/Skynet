@@ -1,25 +1,36 @@
 import { digest, type Database } from './database.js';
-import type { MetricsService } from './metrics.js';
+import type { usageOutputService } from './usage-output.js';
+import type { sessionInsightsService } from './session-insights.js';
+import type { waitsService } from './waits.js';
 import { beijingDate } from '../../packages/contracts/reports.js';
 import { addDays } from '../../packages/contracts/work-views.js';
 import type { CapabilityAssessment } from '../../packages/contracts/assessment.js';
-import { emptyDimensions, scoreMetric } from './assessment-model.js';
+import { emptyDimensions, scoreMetric, concludeAssessment, assessmentModelVersion } from './assessment-model.js';
+import { assessmentSessions, assessmentBaseline, fillAssessmentFactors, median } from './assessment-factors.js';
+import { dimKeys } from '../../packages/contracts/assessment.js';
 
 const weekday = (date: string) => ![0, 6].includes(new Date(date + 'T00:00:00Z').getUTCDay());
-export async function assessmentInputs(db: Database, metrics: MetricsService, clock: () => Date) {
-  const report = await metrics.exportMetrics({ period: 'since-enrollment' });
+export async function assessmentInputs(db: Database, usage: ReturnType<typeof usageOutputService>, insights: ReturnType<typeof sessionInsightsService>, waits: ReturnType<typeof waitsService>, clock: () => Date, full = false) {
+  const selection = { period: 'since-enrollment' };
+  const usageHead = full ? await usage.recompute(selection) : null, waitHead = full ? await waits.recompute(selection) : null;
+  const report = await usage.export({ ...selection, ...(usageHead ? { version: usageHead.version } : {}) });
+  const waitReport = await waits.export({ ...selection, ...(waitHead ? { version: waitHead.version } : {}) });
+  const references = [...new Map(report.sessions.flatMap(row => row.insightVersions).map(ref => [ref.version, ref])).values()];
+  const views = await insights.readVersions(references), factors = assessmentSessions(report.sessions, views, report.scope);
+  const baseline = { ...assessmentBaseline(factors), modelVersion: assessmentModelVersion, usageVersion: report.version,
+    sourceVersions: references.map(ref => ref.version).sort() }, baselineVersion = digest(JSON.stringify(baseline));
   const people = (await db.query(`SELECT e.id,e.name,min(d.enrolled_at) AS enrolled_at,
     bool_or(d.id IS NOT NULL AND d.enrolled_at IS NULL) AS unknown_enrollment
     FROM employees e LEFT JOIN devices d ON d.employee_id=e.id GROUP BY e.id ORDER BY e.name,e.id`)).rows;
   const to = beijingDate(clock());
   const gaps = (await db.query(`SELECT d.employee_id,o.source,o.date,o.gap_observed,o.fault_codes FROM device_coverage_observations o
     JOIN devices d ON d.id=o.device_id WHERE o.date <= $1 AND o.gap_observed ORDER BY d.employee_id,o.date,o.source,o.hour`, [to])).rows;
-  return { report, people: people.map(person => {
+  const values = people.map(person => {
     const sessions = report.sessions.filter(session => session.employeeId === person.id && session.sessions > 0);
     const from = person.enrolled_at && !person.unknown_enrollment ? beijingDate(person.enrolled_at) : null;
     let workdays = 0; if (from) for (let date = from; date <= to; date = addDays(date, 1)) if (weekday(date)) workdays++;
-    const dates = new Set(sessions.flatMap(session => session.dates)), activeWorkdays = [...dates].filter(weekday).length;
     const totals = report.employees.find(employee => employee.employeeId === person.id);
+    const dates = new Set(totals?.activeDates ?? []), activeWorkdays = [...dates].filter(weekday).length;
     const sample: CapabilityAssessment['sample'] = { sessions: new Set(sessions.map(s => s.sessionId)).size, prompts: totals?.userTurns ?? 0,
       activeDays: dates.size, workdays, unknownTokenSessions: totals?.unknownTokenSessions ?? 0 };
     const dims = emptyDimensions();
@@ -32,7 +43,13 @@ export async function assessmentInputs(db: Database, metrics: MetricsService, cl
     const observations = gaps.filter(gap => gap.employee_id === person.id && (!from || gap.date >= from));
     const issues = [...new Set([...observations.map(gap => `${gap.source || '客户端'} · ${gap.date} 采集缺口`),
       ...(sessions.some(s => s.unknownReasons.some(reason => /缺口|不可读取|无效编码/.test(reason))) ? ['来源原件不完整'] : [])])];
-    return { id: person.id as string, name: person.name as string, range: { from, to, timeZone: 'Asia/Shanghai' as const }, sample, dims, issues,
+    const mine = factors.filter(s => s.employeeId === person.id), filled = fillAssessmentFactors(dims, mine, baseline, waitReport, person.id);
+    const verdict = concludeAssessment(dims, sample, issues);
+    if (filled.promptTip) for (const tip of verdict.tips) if (tip.dim === 'prompt') tip.text = filled.promptTip;
+    return { id: person.id as string, name: person.name as string, range: { from, to, timeZone: 'Asia/Shanghai' as const }, sample, dims, issues, verdict, representatives: filled.representatives,
+      analysisVersions: [...new Set(mine.flatMap(s => s.analysisVersions))].sort(), insightVersions: [...new Set(mine.flatMap(s => s.versions.map(v => v.version)))].sort(),
       coverageVersion: digest(JSON.stringify([observations, sessions.map(s => [s.sessionId, s.sourceInputsComplete])])) };
-  }) };
+  });
+  for (const key of dimKeys) { const reference = median(values.flatMap(person => person.dims[key].score === null ? [] : [person.dims[key].score!])); for (const person of values) person.dims[key].teamMedian = reference; }
+  return { report, waitsVersion: waitReport.version, baseline, baselineVersion, people: values };
 }

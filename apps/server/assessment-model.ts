@@ -50,9 +50,9 @@ export function concludeAssessment(dims: CapabilityAssessment['dims'], sample: C
   const enough = (rule: { sessions: number; prompts: number }) => sample.sessions >= rule.sessions && sample.prompts >= rule.prompts;
   let confidence = enough(assessmentModel.confidence.high) ? 3 : enough(assessmentModel.confidence.medium) ? 2 : 1;
   if (issues.length) confidence = Math.max(1, confidence - assessmentModel.confidence.coverageDowngrade);
-  const strengths = scored.filter(key => Math.round(dims[key].score!) >= assessmentModel.strengthMinimum).sort((a, b) => dims[b].score! - dims[a].score!).slice(0, 2);
+  const strengths = scored.filter(key => Math.round(dims[key].score!) >= assessmentModel.strengthMinimum).sort((a, b) => dims[b].score! - dims[a].score!).slice(0, assessmentModel.maximumRecommendations);
   const low = scored.filter(key => Math.round(dims[key].score!) < assessmentModel.priorityBelow).sort((a, b) => dims[a].score! - dims[b].score!);
-  const priorities = low.slice(0, 2), tips = priorities.map(dim => ({ dim, text: dim === 'prompt' ? assessmentModel.promptTips.goal : assessmentModel.tips[dim] }));
+  const priorities = low.slice(0, assessmentModel.maximumRecommendations), tips = priorities.map(dim => ({ dim, text: dim === 'prompt' ? assessmentModel.promptTips.goal : assessmentModel.tips[dim] }));
   return { index, margin: sample.sessions ? Math.round(assessmentModel.marginNumerator / Math.sqrt(sample.sessions)) : null,
     confidence: (['低', '中', '高'] as const)[confidence - 1]!,
     level: (confidence === 1 || index === null ? '待定' : assessmentModel.levels.find(level => index >= level.minimum)!.label) as CapabilityAssessment['level'],

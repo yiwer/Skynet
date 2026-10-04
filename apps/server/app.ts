@@ -273,11 +273,13 @@ export async function createApp(options: { db: Database; rawDirectory: string; w
     const data = await usage.export(request.query);
     return reply.header('Content-Disposition', `attachment; filename="skynet-usage-output-${data.version}.json"`).type('application/json').send(data);
   });
-  const assessments = assessmentService(db, metrics, options.reportClock);
+  const assessments = assessmentService(db, usage, insights, waits, options.reportClock);
   app.get('/api/assessment-models/:version', { onRequest: readerGuard }, request => assessments.model(hashSchema.parse((request.params as { version: string }).version)));
+  app.get('/api/assessment-baselines/:version', { onRequest: readerGuard }, request => assessments.baseline(hashSchema.parse((request.params as { version: string }).version)));
   app.get('/api/assessments/:id', { onRequest: readerGuard }, request => assessments.read(z.uuid().parse((request.params as { id: string }).id), request.query));
+  app.post('/api/assessments/:id/recompute', { onRequest: readerGuard }, request => assessments.recompute(z.uuid().parse((request.params as { id: string }).id), request.body));
   app.get('/api/assessments/:id/export', { onRequest: readerGuard }, async (request, reply) => {
-    const value = await assessments.read(z.uuid().parse((request.params as { id: string }).id), request.query);
+    const value = await assessments.export(z.uuid().parse((request.params as { id: string }).id), request.query);
     return reply.header('Content-Disposition', `attachment; filename="assessment-${value.version}.json"`).send(value);
   });
   app.get('/api/snapshots/:id/insights', { onRequest: readerGuard }, async request => insights.read(z.uuid().parse((request.params as {id:string}).id), sessionInsightsQuery.parse(request.query)));

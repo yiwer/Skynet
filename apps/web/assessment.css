@@ -9,6 +9,7 @@
 .platform-main .assessment-controls select{max-width:220px;margin:0;min-height:34px}
 .platform-main .assessment-controls>span{padding-left:10px;border-left:1px solid var(--color-rule)}
 .platform-main .assessment-content{overflow:auto;min-height:0;flex:1;padding:0 10px 24px 0;scrollbar-gutter:stable}
+.platform-main .assessment-empty{padding:56px 20px;border:1px solid var(--color-rule);border-radius:12px;background:var(--color-card);text-align:center;color:var(--color-muted);font-size:14px}
 .platform-main .assessment-verdict{display:grid;grid-template-columns:1.2fr 1fr;border:1px solid var(--color-rule);border-radius:16px;background:var(--color-card);overflow:hidden}
 .platform-main .assessment-verdict>div{padding:24px 28px}
 .platform-main .assessment-eyebrow{font-size:12px;color:var(--color-muted);margin:0 0 18px}
