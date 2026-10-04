@@ -3,10 +3,10 @@ import { digest } from './database.js';
 import { HttpError } from './identities.js';
 import { RawUnavailableError, type RawStore } from './raw-store.js';
 import { readEvidence } from './evidence.js';
-import { eventOrigins } from './provenance.js';
+import { eventOrigins, eventOriginsBatch } from './provenance.js';
 import { attributionRevisions } from './qualification.js';
-import { verifySnapshotIntegrity } from './evidence-integrity.js';
-import { waitInput, type WaitInput } from './wait-inputs.js';
+import { verifySnapshotsIntegrity } from './evidence-integrity.js';
+import { waitInputBatch, type WaitInput } from './wait-inputs.js';
 import { materialSource } from './material-provenance.js';
 import type { Manifest, Source } from '../../packages/contracts/archive.js';
 import type { Provenance } from '../../packages/contracts/provenance.js';
@@ -51,18 +51,29 @@ export async function waitDataset(client: pg.PoolClient, raw: RawStore, full: bo
     roots.set(nativeKey(record), root ?? digest(nativeKey(current)));
     ownerFallbacks.set(nativeKey(record),current);
   }
+  const failures=new Map<string,RawUnavailableError>();
+  await verifySnapshotsIntegrity(client,raw,records.map(record=>record.id),(error,ids)=>{for(const id of ids)failures.set(id,error);});
+  const origins=await eventOriginsBatch(client,records.map(record=>record.id));
+  const inputs=await waitInputBatch(client,records.map(record=>({snapshotId:record.id,source:record.source,hash:record.hash})),full);
+  const verified=new Map<string,Buffer>();let next=0;
+  await Promise.all(Array.from({length:Math.min(4,records.length)},async()=>{
+    while(next<records.length){const record=records[next++]!;if(failures.has(record.id))continue;
+      try{verified.set(record.id,await raw.read(record.device_id,record.hash));}
+      catch(error){if(!(error instanceof RawUnavailableError))throw error;failures.set(record.id,error);}
+    }
+  }));
   const result: WaitOriginal[] = []; let events = 0;
   for (const record of records) {
-    let bytes:Buffer|undefined,unavailable:WaitOriginal['unavailable'];
-    try{await verifySnapshotIntegrity(client,raw,record.id);bytes=await raw.read(record.device_id,record.hash);}
-    catch(error){if(!(error instanceof RawUnavailableError))throw error;unavailable=error.reason;}
+    const bytes=verified.get(record.id),unavailable=failures.get(record.id)?.reason;
     if(bytes&&bytes.length!==record.manifest.byteLength)throw new HttpError(409,'等待原件大小不一致');
-    const facts:WaitInput = bytes?await waitInput(client, { snapshotId: record.id, source: record.source, hash: record.hash, bytes, full }):
+    const facts:WaitInput = bytes?inputs.read({ snapshotId: record.id, source: record.source, hash: record.hash, bytes }):
       {parserVersion:readEvidence(Buffer.alloc(0),record.source).parserVersion,boundaries:[],messages:[],pairs:[]};
     if ((events += facts.messages.length) > 100000) throw waitBounded();
     if(bytes)observe?.(record,bytes,facts);
-    result.push({ record, sessionId: roots.get(nativeKey(record))!, facts, origins: await eventOrigins(client, record.id), revision: '',...(unavailable?{unavailable}:{}),ownerFallback:ownerFallbacks.get(nativeKey(record)) });
+    result.push({ record, sessionId: roots.get(nativeKey(record))!, facts, origins: origins.get(record.id)!, revision: '',...(unavailable?{unavailable}:{}),ownerFallback:ownerFallbacks.get(nativeKey(record)) });
+    verified.delete(record.id);
   }
+  await inputs.flush();
   const revisions=await attributionRevisions(client,records.map(record=>record.id));
   for(const original of result)original.revision=revisions.get(original.record.id)!;
   return result;

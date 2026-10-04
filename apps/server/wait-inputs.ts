@@ -10,13 +10,29 @@ export interface WaitInput {
   parserVersion: string; boundaries: TurnBoundary[]; messages: EvidenceLine[];
   pairs: { start: TurnBoundary | null; end: EvidenceLine; beforeLine: number | null }[];
 }
-export async function waitInput(client: pg.PoolClient, input: { snapshotId: string; source: Source; hash: string; bytes: Buffer; full: boolean }): Promise<WaitInput> {
+type Identity={snapshotId:string;source:Source;hash:string};
+function identify(input:Identity){
   const parserVersion = readEvidence(Buffer.alloc(0), input.source).parserVersion;
   const key = digest(JSON.stringify([waitAlgorithmVersion, input.snapshotId, input.hash, input.source, parserVersion]));
-  if (!input.full) {
-    const saved = (await client.query('SELECT payload FROM wait_input_revisions WHERE version=$1', [key])).rows[0];
-    if (saved) return saved.payload;
+  return {parserVersion,key};
+}
+export async function waitInputBatch(client:pg.PoolClient,identities:Identity[],full:boolean){
+  const keys=identities.map(input=>identify(input).key);
+  const rows=full||!keys.length?[]:(await client.query('SELECT version,payload FROM wait_input_revisions WHERE version=ANY($1::text[])',[keys])).rows;
+  const saved=new Map<string,WaitInput>(rows.map(row=>[row.version,row.payload])),pending=new Map<string,{version:string;snapshot_id:string;payload:WaitInput}>();
+  function read(input:Identity&{bytes:Buffer}){
+    const {key,parserVersion}=identify(input),known=saved.get(key);if(known)return known;
+    const value=parseWaitInput(input.bytes,input.source,parserVersion);saved.set(key,value);pending.set(key,{version:key,snapshot_id:input.snapshotId,payload:value});return value;
   }
+  async function flush(){const rows=[...pending.values()];for(let offset=0;offset<rows.length;offset+=100)await client.query(`INSERT INTO wait_input_revisions(version,snapshot_id,payload)
+    SELECT version,snapshot_id,payload FROM jsonb_to_recordset($1::jsonb) AS x(version text,snapshot_id uuid,payload jsonb) ON CONFLICT DO NOTHING`,[JSON.stringify(rows.slice(offset,offset+100))]);pending.clear();}
+  return {read,flush};
+}
+export async function waitInput(client: pg.PoolClient, input: Identity & { bytes: Buffer; full: boolean }): Promise<WaitInput> {
+  const batch=await waitInputBatch(client,[input],input.full),value=batch.read(input);await batch.flush();return value;
+}
+function parseWaitInput(bytes:Buffer,source:Source,parserVersion:string):WaitInput {
+  const input={bytes,source};
   const evidence = readEvidence(input.bytes, input.source);
   const excluded = new Set<number>();
   if (input.source === 'claude-code-cli') for (const [index, text] of input.bytes.toString('utf8').split('\n').entries()) {
@@ -63,6 +79,5 @@ export async function waitInput(client: pg.PoolClient, input: { snapshotId: stri
   }
   for (const pair of pairs) if (pair.start?.turnId && conflicts.has(pair.start.turnId)) pair.start = { ...pair.start, timestamp: null };
   const result = { parserVersion, boundaries, messages, pairs };
-  await client.query(`INSERT INTO wait_input_revisions(version,snapshot_id,payload) VALUES($1,$2,$3) ON CONFLICT DO NOTHING`, [key, input.snapshotId, result]);
   return result;
 }
