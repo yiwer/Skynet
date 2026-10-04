@@ -114,7 +114,8 @@ export function capabilityProfileService(db: Database, assessments: ReturnType<t
         if (recentActivity.events.length >= 20) { recentActivity.hasEarlier = events.length > remaining || index + 1 < dates.length; break; }
       }
       return { algorithmVersion: 'capability-profile-1', employeeId, employee: assessment.employee, range: assessment.range, assessment,
-        header: await header(employeeId), kpis: { ...totals, activeDays: activeDates.length }, usage: { version: report.version, metricVersion: report.metricVersion, daily, agents },
+        header: await header(employeeId), kpis: { ...totals, activeDays: activeDates.length }, usage: { version: report.version, metricVersion: report.metricVersion, daily, agents,
+          sourceInputsComplete: mine?.sourceInputsComplete ?? true, unknownReasons: mine?.unknownReasons ?? [], unscopedSources: mine?.unscopedSources ?? 0 },
         sessions, taskDistribution: [...taskCounts].sort(([a], [b]) => a.localeCompare(b)).map(([taskType, sessions]) => ({ taskType, sessions })), recentActivity,
         work: await workContent(employeeId, assessment.range.from, assessment.range.to, activeDates),
         references: { efficiency: { version: efficiencyReport.version, metricVersion: efficiencyReport.metricVersion, path: '#efficiency?' + new URLSearchParams({ period: scope.period, employeeId, version: efficiencyReport.version }) } } };

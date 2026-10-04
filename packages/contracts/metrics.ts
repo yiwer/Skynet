@@ -33,6 +33,6 @@ export type MetricsPage = { version: string; revision: number; scope: MetricsSco
   totals: MetricTotals; sessions: SessionMetrics[]; nextOffset: number | null;
   daily: ({ date: string; tokenTrend?: MetricTokenTrend } & MetricTotals)[];
   employeeDaily?: { employeeId: string; days: MetricDailyPoint[] }[];
-  employees: ({ employeeId: string; employee: string } & MetricTotals)[];
+  employees: ({ employeeId: string; employee: string; sourceInputsComplete?: boolean; unknownReasons?: string[]; unscopedSources?: number } & MetricTotals)[];
   sources: ({ source: Source } & MetricTotals)[];
   catalogVersion: string; definition: string; sourceInputsComplete: boolean; unknownReasons: string[] };

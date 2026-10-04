@@ -16,7 +16,7 @@ export type CapabilityProfile = {
   header: { deviceCount: number; enrolledAt: string | null; lastSyncedAt: string | null;
     devices: { id: string; name: string; active: boolean; enrolledAt: string | null; lastSyncedAt: string | null }[] };
   kpis: Omit<UsageEmployee, 'employeeId' | 'employee' | 'daily' | 'agents' | 'activeDates'> & { activeDays: number };
-  usage: { version: string; metricVersion: string; daily: UsageEmployee['daily']; agents: UsageEmployee['agents'] };
+  usage: { version: string; metricVersion: string; daily: UsageEmployee['daily']; agents: UsageEmployee['agents']; sourceInputsComplete: boolean; unknownReasons: string[]; unscopedSources: number };
   references: { efficiency: { version: string; metricVersion: string; path: string } };
   sessions: (Pick<EfficiencySession, 'sessionId' | 'snapshotId' | 'source' | 'sourceSessionId' | 'projects' | 'dates' | 'tokens' | 'knownTokens' | 'userTurns' | 'toolCalls' | 'verified' | 'codeChanges' | 'efficiency' | 'rework' | 'taskType' | 'webPath'> & { waitFraction: EfficiencyTiming['waitFraction'] | null })[];
   taskDistribution: { taskType: EfficiencySession['taskType']; sessions: number }[];
