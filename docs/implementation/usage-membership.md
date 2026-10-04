@@ -19,6 +19,12 @@ read was 3,250.9 ms. Complete current/full/fixed payload equality and known tota
 passed before the unchanged 3,000 / 1,000 ms gate failed. This is a shared-host
 single pair, not P95.
 
+The candidate `7c12498` measured 8,516.8 ms / 2,959.0 ms on a fresh clone of the
+same source bundle, after passing the same complete-result assertions. Both
+latency limits still fail. Separate shared-host runs do not establish a
+controlled speedup; the accepted purpose of this slice is removal of the
+unnecessary all-views scan with unchanged public semantics.
+
 Author build and the 10 existing public cases in `usage-output.test.ts`,
 `source-isolation.test.ts` and `profile-preparation.test.ts` pass (132,798.7 ms).
 They cover restored ownership, parent/child material, unknown inputs, source
