@@ -19,3 +19,30 @@
 .platform-main .waiting-report .usage-filter-row input{width:180px;max-width:100%;margin:0;min-height:36px}
 @media(max-width:700px){.platform-main .wait-stats{grid-template-columns:1fr 1fr}.platform-main .wait-stats .usage-stat:first-child{grid-column:1/-1}.platform-main .waiting-report .usage-filter-row>label{min-width:0;flex:1 1 120px}.platform-main .waiting-report .usage-filter-row input{width:100%}}
 @media(prefers-reduced-motion:reduce){.platform-main .conversation-wait>summary::before{transition:none}}
+.platform-main .wait-report-stats{grid-template-columns:repeat(5,minmax(0,1fr));gap:10px}
+.platform-main .wait-report-stats .usage-stat:first-child{grid-column:auto}
+.platform-main .wait-report-stats .usage-stat{padding:14px}
+.platform-main .wait-report-stats .usage-stat dd{font-size:clamp(20px,1.8vw,28px)}
+.platform-main .wait-heat-scroll{max-width:100%;overflow:auto;padding:4px 2px}
+.platform-main .wait-heat-grid{display:grid;grid-template-columns:42px repeat(24,minmax(18px,1fr));gap:4px;min-width:650px;align-items:center;font-size:11px;color:var(--color-muted)}
+.platform-main .wait-heat-row{display:contents}
+.platform-main .wait-hour{text-align:center}
+.platform-main .wait-heat-cell{display:block;min-height:24px;height:24px;min-width:0;padding:0;border:1px solid var(--color-rule-soft);border-radius:4px;background:var(--color-paper-2)}
+.platform-main .wait-heat-cell[data-level="1"]{background:color-mix(in srgb,var(--viz-1) 25%,var(--color-card))}
+.platform-main .wait-heat-cell[data-level="2"]{background:color-mix(in srgb,var(--viz-1) 45%,var(--color-card))}
+.platform-main .wait-heat-cell[data-level="3"]{background:color-mix(in srgb,var(--viz-1) 70%,var(--color-card))}
+.platform-main .wait-heat-cell[data-level="4"]{background:var(--viz-1)}
+.platform-main .wait-chart-legend{display:flex;flex-wrap:wrap;gap:8px 20px;color:var(--color-muted);font-size:11px;margin-top:12px}
+.platform-main .wait-stat-table{max-height:360px;overflow:auto}
+.platform-main .wait-person-plots{display:grid;gap:14px}
+.platform-main .wait-person-row{display:grid;grid-template-columns:minmax(100px,160px) minmax(0,1fr);gap:12px;align-items:center;min-width:0}
+.platform-main .wait-person-row>span{overflow-wrap:anywhere}
+.platform-main .wait-person-plot{min-width:0;color:var(--color-muted);font-size:11px}
+.platform-main .wait-person-plot svg{display:block;width:100%;height:32px}
+.platform-main .wait-person-plot line{stroke:var(--viz-1);stroke-width:2}
+.platform-main .wait-person-plot rect{fill:color-mix(in srgb,var(--viz-1) 35%,var(--color-card));stroke:var(--viz-1);stroke-width:1}
+.platform-main .wait-person-plot .wait-person-median{stroke:var(--color-ink);stroke-width:3}
+.platform-main .wait-total-caption{margin:12px 0;color:var(--color-muted);font-size:12px}
+@media(max-width:1400px){.platform-main .wait-report-stats{grid-template-columns:repeat(3,minmax(0,1fr))}}
+@media(max-width:700px){.platform-main .wait-report-stats{grid-template-columns:repeat(2,minmax(0,1fr))}.platform-main .wait-person-row{grid-template-columns:1fr;gap:2px}}
+@media(max-width:380px){.platform-main .wait-report-stats{grid-template-columns:1fr}.platform-main .wait-report-stats .usage-stat{padding:12px}.platform-main .wait-report-stats .usage-stat dd{font-size:24px}}

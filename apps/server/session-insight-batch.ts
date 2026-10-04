@@ -25,6 +25,13 @@ const unknownFacts = () => ({ codeChanges: unknown(), tests: unknown(), commits:
 /** One bounded preparation for report/assessment consumers. Every current read
  * verifies original bytes; persisted projections contain no transcript copy. */
 export async function readInsightBatch(db: Database, raw: RawStore, requested: string[], full = false): Promise<SessionInsights[]> {
+  for(let attempt=0;;attempt++){
+    try{return await readInsightBatchOnce(db,raw,requested,full);}catch(error){
+      if(!['40001','40P01'].includes((error as {code?:string}).code??'')||attempt>=2)throw error;
+    }
+  }
+}
+async function readInsightBatchOnce(db: Database, raw: RawStore, requested: string[], full: boolean): Promise<SessionInsights[]> {
   const ids = [...new Set(requested)];
   if (!ids.length) return [];
   if (ids.length > 20000) throw new HttpError(413, '会话洞察数量超过范围上限');

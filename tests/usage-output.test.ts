@@ -11,7 +11,7 @@ test('Codex 0.160 new sessions count their first native usage while copied or in
   try {
     const person = await sandbox.provision('原生用量员工');
     const now = new Date(Date.now() + 60000), timestamp = now.toISOString();
-    app = await createApp({ db, rawDirectory: sandbox.env.RAW_DIRECTORY!, reportClock: () => now });
+    app = await createApp({ db, rawDirectory: sandbox.env.RAW_DIRECTORY!, reportClock: () => new Date(now.getTime()+86400000) });
     const api = (url: string, body?: unknown, credential = person.readerCredential, method: 'GET'|'POST'|'PUT' = 'GET') => app!.inject({ url, method,
       headers: { Authorization: `Bearer ${credential}`, ...(Buffer.isBuffer(body) ? { 'Content-Type': 'application/octet-stream' } : {}) }, ...(body === undefined ? {} : { payload: body as object }) });
     const device = (await api('/api/devices/enroll', { installationId: randomUUID(), name: '原生计数设备' }, person.enrollmentCredential, 'POST')).json();
@@ -48,6 +48,30 @@ test('Codex 0.160 new sessions count their first native usage while copied or in
     assert.deepEqual(fixed.json(), first.json());
     const detail = await api(`/api/snapshots/${original.snapshotId}/metrics?period=since-enrollment`);
     assert.equal(detail.json().totals.inputTokens, 150);
+    const rewrittenId=randomUUID(), generation=digest(Buffer.from('rewrite-generation'));
+    const meta={timestamp,type:'session_meta',payload:{id:rewrittenId,timestamp,cli_version:'0.160.0',source:'cli'}};
+    async function capture(rows:unknown[],change:'initial'|'rewrite'|'append',revision:number){
+      const bytes=encode(rows);await api(`/api/chunks/${digest(bytes)}`,bytes,device.deviceCredential,'PUT');
+      const result=await api('/api/snapshots',{protocolVersion:1,sourceSessionId:rewrittenId,source:'codex-cli',sourceVersion:'0.160.0',sourceOs:process.platform,
+        project:'/synthetic/rewrite',hash:digest(bytes),byteLength:bytes.length,qualifiedAt:timestamp,capability:'unverified',
+        capture:{generation,revision,change,materials:[],gaps:[],lineage:[],compacted:false,partialLine:false}},device.deviceCredential,'POST');
+      assert.equal(result.statusCode,200,result.body);return result.json().snapshotId;
+    }
+    await capture([meta,user,counter(100,10),counter(150,20)],'initial',1);
+    await capture([meta,user,counter(160,21)],'rewrite',2);
+    const afterRewrite=await capture([meta,user,counter(160,21),counter(210,31)],'append',3);
+    const rewritten=await api(`/api/snapshots/${afterRewrite}/metrics?period=since-enrollment`);
+    assert.equal(rewritten.json().totals.inputTokens,null,'append after a rewrite cannot regain an invented zero baseline');
+    const tokenId=randomUUID(), tomorrow=new Date(now.getTime()+86400000).toISOString();
+    const tokenOnly=encode([{timestamp,type:'session_meta',payload:{id:tokenId,timestamp,cli_version:'0.160.0'}},{...counter(50,10),timestamp:tomorrow}]);
+    await api(`/api/chunks/${digest(tokenOnly)}`,tokenOnly,device.deviceCredential,'PUT');
+    await api('/api/snapshots',{protocolVersion:1,sourceSessionId:tokenId,source:'codex-cli',sourceVersion:'0.160.0',sourceOs:process.platform,
+      project:'/synthetic/token-only',hash:digest(tokenOnly),byteLength:tokenOnly.length,qualifiedAt:timestamp,capability:'unverified'},device.deviceCredential,'POST');
+    const usage=(await api('/api/usage-output?period=since-enrollment')).json();
+    const today=new Date(now.getTime()+8*3600000).toISOString().slice(0,10);
+    assert.deepEqual(usage.employees[0].activeDates,[today],'pure Token metadata does not create a business activity day');
+    assert.equal(usage.employees[0].daily.find((day:any)=>day.date!==today).activeSessions,0);
+
   } finally { await app?.close(); await db.end(); await sandbox.close(); }
 });
 
@@ -98,4 +122,32 @@ test('usage output groups native outcomes by original employee and date across a
     await app.close(); app = await createApp({ db, rawDirectory: sandbox.env.RAW_DIRECTORY! });
     assert.deepEqual((await api(`/api/usage-output?period=since-enrollment&version=${first.version}`)).json(), first);
   } finally { await app?.close(); await db.end(); await sandbox.close(); }
+});
+
+test('restoring a child material preserves separate parent and child output and current native leaves', {timeout:120000},async()=>{
+  const sandbox=await createSandbox(),db=connect(sandbox.env.DATABASE_URL!);let app:Awaited<ReturnType<typeof createApp>>|undefined;
+  try{
+    const a=await sandbox.provision('材料产出作者'),b=await sandbox.provision('材料接续者');
+    const timestamp=new Date(Date.now()+60000).toISOString();app=await createApp({db,rawDirectory:sandbox.env.RAW_DIRECTORY!,reportClock:()=>new Date(timestamp)});
+    const api=(url:string,body?:unknown,credential=a.readerCredential,method:'GET'|'POST'|'PUT'='GET')=>app!.inject({url,method,headers:{Authorization:`Bearer ${credential}`,...(Buffer.isBuffer(body)?{'Content-Type':'application/octet-stream'}:{})},...(body===undefined?{}:{payload:body as object})});
+    const enroll=async(person:typeof a)=>(await api('/api/devices/enroll',{installationId:randomUUID(),name:'material-output'},person.enrollmentCredential,'POST')).json();
+    const da=await enroll(a),dbb=await enroll(b),parentId=randomUUID(),childId=randomUUID();
+    const bytes=(id:string,n:number)=>Buffer.from([{type:'session_meta',payload:{id}},{timestamp,type:'response_item',payload:{type:'message',role:'user',content:[{type:'input_text',text:`核查 ${n} 项`}]}},
+      {timestamp,type:'response_item',payload:{type:'function_call',name:'exec_command',call_id:'tests',arguments:JSON.stringify({cmd:'node --test synthetic.js'})}},
+      {timestamp,type:'response_item',payload:{type:'function_call_output',call_id:'tests',output:`# tests ${n}\n# pass ${n}\n# fail 0`}}].map(row=>JSON.stringify(row)).join('\n')+'\n');
+    const parentBytes=bytes(parentId,3),childBytes=bytes(childId,7);
+    const publish=async(device:typeof da,data:Buffer,id:string,extra:object={})=>{await api(`/api/chunks/${digest(data)}`,data,device.deviceCredential,'PUT');
+      const response=await api('/api/snapshots',{protocolVersion:1,sourceSessionId:id,source:'codex-cli',sourceVersion:'0.160.0',sourceOs:process.platform,project:'/synthetic/material-output',hash:digest(data),byteLength:data.length,qualifiedAt:timestamp,capability:'unverified',...extra},device.deviceCredential,'POST');assert.equal(response.statusCode,200,response.body);return response.json().snapshotId;};
+    await api(`/api/chunks/${digest(childBytes)}`,childBytes,da.deviceCredential,'PUT');
+    const material={id:digest(Buffer.from('usage-child')),role:'child-transcript',name:'child.jsonl',placement:'codex-rollout',sourceSessionId:childId,hash:digest(childBytes),byteLength:childBytes.length,mediaType:'jsonl'};
+    const parent=await publish(da,parentBytes,parentId,{capture:{generation:digest(Buffer.from('usage-parent')),revision:1,change:'initial',materials:[material],gaps:[],lineage:[{relation:'child',sessionId:childId,materialId:material.id}],compacted:false,partialLine:false}});
+    const restored=await publish(dbb,childBytes,childId,{restoredFrom:{snapshotId:parent,materialId:material.id,hash:material.hash,byteLength:material.byteLength}});
+    const child=await publish(da,childBytes,childId);
+    const response=await api('/api/usage-output?period=since-enrollment');assert.equal(response.statusCode,200,response.body);
+    const report=response.json();assert.equal(report.totals.sessions,2);assert.equal(report.outputs.tests.known,10);
+    const p=report.sessions.find((row:any)=>row.sourceSessionId===parentId),c=report.sessions.find((row:any)=>row.sourceSessionId===childId);
+    assert.equal(p.outputs.tests.known,3,'parent contributions never move to the child sharing an original snapshot');
+    assert.equal(c.outputs.tests.known,7);assert.deepEqual(p.latestCarrierSnapshotIds,[parent]);
+    assert.ok(c.latestCarrierSnapshotIds.includes(restored));assert.ok(c.latestCarrierSnapshotIds.includes(child));
+  }finally{await app?.close();await db.end();await sandbox.close();}
 });
