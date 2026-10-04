@@ -242,11 +242,26 @@ export function metricsService(db: Database, raw: RawStore, clock: () => Date = 
           && JSON.stringify(record.manifest.restoredFrom) === JSON.stringify(prior.manifest.restoredFrom)) { subsumed.add(prior.id); covering.set(prior.id, record.id); }
       }
       const candidates = relevantSnapshots.filter(s => !subsumed.has(s.id));
+      // Zero is valid only when the whole observed history begins here. A later
+      // append cannot turn a rewritten generation back into a new native run.
+      const baselineProofs = new Map<string, boolean>();
+      const firstNative = new Map<string,string>();
+      for(const record of snapshots){const key=nativeKey(record.device_id,record.source,record.source_session_id);if(!firstNative.has(key))firstNative.set(key,record.id);}
+      function baselineContinuity(record:Snapshot, seen=new Set<string>()):boolean {
+        const known=baselineProofs.get(record.id);if(known!==undefined)return known;
+        if(seen.has(record.id)||seen.size>=128)return false;seen.add(record.id);
+        const capture=record.manifest.capture, prior=record.provenance?.sourceSnapshotId ? byId.get(record.provenance.sourceSnapshotId) : undefined;
+        let valid=!record.manifest.restoredFrom && !(capture&&(capture.gaps.length||capture.lineage.length||capture.compacted||capture.partialLine||['rewrite','truncate'].includes(capture.change)));
+        if(valid&&prior)valid=record.provenance?.relation==='same-device-continuation'&&!record.provenance.warning
+          &&prior.device_id===record.device_id&&prior.source===record.source&&prior.source_session_id===record.source_session_id&&baselineContinuity(prior,seen);
+        else if(valid)valid=firstNative.get(nativeKey(record.device_id,record.source,record.source_session_id))===record.id&&(!capture||capture.change==='initial');
+        baselineProofs.set(record.id,valid);return valid;
+      }
       let totalBytes = 0; const rawInputs: unknown[] = [];
       const rawBuffers = new Map<string, Buffer>();
       const materialized = new Map<string, MetricInputFacts>();
       const inputBatch = await metricInputBatch(client, candidates.map(record => ({ snapshotId: record.id, attributionRevision: record.attribution_revision,
-        hash: record.hash, source: record.source, sourceVersion: record.manifest.sourceVersion, manifest: record.manifest })), full);
+        hash: record.hash, source: record.source, sourceVersion: record.manifest.sourceVersion, manifest: record.manifest, baselineContinuity: baselineContinuity(record) })), full);
       const sliceGroups = new Map<string, Slice[]>();
       for (const slice of slices.values()) {
         const key = JSON.stringify([slice.sessionId, slice.employeeId, slice.project]);
@@ -269,7 +284,7 @@ export function metricsService(db: Database, raw: RawStore, clock: () => Date = 
         try {
           content = await raw.read(record.device_id, record.hash);
           parsed = inputBatch.read({ snapshotId: record.id, attributionRevision: record.attribution_revision,
-            bytes: content, hash: record.hash, source: record.source, sourceVersion: record.manifest.sourceVersion, manifest: record.manifest });
+            bytes: content, hash: record.hash, source: record.source, sourceVersion: record.manifest.sourceVersion, manifest: record.manifest, baselineContinuity: baselineContinuity(record) });
         }
         catch (error) {
           // A competing scope can materialize this same input after our
@@ -370,13 +385,15 @@ export function metricsService(db: Database, raw: RawStore, clock: () => Date = 
       });
       const byEmployeeDay = new Map<string, Slice[]>();
       for (const slice of selected) { const key = JSON.stringify([slice.employeeId, slice.date]); byEmployeeDay.set(key, [...byEmployeeDay.get(key) ?? [], slice]); }
-      const employeeDaily = [...byEmployeeDay.values()].map(values => {
+      const employeeDays = [...byEmployeeDay.values()].map(values => {
         const first = values[0]!, rows = summarize(values), included = rows.filter(row => !unknownSessions.has(row.sessionId)), known = total(included);
         const excludedSessions = new Set(rows.filter(row => unknownSessions.has(row.sessionId)).map(row => row.sessionId)).size;
-        return { employeeId: first.employeeId, employee: first.employee, date: first.date, ...total(rows), tokenTrend: {
+        return { employeeId: first.employeeId, date: first.date, activeSessions: total(rows).sessions,
           inputTokens: !included.length && excludedSessions ? null : known.knownInputTokens, outputTokens: !included.length && excludedSessions ? null : known.knownOutputTokens,
-          includedSessions: new Set(included.map(row => row.sessionId)).size, excludedSessions } };
-      }).sort((a,b) => a.employee.localeCompare(b.employee, 'zh-CN') || a.employeeId.localeCompare(b.employeeId) || a.date.localeCompare(b.date));
+          includedSessions: new Set(included.map(row => row.sessionId)).size, excludedSessions };
+      }).sort((a,b) => a.employeeId.localeCompare(b.employeeId) || a.date.localeCompare(b.date));
+      const employeeDaily = [...new Set(employeeDays.map(day=>day.employeeId))].map(employeeId=>({employeeId,
+        days:employeeDays.filter(day=>day.employeeId===employeeId).map(({employeeId:_id,...day})=>day)}));
       const byEmployee = new Map<string, SessionMetrics[]>();
       for (const session of sessions) byEmployee.set(session.employeeId, [...byEmployee.get(session.employeeId) ?? [], session]);
       const employees = [...new Map(sessions.map(s => [s.employeeId, s.employee])).entries()]
