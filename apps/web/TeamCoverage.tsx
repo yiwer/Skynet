@@ -105,7 +105,7 @@ export function TeamCoverage({ request, onEvidence, currentEmployeeId }: { reque
         </>}
       </aside>}</div>
       </> : <p className="report-empty">暂无员工</p>}
-      {overview&&<><TeamPeople report={overview} query={query}/><details id="team-definitions"><summary>指标口径与版本</summary><p>人数按所选范围有业务会话的员工计算；人员固定按姓名。Token 为已知部分，未知会话不进入趋势。已验证结果、仅声称和返工为模型推断；返工显示分子、有效非首条分母与未知数。</p><p>覆盖矩阵中活动随员工、日期、Agent 和项目筛选；采集观测描述设备与来源，不能按项目证明连续覆盖。每日检查可进入各自原文及日报版本。</p><p>{overview.coverage.definition}</p><p>团队版本 {overview.version}</p><p>来源 {overview.usageVersion} · {overview.promptVersion} · {overview.waitReportVersion}</p></details></>}    </>}
+      {overview&&<><TeamPeople report={overview} query={query}/><details id="team-definitions"><summary>指标口径与版本</summary><p>人数按所选范围有业务会话的员工计算；人员固定按姓名。Token 为已知部分，未知会话不进入趋势。已验证结果、仅声称和返工为模型推断；返工显示分子、有效非首条分母与未知数。</p><p>覆盖矩阵中活动随员工、日期、Agent 和项目筛选；采集观测描述设备与来源，不能按项目证明连续覆盖。每日检查可进入各自原文及日报版本。</p><p>使用能力采用全部 Agent 与项目的接入至今评估、默认权重；等级、指数与画像同版，不随本页活动范围改变。</p><p>{overview.coverage.definition}</p><p>团队版本 {overview.version}</p><p>来源 {overview.usageVersion} · {overview.promptVersion} · {overview.waitReportVersion}</p></details></>}    </>}
     </div>
   </section>;
 }

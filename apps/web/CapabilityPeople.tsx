@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { dimKeys } from '../../packages/contracts/assessment.js';
 import { capabilityLevels, type CapabilityPeople as People, type CapabilityCard } from '../../packages/contracts/capability-people.js';
 import './capability-people.css';
+import { profileEntry } from './profile-navigation.js';
 
 type Request = (path: string, signal?: AbortSignal) => Promise<Response>;
 type Model = { dimensions: Record<string, { label: string; metrics: { label: string; anchor: [number, number]; minimum: number; unit: string }[] }>;
@@ -36,6 +37,7 @@ export function CapabilityPeople({ request }: { request: Request }) {
     return () => abort.abort();
   }, [data?.modelVersion]);
   const period = query.get('period') ?? data?.selection.period ?? 'since-enrollment', preset = query.get('preset') ?? data?.selection.preset ?? '默认';
+  const origin = data ? '#people?' + new URLSearchParams({ period, preset, version: data.version }) : '';
   function change(key: 'period' | 'preset', value: string) { location.hash = 'people?' + new URLSearchParams({ period, preset, [key]: value }); }
   async function download() {
     if (!data) return;
@@ -51,11 +53,11 @@ export function CapabilityPeople({ request }: { request: Request }) {
     {error && <p role="alert" className="error">{error}</p>}{busy && <p role="status">正在读取员工…</p>}
     {data && <div className="people-scroll" key={data.version}>
       <div className="people-verdict">{data.groups.map(group => <section key={group.level} aria-label={group.level}><header><h2 data-level={group.level}>{group.level}</h2><span>{group.count} 人</span></header>
-        {group.count ? <ul>{data.employees.filter(person => person.level === group.level).map(person => <li key={person.employeeId}><a href={person.profilePath}><strong>{person.employee}</strong><b>{number(person.index)}</b></a><p>{person.reason}</p></li>)}</ul> : <p className="people-empty-group">暂无</p>}</section>)}</div>
+        {group.count ? <ul>{data.employees.filter(person => person.level === group.level).map(person => <li key={person.employeeId}><a {...profileEntry(person.profilePath, origin)}><strong>{person.employee}</strong><b>{number(person.index)}</b></a><p>{person.reason}</p></li>)}</ul> : <p className="people-empty-group">暂无</p>}</section>)}</div>
       <div className="people-section-heading"><h2>每位员工 <span>{data.total}</span></h2><div role="group" aria-label="员工展示"><button aria-pressed={!table} aria-label="员工卡片" onClick={() => setTable(false)}>卡片</button><button aria-pressed={table} aria-label="员工表格" onClick={() => setTable(true)}>表格</button></div></div>
       {data.total === 0 ? <p className="people-empty">暂无员工</p> : table ? <div className="people-table"><table aria-label="员工能力"><thead><tr><th>员工</th><th>等级</th><th>指数</th><th>估计误差</th><th>可信度</th>{dimKeys.map(key => <th key={key}>{model?.dimensions[key]?.label ?? key}</th>)}<th>会话</th><th>提示词</th><th>已验证</th><th>返工率</th><th>依据</th></tr></thead>
-        <tbody>{data.employees.map(person => <tr key={person.employeeId}><th><a href={person.profilePath}>{person.employee}</a></th><td>{person.level}</td><td>{number(person.index)}</td><td>{person.margin === null ? '—' : `±${person.margin}`}</td><td>{person.confidence}</td>{dimKeys.map(key => <td key={key}>{number(person.dims[key].score)}</td>)}<td>{person.sample.sessions}</td><td>{person.sample.prompts}</td><td>{number(person.verified.value)}</td><td>{percent(person.rework.value)}{person.rework.value !== null && `（${person.rework.numerator}/${person.rework.denominator}）`}</td><td>{person.reason}{person.coverageIssues.length > 0 && ` · ${person.coverageIssues.join('；')}`}</td></tr>)}</tbody></table></div>
-        : <ul className="people-grid">{data.employees.map(person => <li key={person.employeeId}><a className="people-card" href={person.profilePath} aria-label={person.employee + '：打开员工画像'}>
+        <tbody>{data.employees.map(person => <tr key={person.employeeId}><th><a {...profileEntry(person.profilePath, origin)}>{person.employee}</a></th><td>{person.level}</td><td>{number(person.index)}</td><td>{person.margin === null ? '—' : `±${person.margin}`}</td><td>{person.confidence}</td>{dimKeys.map(key => <td key={key}>{number(person.dims[key].score)}</td>)}<td>{person.sample.sessions}</td><td>{person.sample.prompts}</td><td>{number(person.verified.value)}</td><td>{percent(person.rework.value)}{person.rework.value !== null && `（${person.rework.numerator}/${person.rework.denominator}）`}</td><td>{person.reason}{person.coverageIssues.length > 0 && ` · ${person.coverageIssues.join('；')}`}</td></tr>)}</tbody></table></div>
+        : <ul className="people-grid">{data.employees.map(person => <li key={person.employeeId}><a className="people-card" {...profileEntry(person.profilePath, origin)} aria-label={person.employee + '：打开员工画像'}>
           <header><span className="people-avatar" aria-hidden="true">{person.employee.slice(0, 1)}</span><strong>{person.employee}</strong><span className="people-level" data-level={person.level}>{person.level}</span></header>
           {person.sample.sessions ? <p className="people-index"><b>{number(person.index)}</b><span>综合{person.margin !== null && ` · 估计误差 ±${person.margin}`}<br />可信度{person.confidence}</span></p> : <p className="people-no-sessions">暂无会话</p>}
           <ul className="people-dims">{dimKeys.map(key => <li key={key}><span>{person.dims[key].label}</span><span className="people-bar"><i style={{ width: (person.dims[key].score ?? 0) + '%' }} /></span><b>{number(person.dims[key].score)}</b></li>)}</ul>
