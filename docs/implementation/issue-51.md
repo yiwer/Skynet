@@ -1,0 +1,51 @@
+# #51 推断更正与派生版本
+
+对应 PRD-v2 US 109/162/163/164/172/173/174，AC-23/28/36/37。会话洞察提供任务类型、提示词四要素及返工判定的更正入口。更正保存原值、新值、原因、认证操作者、服务器时间、原分析 ID、原洞察版本及原句证据。
+
+## 公开接口
+
+- `POST /api/snapshots/:id/inference-corrections`：`requestId`、`expectedVersion`、`reason` 加 `kind`。`task-type` 接受固定任务类型；`prompt-elements` 和 `rework` 另需当前分析中的 `promptEvent`。四要素与返工接受 `null` 表示未知。
+- `GET /api/snapshots/:id/inference-corrections?version=...&offset=...`：固定洞察对应的完整审计历史，最多 20 条且按 48 KiB 元数据预算截页；下一页必须携带返回的固定版本。新更正不会挤入旧分页。
+- OAuth MCP `read_inference_corrections` 返回相同审计页；`read_session_insights`、各报表、评估和导出读取同一派生链。MCP 继续使用只读 OAuth 权限，不增加写入授权。
+- Web 会话侧栏的“更正推断”保存更正；“更正历史”显示新旧值、作者、北京时间以及更正前洞察和原句。固定洞察只读，可返回当前洞察。当前推断与报表示例标出人工更正。
+
+未认证或设备凭据不能提交。伪造作者字段被严格 schema 拒绝。客户端不能选择任意原事件：服务端从指定的当前分析提示词、经校验的引用和原生消息投影确定目标。缺少可关联的分析或原句时拒绝写入。
+
+## 版本与依赖
+
+`inference_corrections` 只追加人工决策，不修改原件字节、原分析结果、归属或先前派生文档。`expectedVersion` 是读到的完整洞察版本；更正写入串行校验该版本，一个并发提交成功后，其他过期提交返回 409。相同作者和相同操作 ID、相同结构化内容的重试幂等；其他作者或不同内容不能复用操作 ID。
+
+更正目标绑定原事件身份，提示词的多个原生文本块绑定同一个消息。当前 `readInsightBatch` 在现有原件校验与归属事务中叠加最新人工决策。续聊和已核验恢复复用这些身份；尚无可用分析或未找到对应提示词时保留待应用更正，不制造推断。原生首条边界继续控制返工分母；首条的多个文本块不变成后续提示词，未知边界及未知判断不填零。
+
+每个更正集合保存独立的审计引用版本，包含已被后续决策替代的记录。历史洞察按 `version` 原样返回；显式 `analysisId` 查询保留原模型投影。重新分析、旧任务晚完成和迟到原件只能更新当前模型输入，不能覆写人工更正记录或旧固定版本。
+
+当前读取自动重算相关用量、提示词、会话产效及评估，并生成新版本；固定查询仍返回旧版。评估使用的完整语义前沿加入人工更正 ID 与提交序号，读取中发生更正时有限重试整批输入，避免新旧更正状态混合。团队任务基线也绑定新的洞察版本，因此受影响的其他员工在当前读取时得到明确的新基线与评估版本。没有新增定时扫描、通知或人事动作。
+
+## 公开验证
+
+全部采用合成上传、公开 Analysis 入口和受控外部分析响应，最终结果仅通过 HTTP/OAuth MCP/Web/导出断言。数据库锁只用于安排真实并发时序，不作为业务结果断言。
+
+`tests/inference-corrections.test.ts` 覆盖：
+
+- 任务类型更正保留原字节、原分析和旧洞察；审计记录认证作者和服务器时间，幂等重试与身份冲突。
+- 提示词要素、返工和任务类型更新对应报表。甲的三会话改为排查后，乙的同类任务基线已验证均值从 2 变为 3，乙的产出指数从 1.5 变为 1；乙得到新版本，旧基线和旧评估仍可查。全量重算与当前读取一致。
+- 两个操作者基于同版同时更正只有一个成功；固定审计包含已替代决策，新写入与重启不改变旧审计页。
+- 22 条长原因、三引用的审计按字节预算分页，新增第 23 条不插入旧页，没有重复或丢项。
+- 通过日报的重新分析入口重新分析同一原件；迟到续聊、旧 Worker 晚完成、跨设备恢复及重复上传均保留更正。
+- 更正发生于评估用量与等待读取之间时，整批重读后冻结一致输入。
+- Claude 一条原生消息的多个文本块共同更正；首条不计返工，后续多块只计一次，设置未知后保持未知，无关会话不继承更正。
+
+`tests/inference-corrections-journey.test.ts` 在真实浏览器保存三类更正，读取审计和历史、返回当前洞察，并逐字段核对 OAuth MCP、HTTP 和评估下载。截图覆盖 1280/390/320、明暗主题和窄屏编辑表单；检查外层无溢出，新增控件及审计链接命中目标至少 44px。
+
+## 复现
+
+```powershell
+$env:SKYNET_TEST_POSTGRES_BIN='C:/Users/yiwer/AppData/Local/Temp/ticket28-pg-0eb735e987dc48d186870e8a96801e01/bin'
+$env:SKYNET_OPENSSL='D:/DevEnv/Git/usr/bin/openssl.exe'
+$env:SKYNET_GIT_BASH='D:/DevEnv/Git/bin/bash.exe'
+$env:SKYNET_CLAUDE_RUNTIME='E:/GenCode/Skynet-evidence/v2-2026-10-04/runtime/package/claude.exe'
+npm run build
+node --import tsx --test --test-concurrency=1 tests/inference-corrections.test.ts tests/inference-corrections-journey.test.ts
+```
+
+原始 RED、GREEN、构建日志和截图位于 `E:/GenCode/Skynet-evidence/v2-2026-10-04/51-inference-corrections/`。本票未读取真实员工材料、调用付费模型或变更生产部署。

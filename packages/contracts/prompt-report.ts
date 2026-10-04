@@ -7,7 +7,7 @@ export const promptReportQuerySchema=z.object({period:z.enum(['this-week','last-
   employeeId:z.uuid().optional(),source:sourceSchema.optional(),project:z.string().max(1024).optional(),version:version.optional(),usageVersion:version.optional()}).strict();
 export type PromptReportQuery=z.infer<typeof promptReportQuerySchema>;
 export type PromptFraction={numerator:number;denominator:number;unknown:number;value:number|null};
-export type PromptExample={employeeId:string;employee:string;messageId:string;citations:InsightCitation[];followingCitations:InsightCitation[];elements:(keyof typeof promptElementLabels)[];analysisVersions:string[]};
+export type PromptExample={employeeId:string;employee:string;messageId:string;citations:InsightCitation[];followingCitations:InsightCitation[];elements:(keyof typeof promptElementLabels)[];analysisVersions:string[];correctionIds?:string[]};
 export type PromptSuggestion={employeeId:string;employee:string;text:string;citations:InsightCitation[];analysisVersions:string[]};
 export type PromptReport={version:string;algorithmVersion:string;usageVersion:string;createdAt:string;dataAsOf:string;scope:MetricsScope;
   kpis:{prompts:number;sessions:number;medianLength:{value:number|null;knownMedian:number|null;knownCount:number;unknownCount:number};context:PromptFraction;rework:PromptFraction;cleanSessions:PromptFraction;clarification:PromptFraction};

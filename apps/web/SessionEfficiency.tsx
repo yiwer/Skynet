@@ -43,7 +43,7 @@ function SelectedSession({row,onClose}: {row:EfficiencySession;onClose:()=>void}
         {s.reason&&<details><summary>来源边界</summary><p>{s.reason}</p></details>}
         <div className="eff-evidence-links">{s.evidence.map((e,j)=><a key={j} href={e.conversationPath??e.webPath}>原件 #{e.line}</a>)}</div>
       </li>)}</ol></>}
-    <details><summary>任务类型与返工证据</summary><p>模型推断 · {taskTypeLabels[row.taskType]} · 返工 {number(row.rework)}</p>{[...row.taskEvidence,...row.reworkEvidence].map((e,i)=><blockquote key={i}>{e.quote}<a href={e.webPath}>原句</a></blockquote>)}</details>
+    <details><summary>任务类型与返工证据</summary><p>{row.correctionIds?.length?'含人工更正':'模型推断'} · {taskTypeLabels[row.taskType]} · 返工 {number(row.rework)}</p>{[...row.taskEvidence,...row.reworkEvidence].map((e,i)=><blockquote key={i}>{e.quote}<a href={e.webPath}>原句</a></blockquote>)}</details>
     <details><summary>固定输入版本</summary><p>等待 {timing?.waitVersion??'未知'}</p>{row.inputVersions.map(v=><p key={v.snapshotId}>{v.snapshotId} · {v.version}</p>)}</details>
   </section>;
 }
@@ -85,7 +85,7 @@ export function SessionEfficiency({request}:Props){
       {page&&<p className="eff-asof">{page.scope.from} — {page.scope.to} · 北京时间 · 数据截至 {new Date(page.dataAsOf).toLocaleString('zh-CN',{timeZone:'Asia/Shanghai',hour12:false})}</p>}
     </form>
     {error&&<div role="alert"><p>{error}</p><button onClick={()=>setRetry(v=>v+1)}>重试读取</button></div>}
-    <div className="workspace-scroll eff-workspace"><details className="eff-definition"><summary>产效比 · 代码产出 · 等待占比</summary><p>{page?.definition}</p><p>等待占比 = 已记录等待 / 已记录活跃区间。边界缺失、未知权限等待和零区间不计算；任务类型为模型推断。</p>{page&&<p>版本 {page.version} · {page.algorithmVersion}</p>}</details>
+    <div className="workspace-scroll eff-workspace"><details className="eff-definition"><summary>产效比 · 代码产出 · 等待占比</summary><p>{page?.definition}</p><p>等待占比 = 已记录等待 / 已记录活跃区间。边界缺失、未知权限等待和零区间不计算；任务类型来自模型推断及人工更正。</p>{page&&<p>版本 {page.version} · {page.algorithmVersion}</p>}</details>
       {busy&&!page?<p role="status">正在读取会话产效…</p>:page?.total===0?<p className="eff-empty">暂无会话</p>:page&&<><Distribution rows={page.distributions} sessions={complete?.sessions??null} onSelect={setSelected}/>
         <section className="eff-review" aria-label="值得复盘的会话"><header><h2>值得复盘的会话 <span>{page.reviewCount}</span></h2><details><summary>入选条件</summary><p>Token 高于 P75（{number(page.tokenP75)}）且已验证结果为 0；或声称多于已验证；或返工 ≥ 2。</p></details></header>
           {!complete?<p role="status">正在读取固定版本…</p>:!reviews.length?<p>暂无符合条件的会话</p>:<ul>{reviews.map(row=><li key={row.sessionId}><button onClick={()=>setSelected(row.sessionId)}><strong>{row.employees.map(e=>e.employee).join('、')}</strong><span>{row.projects.join(' · ')||sourceLabel(row.source)}</span><small>{row.reviewReasons.join(' · ')}</small></button></li>)}</ul>}
