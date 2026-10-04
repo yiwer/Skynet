@@ -14,3 +14,7 @@
 
 .activity-scope>span { white-space:nowrap; }
 .activity-person-label { height:24px;line-height:24px;text-align:right;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px;color:var(--color-muted); }
+.activity-wait{fill:color-mix(in srgb,var(--viz-wait) 50%,var(--color-ink))}
+.activity-legend .legend-wait::before{background:color-mix(in srgb,var(--viz-wait) 50%,var(--color-ink))}
+.activity-canvas{position:relative}.activity-canvas svg{min-height:0}.activity-records .activity-chart-target{position:absolute;padding:0;border:1px solid transparent;background:transparent;border-radius:4px;min-width:44px;min-height:44px}.activity-records .activity-chart-target:hover{background:color-mix(in srgb,var(--color-focus) 8%,transparent)}.activity-chart-target[aria-expanded=true]{border-color:var(--color-focus)}
+.activity-chart .usage-detail-popup{position:absolute;z-index:5;overflow:auto;overscroll-behavior:contain;padding:8px 12px;border:1px solid var(--color-rule);border-radius:var(--radius-sm);background:var(--color-paper-2);color:var(--color-ink);font-size:12px;overflow-wrap:anywhere}.activity-detail-list{margin:0;padding:0;list-style:none}.activity-detail-list li+li{border-top:1px solid var(--color-rule-soft)}.activity-detail-list a{display:flex;align-items:center;min-height:44px;min-width:44px;padding:6px 0;color:var(--color-ink);text-decoration:underline;text-underline-offset:3px;line-height:1.6}

@@ -50,8 +50,8 @@ test('unknown efficiency keeps a compact state and evidence while known zero rem
     const mixed=await(await f.api(owner,'/api/session-efficiency?period=since-enrollment')).json();assert.equal(mixed.total,2);assert.equal(mixed.sessions.find((item:any)=>item.employees.some((person:any)=>person.employeeId===knownOwner.employeeId)).efficiency.value,0);
     await panel.getByRole('button',{name:'接入至今',exact:true}).click();await expect(panel).toHaveAttribute('aria-busy','false');await panel.getByRole('button',{name:'产效分布图表',exact:true}).click();
     const graph=panel.getByRole('group',{name:'按任务类型产效分布图',exact:true});await expect(graph).toBeVisible();await expect(status).toHaveCount(0);
-    const point=graph.getByRole('button',{name:/ · 0 · 0 \/ 1,000 Token/});await expect(point).toHaveCount(1);await point.focus();await expect(panel.getByRole('tooltip')).toBeVisible();
-    await panel.getByLabel('员工',{exact:true}).selectOption(owner.employeeId);await expect(panel).toHaveAttribute('aria-busy','false');await expect(status).toHaveText('产效暂未知1 个会话');await expect(panel.getByRole('tooltip')).toHaveCount(0);assert.deepEqual(errors,[]);
+    await expect(graph.locator('circle')).toHaveCount(1);const point=panel.getByRole('button',{name:'实现 · 1 个会话',exact:true});await expect(point).toHaveCount(1);await point.focus();await expect(panel.getByRole('dialog',{name:'产效会话详情'})).toContainText(' · 0 · 0 / 1,000 Token');
+    await panel.getByLabel('员工',{exact:true}).selectOption(owner.employeeId);await expect(panel).toHaveAttribute('aria-busy','false');await expect(status).toHaveText('产效暂未知1 个会话');await expect(panel.getByRole('dialog',{name:'产效会话详情'})).toHaveCount(0);assert.deepEqual(errors,[]);
     await writeFile(join(directory,'verification.json'),JSON.stringify({unknownVersion:unknown.version,mixedVersion:mixed.version,screenshots,unknownCount:1,knownZeroPoint:true,evidencePreserved:true,errors},null,2));
   }finally{await browser?.close();await f.close();}
 });

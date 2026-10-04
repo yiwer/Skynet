@@ -2,6 +2,7 @@ import {useEffect,useState,type CSSProperties,type FormEvent} from 'react';
 import {sourceLabel,type Source} from '../../packages/contracts/archive.js';
 import {taskTypeLabels} from '../../packages/contracts/session-insights.js';
 import type {EfficiencyQuery,EfficiencySession,SessionEfficiencyPage,EfficiencyRatio,EfficiencySegment} from '../../packages/contracts/session-efficiency.js';
+import {useUsageChartDetail} from './UsageChartDetail.js';
 import './usage-metrics.css';
 import './session-efficiency.css';
 
@@ -13,20 +14,25 @@ const sources:Source[]=['codex-cli','claude-code-cli','codex-desktop'];
 const names:Record<EfficiencySegment['kind'],string>={agent:'Agent 工作',reply:'等待回复',permission:'等待权限',gap:'缺口'};
 
 function Distribution({rows,sessions,onSelect}: {rows:SessionEfficiencyPage['distributions'];sessions:EfficiencySession[]|null;onSelect:(id:string)=>void}){
-  const [chart,setChart]=useState(true),[tooltip,setTooltip]=useState('');
+  const [chart,setChart]=useState(true),detail=useUsageChartDetail('产效会话详情');
   const known=rows.some(row=>row.count>0),unknownCount=rows.reduce((count,row)=>count+row.unknownCount,0);
   const maximum=Math.max(1,...rows.flatMap(r=>r.maximum===null?[]:[r.maximum]));
-  return <section className="eff-card" aria-label="任务类型分布" onKeyDown={e=>{if(e.key==='Escape')setTooltip('');}}>
-    <header><div><h2>按任务类型的产效分布</h2><p>已验证结果 / 百万 Token · 竖线为中位数</p></div><div className="usage-view-toggle" role="group" aria-label="产效分布显示方式"><button aria-label="产效分布图表" aria-pressed={chart} onClick={()=>setChart(true)}>图表</button><button aria-label="产效分布表格" aria-pressed={!chart} onClick={()=>{setChart(false);setTooltip('');}}>表格</button></div></header>
-    {chart&&!known?<div className="eff-unknown" role="status" aria-label="产效数据状态"><strong>产效暂未知</strong><span>{unknownCount} 个会话</span></div>:chart?<div className="eff-chart-scroll"><svg viewBox={`0 0 760 ${Math.max(110,rows.length*54+40)}`} className="eff-distribution" role="group" aria-label="按任务类型产效分布图">
+  const height=Math.max(110,rows.length*54+40),targets=rows.flatMap((row,index)=>{
+    const groups=new Map<number,EfficiencySession[]>();
+    for(const session of sessions??[]){if(session.taskType!==row.taskType||session.taskType==='unknown'||session.efficiency.value===null)continue;
+      const column=Math.min(9,Math.floor((90+session.efficiency.value/maximum*550-70)/59)),group=groups.get(column)??[];group.push(session);groups.set(column,group);}
+    return [...groups].map(([column,items])=>({key:row.taskType+':'+column,left:70+column*59,top:index*54+9,label:`${taskTypeLabels[row.taskType]} · ${items.length} 个会话`,items}));
+  });
+  return <section className="eff-card eff-distribution-card" aria-label="任务类型分布">
+    <header><div><h2>按任务类型的产效分布</h2><p>已验证结果 / 百万 Token · 竖线为中位数</p></div><div className="usage-view-toggle" role="group" aria-label="产效分布显示方式"><button aria-label="产效分布图表" aria-pressed={chart} onClick={()=>{detail.close();setChart(true);}}>图表</button><button aria-label="产效分布表格" aria-pressed={!chart} onClick={()=>{setChart(false);detail.close();}}>表格</button></div></header>
+    {chart&&!known?<div className="eff-unknown" role="status" aria-label="产效数据状态"><strong>产效暂未知</strong><span>{unknownCount} 个会话</span></div>:chart?<div className="eff-chart-interaction" {...detail.boundary}><div className="eff-chart-scroll"><div className="eff-distribution-canvas"><svg viewBox={`0 0 760 ${height}`} className="eff-distribution" role="group" aria-label="按任务类型产效分布图">
       {[0,.25,.5,.75,1].map(f=><g key={f}><line x1={90+f*550} x2={90+f*550} y1="8" y2={rows.length*54+8}/><text x={90+f*550} y={rows.length*54+32} textAnchor="middle">{number(f*maximum)}</text></g>)}
       {rows.map((row,i)=><g key={row.taskType}><text x="75" y={35+i*54} textAnchor="end">{taskTypeLabels[row.taskType]}</text><line x1="90" x2="640" y1={30+i*54} y2={30+i*54}/>
         {row.median!==null&&<line className="eff-median" x1={90+row.median/maximum*550} x2={90+row.median/maximum*550} y1={14+i*54} y2={46+i*54}/>}
-        {(sessions??[]).filter(s=>s.taskType===row.taskType&&s.taskType!=='unknown'&&s.efficiency.value!==null).map((session,j)=>{const label=`${taskTypeLabels[row.taskType]} · ${number(session.efficiency.value)} · ${number(session.efficiency.numerator)} / ${number(session.efficiency.denominator)} Token`,tip=`${session.employees.map(e=>e.employee).join('、')} · ${label}`;return <g key={session.sessionId} role="button" tabIndex={0} aria-label={label} transform={`translate(${90+session.efficiency.value!/maximum*550},${35+i*54+(j%3-1)*6})`} onClick={()=>onSelect(session.sessionId)} onKeyDown={e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();onSelect(session.sessionId);}}} onFocus={()=>setTooltip(tip)} onBlur={()=>setTooltip('')} onMouseEnter={()=>setTooltip(tip)} onMouseLeave={()=>setTooltip('')}><rect x="-26" y="-26" width="52" height="52" rx="5" className="eff-point-target"/><circle r="5"/></g>;})}
+        {(sessions??[]).filter(s=>s.taskType===row.taskType&&s.taskType!=='unknown'&&s.efficiency.value!==null).map((session,j)=><circle key={session.sessionId} cx={90+session.efficiency.value!/maximum*550} cy={35+i*54+(j%3-1)*6} r="5"/>)}
         <text x="660" y={35+i*54}>{row.count?`n=${row.count}`:'未知'}{row.unknownCount>0&&row.count>0?` · 未知 ${row.unknownCount}`:''}</text>
       </g>)}
-    </svg></div>:<div className="eff-table-scroll"><table aria-label="任务类型产效"><thead><tr><th>任务类型</th><th>已知会话</th><th>未知</th><th>中位数</th><th>范围</th></tr></thead><tbody>{rows.map(r=><tr key={r.taskType}><th>{taskTypeLabels[r.taskType]}</th><td>{r.count}</td><td>{r.unknownCount}</td><td>{number(r.median)}</td><td>{r.minimum===null?'未知':`${number(r.minimum)} — ${number(r.maximum)}`}</td></tr>)}</tbody></table></div>}
-    {chart&&known&&tooltip&&<p role="tooltip" className="eff-tooltip">{tooltip}</p>}
+    </svg>{targets.map(target=><button key={target.key} className="eff-chart-target" style={{left:target.left/760*100+'%',top:target.top/height*100+'%',width:59/760*100+'%',height:52/height*100+'%'}} {...detail.bind(target.key,target.label,()=> <ul className="eff-chart-details">{target.items.map(session=><li key={session.sessionId}><button onClick={()=>{detail.close();onSelect(session.sessionId);}}><strong>{session.employees.map(employee=>employee.employee).join('、')} · 会话 {session.sourceSessionId.slice(0,8)}</strong><span>{taskTypeLabels[session.taskType]} · {number(session.efficiency.value)} · {number(session.efficiency.numerator)} / {number(session.efficiency.denominator)} Token</span><small>{session.projects.join(' · ')||sourceLabel(session.source)}</small></button></li>)}</ul>)}/>)}</div></div>{detail.element}</div>:<div className="eff-table-scroll"><table aria-label="任务类型产效"><thead><tr><th>任务类型</th><th>已知会话</th><th>未知</th><th>中位数</th><th>范围</th></tr></thead><tbody>{rows.map(r=><tr key={r.taskType}><th>{taskTypeLabels[r.taskType]}</th><td>{r.count}</td><td>{r.unknownCount}</td><td>{number(r.median)}</td><td>{r.minimum===null?'未知':`${number(r.minimum)} — ${number(r.maximum)}`}</td></tr>)}</tbody></table></div>}
   </section>;
 }
 

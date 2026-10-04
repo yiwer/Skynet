@@ -2,7 +2,7 @@ import {useId,useLayoutEffect,useRef,useState,type ReactNode} from 'react';
 
 /** A chart's preview and explicit activation are separate: focus must not
  * consume the first touch. Placement stays inside the report's reading area. */
-export function useUsageChartDetail(dialog=false){
+export function useUsageChartDetail(dialog:boolean|string=false){
   const [active,setActive]=useState<{key:string;content:ReactNode}|null>(null),clicked=useRef('');
   const anchor=useRef<HTMLButtonElement|null>(null),popup=useRef<HTMLDivElement>(null),id=useId();
   const close=()=>{clicked.current='';setActive(null);};
@@ -36,5 +36,5 @@ export function useUsageChartDetail(dialog=false){
     onBlur:(event:React.FocusEvent)=>{if(!event.currentTarget.contains(event.relatedTarget))close();},
     onPointerLeave:(event:React.PointerEvent)=>{if(event.pointerType==='mouse')close();},
   };
-  return {bind,boundary,close,element:active&&<div ref={popup} id={id} className="usage-detail-popup" role={dialog?'dialog':'tooltip'} aria-label={dialog?'会话点详情':undefined}>{active.content}</div>};
+  return {bind,boundary,close,element:active&&<div ref={popup} id={id} className="usage-detail-popup" role={dialog?'dialog':'tooltip'} aria-label={dialog?(typeof dialog==='string'?dialog:'会话点详情'):undefined}>{active.content}</div>};
 }

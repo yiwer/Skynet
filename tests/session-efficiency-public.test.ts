@@ -104,9 +104,9 @@ test('session efficiency keeps OAuth MCP, export, review, sorting, fixed evidenc
     await panel.getByRole('button',{name:'产效分布表格',exact:true}).click();
     await expect(panel.getByRole('table',{name:'任务类型产效',exact:true})).toContainText('10,000');
     await panel.getByRole('button',{name:'产效分布图表',exact:true}).click();
-    const point=panel.getByRole('button',{name:'实现 · 10,000 · 1 / 100 Token',exact:true});
-    await point.focus();await expect(panel.getByRole('tooltip')).toContainText('1 / 100 Token');await page.keyboard.press('Escape');await expect(panel.getByRole('tooltip')).toHaveCount(0);
-    await point.press('Enter');await expect(panel.getByRole('region',{name:'选中会话',exact:true})).toBeVisible();
+    const point=panel.getByRole('button',{name:'实现 · 1 个会话',exact:true}),choices=panel.getByRole('dialog',{name:'产效会话详情'});
+    await point.focus();await expect(choices).toContainText('1 / 100 Token');await page.keyboard.press('Escape');await expect(choices).toHaveCount(0);
+    await point.press('Enter');await choices.getByRole('button').press('Enter');await expect(panel.getByRole('region',{name:'选中会话',exact:true})).toBeVisible();
     await panel.getByRole('button',{name:'关闭会话分段',exact:true}).click();
     await panel.getByRole('button',{name:'按 Token 排序',exact:true}).click();
     await panel.getByRole('table',{name:'会话明细',exact:true}).getByRole('button',{name:'查看会话分段',exact:true}).click();
