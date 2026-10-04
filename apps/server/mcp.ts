@@ -33,7 +33,7 @@ import type { sessionInsightsService } from './session-insights.js';
 import { sessionInsightsQuery } from '../../packages/contracts/session-insights.js';
 import {inferenceCorrectionsService} from './inference-corrections.js';
 import {inferenceCorrectionQuery} from '../../packages/contracts/inference-corrections.js';
-import { waitsQuerySchema } from '../../packages/contracts/waits.js';
+import { waitsReadingQuerySchema } from '../../packages/contracts/waits.js';
 import type { waitsService } from './waits.js';
 import type { waitReportService } from './wait-report.js';
 import { waitReportQuerySchema } from '../../packages/contracts/wait-report.js';
@@ -94,8 +94,8 @@ export async function registerMcp(app: FastifyInstance, db: Database, archive: A
     mcp.registerTool('read_session_efficiency',{description:'读取固定会话产效、同类任务分布及严格 P75/声称/返工复盘条件。比值保留分子分母，未知与零分母不计算，时间分段绑定同一批原件与等待版本。sort/direction 只排序会话；后续页传同一 version 与 nextOffset。每会话先返回 5 段；完整分段用同一 version、sessionId 与 nextSegmentOffset 作为 segmentOffset，每页 20 段。',annotations,inputSchema:efficiencyQuerySchema},input=>result(()=>efficiency.read(input)));
     mcp.registerTool('read_prompt_report',{description:'读取提示词分析固定版本，与 Web、HTTP 和导出同源。原件消息按原事件去重，模型指标保留有效分母和未知数；返工排除首条，上下文比较使用前一条提示词。示例与实际模型建议附原文引用。',annotations,inputSchema:promptReportQuerySchema},input=>result(()=>prompts.read(input)));
     mcp.registerTool('list_activity',{description:'按北京时间分页读取同一版本的活动记录与对话节奏。date、employeeId、source、project、type 共同筛选；后续页固定 version。section=events/lanes/inputs 分别按 nextOffset/nextLaneOffset/nextInputOffset 查询事件、泳道及来源，均为最多25项的有界页。返工与追问附分析版本，原生本轮结束不表示永久结束，补传必须有投递记录。',annotations,inputSchema:activityQuerySchema},input=>result(()=>activity.read(input)));
-    mcp.registerTool('read_waits', { description: '读取与 Web、导出共用的固定等待记录：原生本轮结束至下一条真实用户，末尾空闲排除，满600秒为长等待；权限未知单列。同员工其他逻辑会话活动含其他项目与Agent。后续页固定version；contextSnapshotId与lines可读取该版本的对话行标签。',
-      annotations, inputSchema: waitsQuerySchema }, input => result(() => waits.read(input)));
+    mcp.registerTool('read_waits', { description: '读取与 Web、导出共用的固定等待记录。summary/total 是完整范围，pages 列出 intervals/daily/unavailableSources/employees 总量与 nextOffset；每个显式 section（包括 offset=0）固定 version，空数组不代表该区总量为零。contextSnapshotId 与 lines 可单独读取固定版本的对话行标签。末尾空闲排除，满600秒为长等待；权限未知单列。',
+      annotations, inputSchema: waitsReadingQuerySchema }, input => result(() => waits.read(input)));
     mcp.registerTool('read_assessment', { description: '读取一名员工本周、上周或接入至今的使用能力评估，支持默认、重产出、重质量固定方案。与 Web、导出共用指标、证据及固定版本；缺失指标不计分，低可信度等级待定。输入版本每页32条；沿inputPage.nextOffset作为inputOffset并携带同一version读取全部。',
       annotations, inputSchema: assessmentQuery.extend({ employeeId: z.uuid() }) }, input => result(() => { const { employeeId, ...query } = input; return assessments.read(employeeId, query); }));
     mcp.registerTool('list_assessment_history', { description: '分页列出员工已保存的评估版本，可按周期与固定权重方案筛选。沿nextCursor续读，分页期间新结果不插入已有列表；version用于read_assessment固定读取。',
