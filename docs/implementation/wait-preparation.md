@@ -57,3 +57,5 @@ node --import tsx tests/wait-preparation-performance.ts
 `09-integrated-performance.*` 再次以原 1,000 ms 断言通过：首次 1,043.52 ms，后续 626.90 / 541.16 / 529.67 ms；后续仍 fresh 读取 108 次、6,340,788 bytes。该合并后小样本仍不代表千会话 AC-32。最后仅补本文档，完整提交与证据 SHA-256 见外部 `manifest.json`。
 
 独立审查发现合法大写 UUID 的原件、证据、对话路由回归：批量 Map 使用入参拼写，PostgreSQL 返回规范小写，取归属失败。`10-uppercase-red.txt` 公开复现 500；只规范批量 Map 与单项 wrapper 的 UUID 键后，`12-uppercase-green.txt` **1/1 PASS（16.48 秒）**，三路 HTTP 200，规范身份后完整证据/对话内容与小写入口相同。路由原有的链接拼写没有变更；`11-uppercase-green.txt` 虽命名 green，实际为过严测试对原有链接大小写断言失败，保留为测试修订记录，不算产品 GREEN。独立旧基线对应入口本来通过，该修复保留既有接受范围。
+
+随后独立材料资格回归发现原交错 gate 只接受标量 UUID，批量查询使用数组后无法释放。只适配 gate 同时识别两种参数形状，三次读取、12 秒等待上限和所有资格/409/旧任务/冻结报告断言原样保留；`14-material-gate-green.txt` **1/1 PASS（36.64 秒）**。该次是在获知另一千会话量测窗口前已经启动，保留共享机器并发背景，不作为任何性能样本。没有为此改变产品或放宽期限。
