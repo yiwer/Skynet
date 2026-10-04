@@ -14,7 +14,8 @@ import {verifyOriginIntegrity,verifySnapshotIntegrity,repairLegacyCarriers,recor
 
 type Query = Pick<Database, 'query'> | Pick<pg.PoolClient, 'query'>;
 type Record = { id: string; device_id: string; manifest: Manifest; hash: string; committed_at?: Date };
-const unconfirmed = '没有经过服务器字节校验的跨设备谱系；保持独立。相同文字、会话 ID 或本地用户名不能证明同一次活动。';
+export const independentOriginReason = '没有经过服务器字节校验的跨设备谱系；保持独立。相同文字、会话 ID 或本地用户名不能证明同一次活动。';
+const unconfirmed = independentOriginReason;
 
 function commonCompleteLines(left: Buffer, right: Buffer) {
   let end = 0;

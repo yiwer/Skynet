@@ -11,6 +11,7 @@ import { ConversationReader, conversationSelection } from './ConversationReader.
 import { EvidenceReader } from './EvidenceReader.js';
 import type { selectedEvidence } from './EvidenceReader.js';
 import type { MetricTotals } from '../../packages/contracts/metrics.js';
+import { AssemblyPanel } from './Assembly.js';
 export type Detail = { snapshotId:string; employee:string; manifest:Manifest; committedAt:string; events:ActivityEvent[]; activity:ActivitySummary;
  unrecognizedLines:number; partialLine:boolean; nextOffset:number|null; total:number; captureHealth:Coverage; provenance:Provenance;
  recovery:{nativeRuntimeVersion:string|null; preparation:string; nativeBackend:string; limitation:string} };
@@ -49,6 +50,7 @@ export function SessionDetail({detail,reading,conversationHash,refresh,offset,ev
           {!evidenceLocation && <div className="pagination"><button disabled={offset === 0} onClick={() => setOffset(value => Math.max(0, value - 100))}>上一页</button><button disabled={detail.nextOffset === null} onClick={() => setOffset(detail.nextOffset ?? 0)}>下一页</button></div>}</>}
 </section><aside className="session-side" data-scroll-region="session-inspector" aria-label="会话数据与存档">
  <SessionFacts snapshotId={selected} request={request}/>
+ <AssemblyPanel snapshotId={selected} request={request}/>
  <section className="session-file"><h2>存档</h2><dl><div><dt>来源</dt><dd>{sourceLabel(detail.manifest.source)}</dd></div><div><dt>版本</dt><dd>{detail.manifest.sourceVersion}</dd></div><div><dt>提交时间</dt><dd>{date(detail.committedAt)}</dd></div></dl>
  <div className="session-file-actions"><button disabled={exporting} onClick={()=>download('raw')}>下载原件</button><button disabled={exporting} onClick={()=>download('readable')}>导出文本</button></div></section>
  <SessionAnalysis key={`analysis-${selected}`} snapshotId={selected} request={(path,signal,method)=>request(path,signal,method)}/>
