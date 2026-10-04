@@ -20,6 +20,7 @@ test('employee groups preserve names and exact individual assessment versions ac
       const detail = await (await sandbox.api(zeta, '/api/assessments/' + card.employeeId + '?version=' + card.assessmentVersion)).json();
       assert.equal(card.reason, detail.reason); assert.equal(card.index, detail.index); assert.equal(card.level, detail.level);
       assert.equal(card.confidence, detail.confidence); assert.equal(card.margin, detail.margin); assert.deepEqual(card.sample, detail.sample);
+      assert.match(card.reason, /样本不足|采集覆盖不完整|暂无会话/);
       assert.deepEqual(card.coverageIssues, detail.coverageIssues);
       for (const [key, dim] of Object.entries(card.dims) as [string, any][]) assert.equal(dim.score, detail.dims[key].score);
       assert.equal(detail.inputs.frontierVersion, report.frontierVersion);
