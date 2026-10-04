@@ -127,9 +127,9 @@ test('usage output exposes the same verified contributions over HTTP, OAuth MCP,
     await panel.getByRole('button',{name:'会话散点切换为表格',exact:true}).click();
     await expect(panel.getByRole('region',{name:'会话散点',exact:true}).getByRole('table')).toBeVisible();
     await panel.getByRole('button',{name:'会话散点切换为图表',exact:true}).click();
-    const point=panel.getByRole('region',{name:'会话散点',exact:true}).getByRole('link').first();
-    await point.focus(); await expect(point).toBeFocused(); await expect(panel.getByRole('tooltip')).toBeVisible();
-    await page.keyboard.press('Escape'); await expect(panel.getByRole('tooltip')).toHaveCount(0);
+    const point=panel.getByRole('region',{name:'会话散点',exact:true}).getByRole('button',{name:/ · (Codex|Claude)/}).first();
+    await point.focus(); await expect(point).toBeFocused(); await expect(panel.getByRole('dialog',{name:'会话点详情'})).toBeVisible();
+    await page.keyboard.press('Escape'); await expect(panel.getByRole('dialog',{name:'会话点详情'})).toHaveCount(0);
     const selectedResponse=page.waitForResponse(response=>{const url=new URL(response.url());return url.pathname==='/api/usage-output'&&url.searchParams.get('employeeId')===employee.employeeId&&!url.searchParams.has('section');});
     await panel.getByRole('combobox',{name:/^员工/}).selectOption(employee.employeeId);
     const selectedPage=await(await selectedResponse).json();assert.equal(selectedPage.pages.sessions.total,2,'both current public source sessions are in the selected scope');assert.equal(selectedPage.sessions.filter((row:any)=>!row.selected).length,1);
