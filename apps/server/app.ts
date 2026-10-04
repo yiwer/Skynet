@@ -35,11 +35,13 @@ import { metricsQuerySchema } from '../../packages/contracts/metrics.js';
 import { migrateSessionInsights,sessionInsightsService } from './session-insights.js';
 import { sessionInsightsQuery } from '../../packages/contracts/session-insights.js';
 import { migrateUsageOutput, usageOutputService } from './usage-output.js';
+import {migrateSessionEfficiency,sessionEfficiencyService} from './session-efficiency.js';
 import {migratePromptReports,promptReportService} from './prompt-report.js';
 import {migrateTeamReports,teamReportService} from './team-report.js';
 import { migrateDeliveryReceipts, saveDeliveryReceipt } from './delivery-receipts.js';
 import { migrateAssembly, assemblyService, processingService, recordAssemblyRecipe } from './assembly.js';
 import { migrateWaits, waitsService } from './waits.js';
+import { migrateAssessments, assessmentService } from './assessment.js';
 import { migrateWaitReports, waitReportService } from './wait-report.js';
 import { migrateActivity,activityService } from './activity.js';
 
@@ -56,11 +58,13 @@ export async function createApp(options: { db: Database; rawDirectory: string; w
   await migrateWorkViews(db);
   await migrateMetrics(db);
   await migrateUsageOutput(db);
+  await migrateSessionEfficiency(db);
   await migratePromptReports(db);
   await migrateTeamReports(db);
   await migrateDeliveryReceipts(db);
   await migrateAssembly(db);
   await migrateWaits(db);
+  await migrateAssessments(db);
   await migrateWaitReports(db);
   await migrateActivity(db);
   const raw = new RawStore(options.rawDirectory);
@@ -275,6 +279,13 @@ export async function createApp(options: { db: Database; rawDirectory: string; w
   app.post('/api/activity/recompute',{onRequest:readerGuard},request=>activity.recompute(request.body));
   app.get('/api/activity/export',{onRequest:readerGuard},async(request,reply)=>{const data=await activity.export(request.query);return reply.header('Content-Disposition',`attachment; filename="skynet-activity-${data.version}.json"`).type('application/json').send(data);});
   const usage = usageOutputService(db, metrics, insights);
+  const efficiency=sessionEfficiencyService(db,usage,insights,raw,options.reportClock);
+  app.get('/api/session-efficiency',{onRequest:readerGuard},request=>efficiency.read(request.query));
+  app.post('/api/session-efficiency/recompute',{onRequest:readerGuard},request=>efficiency.recompute(request.body));
+  app.get('/api/session-efficiency/export',{onRequest:readerGuard},async(request,reply)=>{
+    const value=await efficiency.export(request.query);
+    return reply.header('Content-Disposition',`attachment; filename="skynet-session-efficiency-${value.version}.json"`).type('application/json').send(value);
+  });
   const prompts=promptReportService(db,usage,insights);
   const team=teamReportService(db,usage,prompts,waitReport,options.reportClock);
   app.post('/api/team-report/recompute',{onRequest:readerGuard},request=>team.recompute(request.body));
@@ -292,6 +303,16 @@ export async function createApp(options: { db: Database; rawDirectory: string; w
   app.get('/api/usage-output/export', { onRequest: readerGuard }, async (request, reply) => {
     const data = await usage.export(request.query);
     return reply.header('Content-Disposition', `attachment; filename="skynet-usage-output-${data.version}.json"`).type('application/json').send(data);
+  });
+  const assessments = assessmentService(db, usage, insights, waits, options.reportClock);
+  app.get('/api/assessment-models/:version', { onRequest: readerGuard }, request => assessments.model(hashSchema.parse((request.params as { version: string }).version)));
+  app.get('/api/assessment-baselines/:version', { onRequest: readerGuard }, request => assessments.baseline(hashSchema.parse((request.params as { version: string }).version)));
+  app.get('/api/assessments/:id', { onRequest: readerGuard }, request => assessments.read(z.uuid().parse((request.params as { id: string }).id), request.query));
+  app.get('/api/assessments/:id/history', { onRequest: readerGuard }, request => assessments.history(z.uuid().parse((request.params as { id: string }).id), request.query));
+  app.post('/api/assessments/:id/recompute', { onRequest: readerGuard }, request => assessments.recompute(z.uuid().parse((request.params as { id: string }).id), request.body));
+  app.get('/api/assessments/:id/export', { onRequest: readerGuard }, async (request, reply) => {
+    const value = await assessments.export(z.uuid().parse((request.params as { id: string }).id), request.query);
+    return reply.header('Content-Disposition', `attachment; filename="assessment-${value.version}.json"`).send(value);
   });
   app.get('/api/snapshots/:id/insights', { onRequest: readerGuard }, async request => insights.read(z.uuid().parse((request.params as {id:string}).id), sessionInsightsQuery.parse(request.query)));
   const reports = reportService(db, analysis,workStatistics, options.reportClock);
@@ -423,7 +444,7 @@ export async function createApp(options: { db: Database; rawDirectory: string; w
     const file = await archive.exported((request.params as { id: string }).id, format);
     return reply.header('Content-Disposition', `attachment; filename="${file.filename}"`).type(file.contentType).send(file.bytes);
   });
-  if (options.publicOrigin) await registerMcp(app, db, archive, options.publicOrigin, analysis, reports, coverage, workStatistics, workViews,operations,conversation,metrics,assembly,processing,insights,waits,usage,waitReport,prompts,activity,team);
+  if (options.publicOrigin) await registerMcp(app, db, archive, options.publicOrigin, analysis, reports, coverage, workStatistics, workViews,operations,conversation,metrics,assembly,processing,insights,waits,usage,waitReport,prompts,activity,efficiency,assessments,team);
   if (options.webDirectory) {
     await app.register(fastifyStatic, { root: resolve(options.webDirectory), wildcard: false });
   }

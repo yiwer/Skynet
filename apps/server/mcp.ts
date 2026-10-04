@@ -29,13 +29,18 @@ import { waitsQuerySchema } from '../../packages/contracts/waits.js';
 import type { waitsService } from './waits.js';
 import type { waitReportService } from './wait-report.js';
 import { waitReportQuerySchema } from '../../packages/contracts/wait-report.js';
+import type { assessmentService } from './assessment.js';
+import { assessmentQuery, assessmentHistoryQuery } from '../../packages/contracts/assessment.js';
 import type { usageOutputService } from './usage-output.js';
+import type { sessionEfficiencyService } from './session-efficiency.js';
+import { efficiencyQuerySchema } from '../../packages/contracts/session-efficiency.js';
+
 import type {promptReportService} from './prompt-report.js';
 import {promptReportQuerySchema} from '../../packages/contracts/prompt-report.js';
 
 import type { activityService } from './activity.js';
 import { activityQuerySchema } from '../../packages/contracts/activity.js';
-export async function registerMcp(app: FastifyInstance, db: Database, archive: ArchiveQuery, publicOrigin: string, analysis: AnalysisService, reports: ReportService, coverage: CoverageService, workStatistics: WorkStatisticsService, workViews: WorkViewService,operations:ServerOperationsService, conversation: ReturnType<typeof conversationQuery>, metrics: ReturnType<typeof metricsService>, assembly: ReturnType<typeof assemblyService>, processing: ReturnType<typeof processingService>, insights:ReturnType<typeof sessionInsightsService>, waits:ReturnType<typeof waitsService>, usage:ReturnType<typeof usageOutputService>, waitReport:ReturnType<typeof waitReportService>, prompts:ReturnType<typeof promptReportService>, activity:ReturnType<typeof activityService>, team:ReturnType<typeof teamReportService>) {
+export async function registerMcp(app: FastifyInstance, db: Database, archive: ArchiveQuery, publicOrigin: string, analysis: AnalysisService, reports: ReportService, coverage: CoverageService, workStatistics: WorkStatisticsService, workViews: WorkViewService,operations:ServerOperationsService, conversation: ReturnType<typeof conversationQuery>, metrics: ReturnType<typeof metricsService>, assembly: ReturnType<typeof assemblyService>, processing: ReturnType<typeof processingService>, insights:ReturnType<typeof sessionInsightsService>, waits:ReturnType<typeof waitsService>, usage:ReturnType<typeof usageOutputService>, waitReport:ReturnType<typeof waitReportService>, prompts:ReturnType<typeof promptReportService>, activity:ReturnType<typeof activityService>, efficiency:ReturnType<typeof sessionEfficiencyService>, assessments:ReturnType<typeof assessmentService>, team:ReturnType<typeof teamReportService>) {
   const { guard } = await registerMcpAuth(app, db, publicOrigin);
   const offset = z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).default(0);
   const snapshotId = z.uuid().describe('Immutable snapshot ID from list_sessions, never a mutable session ID');
@@ -73,10 +78,17 @@ export async function registerMcp(app: FastifyInstance, db: Database, archive: A
       annotations, inputSchema: metricsQuerySchema }, input => result(() => usage.read(input)));
     mcp.registerTool('read_wait_report', { description:'按固定等待来源读取中位数/P90、长等待与并行占比、星期小时热力表和姓名顺序人员分布。保留分子分母，权限未知单列。等待不用于考勤，建议不更改宿主权限。', annotations, inputSchema:waitReportQuerySchema }, input=>result(()=>waitReport.read(input)));
     mcp.registerTool('read_team_report',{description:'读取团队与员工周使用概况的固定同源指标、每日趋势与姓名顺序人员汇总，保留覆盖和未知状态。',annotations,inputSchema:fixedTeamReportQuerySchema},input=>result(()=>team.read(input)));
+    mcp.registerTool('read_session_efficiency',{description:'读取固定会话产效、同类任务分布及严格 P75/声称/返工复盘条件。比值保留分子分母，未知与零分母不计算，时间分段绑定同一批原件与等待版本。sort/direction 只排序会话；后续页传同一 version 与 nextOffset。每会话先返回 5 段；完整分段用同一 version、sessionId 与 nextSegmentOffset 作为 segmentOffset，每页 20 段。',annotations,inputSchema:efficiencyQuerySchema},input=>result(()=>efficiency.read(input)));
     mcp.registerTool('read_prompt_report',{description:'读取提示词分析固定版本，与 Web、HTTP 和导出同源。原件消息按原事件去重，模型指标保留有效分母和未知数；返工排除首条，上下文比较使用前一条提示词。示例与实际模型建议附原文引用。',annotations,inputSchema:promptReportQuerySchema},input=>result(()=>prompts.read(input)));
     mcp.registerTool('list_activity',{description:'按北京时间分页读取同一版本的活动记录与对话节奏。date、employeeId、source、project、type 共同筛选；后续页固定 version。section=events/lanes/inputs 分别按 nextOffset/nextLaneOffset/nextInputOffset 查询事件、泳道及来源，均为最多25项的有界页。返工与追问附分析版本，原生本轮结束不表示永久结束，补传必须有投递记录。',annotations,inputSchema:activityQuerySchema},input=>result(()=>activity.read(input)));
     mcp.registerTool('read_waits', { description: '读取与 Web、导出共用的固定等待记录：原生本轮结束至下一条真实用户，末尾空闲排除，满600秒为长等待；权限未知单列。同员工其他逻辑会话活动含其他项目与Agent。后续页固定version；contextSnapshotId与lines可读取该版本的对话行标签。',
       annotations, inputSchema: waitsQuerySchema }, input => result(() => waits.read(input)));
+    mcp.registerTool('read_assessment', { description: '读取一名员工本周、上周或接入至今的使用能力评估，支持默认、重产出、重质量固定方案。与 Web、导出共用指标、证据及固定版本；缺失指标不计分，低可信度等级待定。输入版本每页32条；沿inputPage.nextOffset作为inputOffset并携带同一version读取全部。',
+      annotations, inputSchema: assessmentQuery.extend({ employeeId: z.uuid() }) }, input => result(() => { const { employeeId, ...query } = input; return assessments.read(employeeId, query); }));
+    mcp.registerTool('list_assessment_history', { description: '分页列出员工已保存的评估版本，可按周期与固定权重方案筛选。沿nextCursor续读，分页期间新结果不插入已有列表；version用于read_assessment固定读取。',
+      annotations, inputSchema: assessmentHistoryQuery.extend({ employeeId: z.uuid() }) }, input => result(() => { const { employeeId, ...query } = input; return assessments.history(employeeId, query); }));
+    mcp.registerTool('read_assessment_model', { description: '读取评估结果引用的完整参数版本：13 项锚点、样本门槛、权重、分档、可信度与固定建议库。',
+      annotations, inputSchema: { version: z.string().regex(/^[a-f0-9]{64}$/) } }, input => result(() => assessments.model(input.version)));
     mcp.registerTool('list_sessions', { description: '分页列出全体员工的会话快照。nextCursor 保持同一查询时间范围。',
       annotations, inputSchema: { cursor: z.string().max(1024).optional(), limit: z.number().int().min(1).max(10).default(10) } },
     input => result(() => archive.sessions(input.cursor, input.limit)));
