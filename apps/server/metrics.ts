@@ -50,6 +50,27 @@ export async function migrateMetrics(db: Database) {
 
 type Snapshot = { id: string; device_id: string; employee_id: string; employee: string; source: Source; source_session_id: string;
   manifest: Manifest; hash: string; committed_at: Date; enrolled_at: Date | null; provenance: Provenance | null; attribution_revision: string };
+type Original = { content: Buffer } | { error: unknown };
+/** Preserve candidate order while overlapping at most four fresh reads with
+ * parsing. Only this generator starts reads; a failure drains its lookahead
+ * without starting more work or replacing the caller's original error. */
+async function* metricOriginals(records: Snapshot[], read: (device: string, hash: string) => Promise<Buffer>) {
+  const pending: Promise<{ record: Snapshot; original: Original }>[] = [];
+  let next = 0;
+  const start = () => {
+    const record = records[next++]!;
+    pending.push(read(record.device_id, record.hash).then(content => ({ record, original: { content } }),
+      error => ({ record, original: { error } })));
+  };
+  try {
+    while (pending.length < 4 && next < records.length) start();
+    while (pending.length) {
+      const item = await pending.shift()!;
+      if (next < records.length) start();
+      yield item;
+    }
+  } finally { await Promise.all(pending); }
+}
 type Slice = { sessionId: string; employeeId: string; employee: string; source: Source; project: string; sourceSessionId: string;
   snapshotId: string; snapshotIds: Set<string>; date: string; businessEvents: boolean; turns: Set<string>; tools: Set<string>; usage: Map<string, TokenComponents | null>; reasons: Set<string> };
 const nativeKey = (device: string, source: Source, session: string) => JSON.stringify([device, source, session]);
@@ -291,17 +312,6 @@ export function metricsService(db: Database, raw: RawStore, clock: () => Date = 
       if (totalBytes > limits.rawBytes) throw bounded();
       const rawInputs: unknown[] = [];
       const rawBuffers = new Map<string, Buffer>();
-      // Fresh verification belongs to this request. Bound filesystem work while
-      // keeping each original's failure separate and processing facts in order.
-      const originals = new Map<string, { content: Buffer } | { error: unknown }>();
-      let nextOriginal = 0;
-      await Promise.all(Array.from({ length: Math.min(4, candidates.length) }, async () => {
-        while (nextOriginal < candidates.length) {
-          const record = candidates[nextOriginal++]!;
-          try { originals.set(record.id, { content: await readOriginal(record.device_id, record.hash) }); }
-          catch (error) { originals.set(record.id, { error }); }
-        }
-      }));
       const materialized = new Map<string, MetricInputFacts>();
       const inputBatch = await metricInputBatch(client, candidates.map(record => ({ snapshotId: record.id, attributionRevision: record.attribution_revision,
         hash: record.hash, source: record.source, sourceVersion: record.manifest.sourceVersion, manifest: record.manifest, baselineContinuity: baselineContinuity(record) })), full);
@@ -316,7 +326,7 @@ export function metricsService(db: Database, raw: RawStore, clock: () => Date = 
       const usageOrigins = new Map<string, { slice?: Slice; value: TokenComponents | null }>();
       const discoveryGaps = new Set<string>(), ownerDiscoveryGaps = new Map<string, { snapshotId: string; reason: string }[]>();
       const gapForOwner = (record: Snapshot, reason: string) => { discoveryGaps.add(reason); const gaps = ownerDiscoveryGaps.get(record.employee_id) ?? []; gaps.push({ snapshotId: record.id, reason }); ownerDiscoveryGaps.set(record.employee_id, gaps); };
-      for (const record of candidates) {
+      for await (const { record, original } of metricOriginals(candidates, readOriginal)) {
         const session = identity(record);
         const groupKey = JSON.stringify([session, record.employee_id, record.manifest.project]);
         const relevant = sliceGroups.get(groupKey) ?? [];
@@ -325,7 +335,6 @@ export function metricsService(db: Database, raw: RawStore, clock: () => Date = 
         rawInputs.push([record.id, record.hash, record.manifest.sourceVersion, record.enrolled_at?.toISOString(), record.provenance]);
         let parsed: MetricInputFacts, content: Buffer;
         try {
-          const original = originals.get(record.id)!;
           if ('error' in original) throw original.error;
           content = original.content;
           parsed = inputBatch.read({ snapshotId: record.id, attributionRevision: record.attribution_revision,
