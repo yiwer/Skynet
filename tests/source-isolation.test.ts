@@ -98,7 +98,10 @@ test('unavailable restored carriers keep original owners and distinguish same-se
     const broken=await get(query);assert.equal(broken.unavailableSources.length,1);assert.equal(broken.unavailableSources[0].employeeId,a.employeeId);assert.ok(broken.intervals.every((row:any)=>row.parallel==='not-observed'),'a lost copy of the same logical session is not an unknown other session');assert.equal(broken.summary.replyWaitMs,null);
     const other=await get('/api/waits/export?period=since-enrollment&employeeId='+b.employeeId);assert.deepEqual(other.unavailableSources,[]);
     const activity=await get('/api/activity/export?date='+beijingDate(f.base));assert.ok(activity.events.filter((event:any)=>event.type==='gap').every((event:any)=>event.employeeId===a.employeeId));
-    await writeFile(target.path,target.bytes);assert.deepEqual(await get(query),before);const full=await f.api(a,'/api/waits/recompute',{period:'since-enrollment',employeeId:a.employeeId});assert.equal(full.status,200);assert.deepEqual(await full.json(),before);
+    await writeFile(target.path,target.bytes);assert.deepEqual(await get(query),before);const full=await f.api(a,'/api/waits/recompute',{period:'since-enrollment',employeeId:a.employeeId});assert.equal(full.status,200);
+    const recomputed=await full.json();assert.equal(recomputed.version,before.version);
+    assert.deepEqual(await get(query+'&version='+recomputed.version),before,'full recompute preserves the complete fixed export, including every interval and original owner');
+    assert.deepEqual(recomputed,await get('/api/waits?period=since-enrollment&employeeId='+a.employeeId+'&version='+recomputed.version),'recompute returns the same bounded reading page as its fixed version');
     const second=await f.session(a,{prompts:1}),parallel={path:join(f.directory,'raw',a.deviceId,createHash('sha256').update(second.bytes).digest('hex')),bytes:second.bytes};restore.push(parallel);await writeFile(parallel.path,'synthetic other session damaged\n');
     const selected=await get('/api/waits/export?snapshotId='+record.snapshotId);assert.ok(selected.intervals.length);assert.ok(selected.intervals.every((row:any)=>row.parallel==='unknown'));
     assert.equal((await f.api(a,'/api/waits?employeeId='+b.employeeId+'&version='+before.version+'&period=since-enrollment')).status,400);
