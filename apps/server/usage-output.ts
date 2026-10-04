@@ -7,6 +7,8 @@ import type { sessionInsightsService } from './session-insights.js';
 import { metricsQuerySchema, type MetricsQuery, type MetricTotals, type SessionMetrics, type MetricsPage } from '../../packages/contracts/metrics.js';
 import type { OutputAmount, OutputTotals, UsageOutputPage, UsageSession } from '../../packages/contracts/usage-output.js';
 import type { FactContribution, SessionInsights } from '../../packages/contracts/session-insights.js';
+import {usageQuerySchema} from '../../packages/contracts/usage-output.js';
+import {usagePage} from './usage-page.js';
 
 const catalogVersion = 'usage-output-2';
 const kinds = ['verified', 'claimed', 'codeChanges', 'tests', 'commits'] as const;
@@ -177,12 +179,10 @@ export function usageOutputService(db: Database, metrics: MetricsService, insigh
     return { q, payload: record.payload as UsageOutputPage };
   }
   async function read(input: unknown = {}, full = false) {
-    const q = metricsQuerySchema.parse(input);
-    if (q.offset && !q.version) throw new HttpError(400, '后续分页需要固定版本');
+    const parsed = usageQuerySchema.parse(input), {section,...q}=parsed;
+    if(full&&section)throw new HttpError(400,'重算不能指定分页部分');
     const { payload } = await load(q, full);
-    const result = { ...payload, sessions: payload.sessions.slice(q.offset, q.offset + 20), nextOffset: payload.sessions.length > q.offset + 20 ? q.offset + 20 : null };
-    if (Buffer.byteLength(JSON.stringify(result)) > 80 * 1024) throw new HttpError(413, '产出响应超过范围上限，请缩小筛选');
-    return result;
+    return usagePage(payload,parsed);
   }
   /** Internal full revision, with the same source checks and calculation bounds.
    * Composed reports must not obtain it via a bounded first-page response. */
