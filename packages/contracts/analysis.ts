@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import type { EvidenceLocation } from './search.js';
 import type { EventOrigin } from './provenance.js';
+import { analysisInsightsSchema, type SessionInferences } from './session-insights.js';
 
 export const analysisCategories = ['goal', 'topic', 'activity', 'outcome', 'blocker', 'next', 'uncertainty'] as const;
 export const analysisLabels: Record<typeof analysisCategories[number], string> = {
@@ -11,7 +12,7 @@ export const analysisOutputSchema = z.object({ items: z.array(z.object({
   category: z.enum(analysisCategories), assessment: z.enum(['observed', 'claimed', 'inferred', 'insufficient']),
   text: z.string().min(1).max(512), citations: z.array(z.object({ event: z.number().int().min(0),
     textOffset: z.number().int().min(0), quote: z.string().min(1).max(512) }).strict()).max(3),
-}).strict()).max(28) }).strict();
+}).strict()).max(28), insights: analysisInsightsSchema.optional() }).strict();
 export type AnalysisOutput = z.infer<typeof analysisOutputSchema>;
 export type AnalysisPosition = { event: number; textOffset: number };
 export type AnalysisProcessing = { version: string; complete: boolean; aggregation: 'not-needed' | 'succeeded' | 'failed' | 'limited';
@@ -35,7 +36,7 @@ export type AnalysisRun = { id: string; snapshotId: string; state: 'queued' | 'r
     attributionRevision?: string;
     coverage: { unrecognizedLines: number; partialLine: boolean; excludedMaterials: number; captureGaps: unknown[]; scope: string } };
   result: { items: AnalysisItem[]; usage: { inputTokens: number | null; outputTokens: number | null; runtimeCostUsd: number | null;
-    providerBilledCny: null; requests: number }; fixture: boolean; processing?: AnalysisProcessing } | null;
+    providerBilledCny: null; requests: number }; fixture: boolean; processing?: AnalysisProcessing; insights?:SessionInferences } | null;
 };
 export type AnalysisPage = { runs: AnalysisRun[]; nextOffset: number | null; availability: {
   ready: boolean; reason: string; mode?: 'qwen-payg' | 'fixture'; model?: string; runtimeVersion?: string;
