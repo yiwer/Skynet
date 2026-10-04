@@ -16,6 +16,7 @@ const algorithmVersion='session-efficiency-1';
 const definition='产效比 = 已验证结果 ÷ 百万 Token；代码产出 = 代码变更行 ÷ 百万 Token。Token 使用已知输入与输出之和，未知或零分母不计算比值。只在同类任务之间参考；任务类型与返工来自模型推断及人工更正。P75 按所选范围 Token 已知的逻辑会话使用线性插值，同一会话的归属分片先合计。';
 const selection=(q:EfficiencyQuery)=>({period:q.period,...(q.employeeId?{employeeId:q.employeeId}:{}),...(q.source?{source:q.source}:{}),...(q.project!==undefined?{project:q.project}:{})});
 const ratio=(numerator:number|null,denominator:number|null)=>({numerator,denominator,value:numerator!==null&&denominator!==null&&denominator>0?numerator/denominator*1e6:null});
+const fitsPage=(value:unknown)=>{const text=JSON.stringify(value);return Buffer.byteLength(text)<=80*1024&&Buffer.byteLength(JSON.stringify({content:[{type:'text',text}]}))<=48*1024;};
 function quantile(values:number[],q:number){if(!values.length)return null;const sorted=[...values].sort((a,b)=>a-b),p=(sorted.length-1)*q,lo=Math.floor(p);return sorted[lo]!+(sorted[Math.ceil(p)]!-sorted[lo]!)*(p-lo);}
 function combine(rows:UsageSession[]):EfficiencySession{
   const first=rows[0]!,sum=(key:'userTurns'|'toolCalls'|'knownInputTokens'|'knownOutputTokens')=>rows.reduce((n,row)=>n+row[key],0);
@@ -82,8 +83,8 @@ export function sessionEfficiencyService(db:Database,usage:ReturnType<typeof usa
     const projected=await Promise.all(selected.map(async row=>{if(!row.timing)return row;const offset=q.sessionId?q.segmentOffset:0,limit=q.sessionId?20:5;
       return {...row,timing:{...row.timing,segments:await revision.segments(row.sessionId,offset,limit),segmentTotal:row.timing.segmentTotal,nextSegmentOffset:row.timing.segmentTotal>offset+limit?offset+limit:null}};}));
     const result={...value,sessions:projected,filteredTotal:q.sessionId?1:sessions.length,nextOffset:!q.sessionId&&sessions.length>q.offset+selected.length?q.offset+selected.length:null};
-    while(Buffer.byteLength(JSON.stringify(result))>80*1024&&result.sessions.length>1){result.sessions.pop();if(!q.sessionId)result.nextOffset=q.offset+result.sessions.length;}
-    if(Buffer.byteLength(JSON.stringify(result))>80*1024)throw new HttpError(413,'会话产效单项响应超过范围上限');return result;}
+    while(!fitsPage(result)&&result.sessions.length>1){result.sessions.pop();if(!q.sessionId)result.nextOffset=q.offset+result.sessions.length;}
+    if(!fitsPage(result))throw new HttpError(413,'会话产效单项响应超过范围上限');return result;}
 
   return{read,recompute:(input:unknown)=>read(input,true),export:async(input:unknown)=>(await load(input)).revision.complete(),
     exportFromMetric:async(input:unknown,metricVersion:string,full=false)=>(await load(input,full,metricVersion)).revision.complete()};
