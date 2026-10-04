@@ -6,8 +6,26 @@
 .platform-main .assessment-actions button{white-space:nowrap;font-size:12px}
 .platform-main .assessment-controls{border-bottom:1px solid var(--color-rule);padding-bottom:14px;font-size:12px;flex:none;color:var(--color-muted)}
 .platform-main .assessment-controls label{display:flex;align-items:center;gap:8px;margin:0;min-width:0;white-space:nowrap}
-.platform-main .assessment-controls select{max-width:220px;margin:0;min-height:34px}
+.platform-main .assessment-controls select{max-width:220px;margin:0;min-height:44px}
+.platform-main .assessment-controls>a{display:inline-flex;align-items:center;min-height:44px}
 .platform-main .assessment-controls>span{padding-left:10px;border-left:1px solid var(--color-rule)}
+.platform-main .assessment-segments{display:inline-flex;max-width:100%;padding:3px;gap:2px;border:1px solid var(--color-rule);border-radius:8px;background:var(--color-paper-2)}
+.platform-main .assessment-segments button{padding:6px 10px;min-width:44px;min-height:44px;border:0;box-shadow:none;background:transparent;color:var(--color-muted);font-size:12px;white-space:nowrap;border-radius:5px}
+.platform-main .assessment-segments button[aria-pressed=true]{background:var(--color-card);color:var(--color-ink);box-shadow:0 1px 3px #00000010}
+.platform-main .assessment-segments button:hover{color:var(--color-ink);background:var(--color-hover)}
+.platform-main .assessment-range{display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;font-size:11px;color:var(--color-muted);margin:0 0 12px}
+.platform-main .assessment-history{font-size:12px;margin-bottom:14px;color:var(--color-muted)}
+.platform-main .assessment-history summary{cursor:pointer;width:max-content;min-height:44px;padding:12px 0;line-height:20px}
+.platform-main .assessment-history ol{list-style:none;margin:8px 0 12px;padding:0;display:grid;gap:1px;border:1px solid var(--color-rule);border-radius:8px;overflow:hidden}
+.platform-main .assessment-history li>a{display:grid;grid-template-columns:minmax(130px,1fr) auto;gap:4px 12px;padding:12px 14px;text-decoration:none;background:var(--color-card);color:var(--color-ink)}
+.platform-main .assessment-history li+li{border-top:1px solid var(--color-rule-soft)}
+.platform-main .assessment-history li>a:hover,.platform-main .assessment-history li>a[aria-current]{background:var(--color-hover)}
+.platform-main .assessment-history li span{font-size:11px;color:var(--color-muted);grid-column:1/-1}
+.platform-main .assessment-history li small{grid-column:2;grid-row:1;font:10px var(--font-mono);color:var(--color-muted)}
+.platform-main .assessment-parameters{width:100%;max-width:540px;font-size:12px;border-collapse:collapse;margin:18px 0;text-align:left}
+.platform-main .assessment-parameters caption{text-align:left;margin-bottom:8px;color:var(--color-ink);font-weight:600}
+.platform-main .assessment-parameters th,.platform-main .assessment-parameters td{padding:7px 8px;border-bottom:1px solid var(--color-rule-soft)}
+.platform-main .assessment-parameters td{font-family:var(--font-mono)}
 .platform-main .assessment-content{overflow:auto;min-height:0;flex:1;padding:0 10px 24px 0;scrollbar-gutter:stable}
 .platform-main .assessment-empty{padding:56px 20px;border:1px solid var(--color-rule);border-radius:12px;background:var(--color-card);text-align:center;color:var(--color-muted);font-size:14px}
 .platform-main .assessment-verdict{display:grid;grid-template-columns:1.2fr 1fr;border:1px solid var(--color-rule);border-radius:16px;background:var(--color-card);overflow:hidden}
@@ -62,3 +80,4 @@
 @media(max-width:760px){.platform-main .assessment-verdict{grid-template-columns:1fr}.platform-main .assessment-verdict aside{border-left:0;border-top:1px solid var(--color-rule-soft)}.platform-main .assessment-heading{align-items:flex-start}.platform-main .assessment-heading h1{font-size:23px}.platform-main .assessment-actions{gap:6px}.platform-main .assessment-dimension>summary{grid-template-columns:1fr 36px 60px;gap:8px;padding:15px}.platform-main .assessment-bar{grid-row:2;grid-column:1/-1}.platform-main .assessment-metrics{padding:0 14px 14px}.platform-main .assessment-verdict>div,.platform-main .assessment-verdict aside{padding:20px}.platform-main .assessment-section-title{align-items:flex-start;flex-direction:column;gap:6px}.platform-main .assessment-method dl>div{grid-template-columns:1fr;gap:3px}}
 @media(max-width:390px){.platform-main .assessment-heading{flex-direction:column;gap:10px}.platform-main .assessment-controls{gap:8px}.platform-main .assessment-controls label{width:100%}.platform-main .assessment-controls select{flex:1;max-width:100%;min-width:0}.platform-main .assessment-controls>span{border:0;padding:0;margin-right:8px}.platform-main .assessment-score>strong{font-size:46px}.platform-main .assessment-verdict>div,.platform-main .assessment-verdict aside{padding:16px}.platform-main .assessment-content{padding-right:4px}}
 @media(prefers-reduced-motion:reduce){.platform-main .assessment-bar>i{transition:none}}
+@media(max-width:390px){.platform-main .assessment-segments{width:100%}.platform-main .assessment-segments button{flex:1;padding:5px 7px}.platform-main .assessment-history li>a{grid-template-columns:1fr}.platform-main .assessment-history li small{grid-column:1;grid-row:auto}.platform-main .assessment-parameters th,.platform-main .assessment-parameters td{padding:7px 4px;font-size:11px}}

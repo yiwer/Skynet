@@ -300,6 +300,7 @@ export async function createApp(options: { db: Database; rawDirectory: string; w
   app.get('/api/assessment-models/:version', { onRequest: readerGuard }, request => assessments.model(hashSchema.parse((request.params as { version: string }).version)));
   app.get('/api/assessment-baselines/:version', { onRequest: readerGuard }, request => assessments.baseline(hashSchema.parse((request.params as { version: string }).version)));
   app.get('/api/assessments/:id', { onRequest: readerGuard }, request => assessments.read(z.uuid().parse((request.params as { id: string }).id), request.query));
+  app.get('/api/assessments/:id/history', { onRequest: readerGuard }, request => assessments.history(z.uuid().parse((request.params as { id: string }).id), request.query));
   app.post('/api/assessments/:id/recompute', { onRequest: readerGuard }, request => assessments.recompute(z.uuid().parse((request.params as { id: string }).id), request.body));
   app.get('/api/assessments/:id/export', { onRequest: readerGuard }, async (request, reply) => {
     const value = await assessments.export(z.uuid().parse((request.params as { id: string }).id), request.query);
