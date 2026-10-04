@@ -1,22 +1,74 @@
-name: V1 archive slice
+name: Public product regression
 on:
   pull_request:
   push:
-    branches: [main]
+    branches: [main, codex/v2]
+  workflow_dispatch:
 permissions:
   contents: read
 jobs:
   archive:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix:
+        shard: [1, 2]
+    env:
+      SKYNET_TEST_SHARD: ${{ matrix.shard }}/2
+      SKYNET_CLAUDE_RUNTIME: ${{ github.workspace }}/tests/runtime/node_modules/@anthropic-ai/claude-code-linux-x64/claude
+      SKYNET_OPENSSL: /usr/bin/openssl
+      SKYNET_GIT_BASH: /usr/bin/bash
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 24
           cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            tests/runtime/package-lock.json
       - run: npm ci
+      - name: Install the fixed test-only native runtime
+        run: npm ci --prefix tests/runtime --ignore-scripts --no-audit --no-fund
       - run: npx playwright install --with-deps chromium
-      - run: npm run typecheck
-      - run: npm run build
-      - run: npm test
+      - name: Record the source, runtime and selected tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          source_status="$(git status --porcelain)"
+          mkdir -p artifacts
+          git rev-parse HEAD > artifacts/source.txt
+          printf '%s\n' "$source_status" > artifacts/source-status.txt
+          node --version > artifacts/node.txt
+          npm --version > artifacts/npm.txt
+          uname -a > artifacts/host.txt
+          docker version > artifacts/docker.txt
+          "$SKYNET_CLAUDE_RUNTIME" --version > artifacts/claude-version.txt
+          test "$(cat artifacts/claude-version.txt)" = '2.1.281 (Claude Code)'
+          sha256sum "$SKYNET_CLAUDE_RUNTIME" tests/runtime/package-lock.json > artifacts/runtime-sha256.txt
+          find tests -maxdepth 1 -name '*.test.ts' ! -name 'native-*' | LC_ALL=C sort > artifacts/all-ordinary-tests.txt
+          printf '%s\n' "$SKYNET_TEST_SHARD" > artifacts/shard.txt
+          for spec in SKYNET_ASSEMBLY_EVIDENCE:assembly SKYNET_ACTIVITY_EVIDENCE_DIR:activity SKYNET_WAITS_EVIDENCE_DIR:waits SKYNET_WAIT_REPORT_EVIDENCE_DIR:wait-report SKYNET_ASSESSMENT_EVIDENCE_DIR:assessment SKYNET_ASSESSMENT_SCOPE_EVIDENCE_DIR:assessment-scope SKYNET_PEOPLE_EVIDENCE_DIR:people SKYNET_PROFILE_WEB_EVIDENCE_DIR:profile SKYNET_COACHING_EVIDENCE_DIR:coaching SKYNET_NOTES_EVIDENCE_DIR:notes SKYNET_CORRECTIONS_EVIDENCE_DIR:corrections SKYNET_NAVIGATION_EVIDENCE_DIR:navigation SKYNET_SOURCE_ISOLATION_EVIDENCE_DIR:source-isolation; do
+            printf '%s=%s/artifacts/%s\n' "${spec%%:*}" "$GITHUB_WORKSPACE" "${spec#*:}" >> "$GITHUB_ENV"
+          done
+      - name: Typecheck and build
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm run typecheck 2>&1 | tee artifacts/typecheck.txt
+          npm run build 2>&1 | tee artifacts/build.txt
+      - name: Run every ordinary test across both bounded shards
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm test 2>&1 | tee artifacts/tests.txt
+      - name: Retain the actual result even on failure
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: public-regression-${{ github.sha }}-${{ matrix.shard }}
+          path: artifacts/
+          if-no-files-found: warn
+          retention-days: 30
