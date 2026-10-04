@@ -50,6 +50,8 @@ export function profileCoachingService(insights:ReturnType<typeof sessionInsight
     const previous=await week('last-week'),current=await week('this-week'),correctionIds=[...new Set(own.prompts.flatMap(prompt=>prompt.correctionIds))].sort();
     return {algorithmVersion:'profile-coaching-1',usageVersion:source.version,representatives:{best:example('best'),rework:example('rework')},trend:{preset:assessment.preset,previous,current},
       waiting:{waitVersion:waitSource.version,summary:waitSummary.summary,teamMedianMs:summarizeWaits(waitSource).summary.medianMs,permissions:waitSummary.permissions,
+        unavailableSourceCount:new Set((waitSource.unavailableSources??[]).filter(row=>row.employeeId===assessment.employeeId).map(row=>row.snapshotId)).size,
+        teamUnavailableSourceCount:new Set((waitSource.unavailableSources??[]).map(row=>row.snapshotId)).size,
         hours:bins.map((values,hour)=>({hour,count:values.length,medianMs:waitDistribution(values).medianMs})),
         evidence:[...intervals].sort((a,b)=>(b.durationMs??-1)-(a.durationMs??-1)||a.id.localeCompare(b.id)).slice(0,3).map(({id,startedAt,durationMs,parallel,start,end})=>({id,startedAt,durationMs,parallel,start,end}))},communication:{
       firstPrompts:{person:first(own,unknown),team:first(native,teamUnknown)},rework:withUnknown(own.rework(own.prompts),unknown),clarification:withUnknown(own.clarification,unknown),cleanSessions:own.cleanSessions,

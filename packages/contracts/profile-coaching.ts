@@ -13,7 +13,7 @@ export type ProfileCoaching={
   algorithmVersion:string;usageVersion:string;
   representatives:{best:CoachingExample|null;rework:CoachingExample|null};
   trend:{preset:AssessmentPreset;previous:CoachingWeek;current:CoachingWeek};
-  waiting:{waitVersion:string;summary:WaitReport['summary'];teamMedianMs:number|null;hours:{hour:number;count:number;medianMs:number|null}[];
+  waiting:{waitVersion:string;summary:WaitReport['summary'];teamMedianMs:number|null;unavailableSourceCount:number;teamUnavailableSourceCount:number;hours:{hour:number;count:number;medianMs:number|null}[];
     permissions:WaitReport['permissions'];evidence:Pick<ReplyWait,'id'|'startedAt'|'durationMs'|'parallel'|'start'|'end'>[]};
   communication:{
     firstPrompts:{person:{count:number;unknownFirst:number;elements:Elements};team:{count:number;unknownFirst:number;elements:Elements}};
