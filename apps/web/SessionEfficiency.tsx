@@ -32,18 +32,19 @@ function Distribution({rows,sessions,onSelect}: {rows:SessionEfficiencyPage['dis
 
 function Ratio({label,ratio}: {label:string;ratio:EfficiencyRatio}){return <div><dt>{label}</dt><dd>{number(ratio.value)}</dd><small>{number(ratio.numerator)} / {number(ratio.denominator)} Token</small></div>;}
 function SelectedSession({row,onClose}: {row:EfficiencySession;onClose:()=>void}){
+  const [chart,setChart]=useState(true);
   const timing=row.timing,known=timing?.segments.filter(s=>s.durationMs!==null&&s.durationMs>0)??[],total=known.reduce((n,s)=>n+s.durationMs!,0);
   return <section className="eff-card eff-selected" aria-label="选中会话"><header><div><h2>会话分段</h2><p>{row.employees.map(e=>e.employee).join('、')} · {sourceLabel(row.source)}</p></div><button onClick={onClose} aria-label="关闭会话分段">关闭</button></header>
     <p className="eff-id">{row.sourceSessionId}</p><a href={row.webPath}>阅读原始对话</a>
     <dl className="eff-ratios"><Ratio label="产效比" ratio={row.efficiency}/><Ratio label="代码产出" ratio={row.codeOutput}/><div><dt>等待占比</dt><dd>{timing?.waitFraction.value===null||!timing?'未知':number(timing.waitFraction.value*100)+'%'}</dd><small>{time(timing?.waitFraction.numerator??null)} / {time(timing?.waitFraction.denominator??null)}</small></div></dl>
-    {timing&&<><div className="eff-segment-bar" role="img" aria-label={`已确认分段：Agent 工作 ${time(timing.knownAgentMs)}，等待回复 ${time(timing.knownReplyMs)}`}>
+    {timing&&<><div className="usage-view-toggle eff-segment-toggle" role="group" aria-label="会话分段显示方式"><button aria-label="会话分段图表" aria-pressed={chart} onClick={()=>setChart(true)}>图表</button><button aria-label="会话分段表格" aria-pressed={!chart} onClick={()=>setChart(false)}>表格</button></div>{chart?<><div className="eff-segment-bar" role="img" aria-label={`已确认分段：Agent 工作 ${time(timing.knownAgentMs)}，等待回复 ${time(timing.knownReplyMs)}`}>
       {known.map((s,i)=><i key={i} data-kind={s.kind} style={{'--segment-width':`${s.durationMs!/total*100}%`} as CSSProperties}/>)}
     </div><div className="eff-legend"><span data-kind="agent">Agent 工作</span><span data-kind="reply">等待回复</span><span data-kind="permission">等待权限 · 未知</span></div>
       <ol className="eff-segments">{timing.segments.map((s,i)=><li key={i} data-kind={s.kind}><div><strong>{names[s.kind]}</strong><span>{time(s.durationMs)}</span></div>
         {(s.startedAt||s.endedAt)&&<p>{s.startedAt?new Date(s.startedAt).toLocaleString('zh-CN',{timeZone:'Asia/Shanghai',hour12:false}):'未知'} → {s.endedAt?new Date(s.endedAt).toLocaleString('zh-CN',{timeZone:'Asia/Shanghai',hour12:false}):'未知'}</p>}
         {s.reason&&<details><summary>来源边界</summary><p>{s.reason}</p></details>}
         <div className="eff-evidence-links">{s.evidence.map((e,j)=><a key={j} href={e.conversationPath??e.webPath}>原件 #{e.line}</a>)}</div>
-      </li>)}</ol></>}
+      </li>)}</ol></>:<div className="eff-table-scroll"><table className="eff-segment-table" aria-label="会话分段明细"><thead><tr><th>类型</th><th>开始时间</th><th>结束时间</th><th>时长</th><th>原件</th></tr></thead><tbody>{timing.segments.map((segment,index)=><tr key={index}><th scope="row">{names[segment.kind]}</th><td>{segment.startedAt?<time dateTime={segment.startedAt}>{new Date(segment.startedAt).toLocaleString('zh-CN',{timeZone:'Asia/Shanghai',hour12:false})}</time>:'未知'}</td><td>{segment.endedAt?<time dateTime={segment.endedAt}>{new Date(segment.endedAt).toLocaleString('zh-CN',{timeZone:'Asia/Shanghai',hour12:false})}</time>:'未知'}</td><td>{time(segment.durationMs)}</td><td><div className="eff-evidence-links">{segment.evidence.map((item,i)=><a key={i} href={item.conversationPath??item.webPath}>原件 #{item.line}</a>)}</div>{segment.reason&&<details><summary>来源边界</summary><p>{segment.reason}</p></details>}</td></tr>)}</tbody></table></div>}</>}
     <details><summary>任务类型与返工证据</summary><p>{row.correctionIds?.length?'含人工更正':'模型推断'} · {taskTypeLabels[row.taskType]} · 返工 {number(row.rework)}</p>{[...row.taskEvidence,...row.reworkEvidence].map((e,i)=><blockquote key={i}>{e.quote}<a href={e.webPath}>原句</a></blockquote>)}</details>
     <details><summary>固定输入版本</summary><p>等待 {timing?.waitVersion??'未知'}</p>{row.inputVersions.map(v=><p key={v.snapshotId}>{v.snapshotId} · {v.version}</p>)}</details>
   </section>;
