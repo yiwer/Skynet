@@ -11,16 +11,23 @@ const compact = (value: number) => value >= 1e6 ? `${Number((value / 1e6).toFixe
 const tokenUnknown = (row: MetricTotals, kind: 'Input' | 'Output') => row[kind === 'Input' ? 'inputTokens' : 'outputTokens'] === null;
 const tokens = (row: MetricTotals, kind: 'Input' | 'Output') => tokenUnknown(row, kind) ? row[`known${kind}Tokens`] ? `${number(row[`known${kind}Tokens`])}*` : '—' : number(row[`known${kind}Tokens`]);
 function TokenValue({ value, unknown, short = false }: { value: number; unknown: boolean; short?: boolean }) {
-  return <span title={unknown ? value ? '部分用量未上报' : '用量未上报' : undefined}>{unknown && !value ? '—' : short ? compact(value) : number(value)}{unknown && value > 0 && <sup className="usage-partial">*</sup>}</span>;
+  return <span title={unknown ? value ? '部分用量未上报' : '用量未上报' : undefined}>{unknown && !value ? '未知' : short ? compact(value) : number(value)}{unknown && value > 0 && <sup className="usage-partial">*</sup>}</span>;
 }
 const agents: Source[] = ['claude-code-cli', 'codex-cli', 'codex-desktop'];
 const sourceSeries = (source: Source) => agents.indexOf(source) + 1;
-function Spark({ values }: { values: number[] }) {
-  if (!values.length) return null;
-  const maximum = Math.max(1, ...values), points = values.map((value, index) => `${4 + index / Math.max(1, values.length - 1) * 112},${24 - value / maximum * 18}`);
-  return <svg className="usage-spark" viewBox="0 0 120 30" aria-hidden="true"><polyline points={points.join(' ')} /><circle cx={values.length > 1 ? 116 : 4} cy={24 - values.at(-1)! / maximum * 18} r="3" /></svg>;
+const trendValue = (day: MetricsPage['daily'][number], kind: 'inputTokens' | 'outputTokens') => day.tokenTrend ? day.tokenTrend[kind] : day[kind];
+function Spark({ values }: { values: (number | null)[] }) {
+  if (!values.some(value => value !== null)) return null;
+  const maximum = Math.max(1, ...values.filter((value): value is number => value !== null));
+  const segments: string[][] = []; let segment: string[] = [];
+  values.forEach((value, index) => {
+    if (value === null) { if (segment.length) segments.push(segment); segment = []; }
+    else segment.push(`${4 + index / Math.max(1, values.length - 1) * 112},${24 - value / maximum * 18}`);
+  });
+  if (segment.length) segments.push(segment);
+  return <svg className="usage-spark" viewBox="0 0 120 30" aria-hidden="true">{segments.map((points, index) => <g key={index}><polyline points={points.join(' ')} />{points.map(point => { const [cx, cy] = point.split(','); return <circle key={point} cx={cx} cy={cy} r="2" />; })}</g>)}</svg>;
 }
-function Stat({ label, value, children, trend }: { label: string; value: ReactNode; children?: ReactNode; trend?: number[] }) {
+function Stat({ label, value, children, trend }: { label: string; value: ReactNode; children?: ReactNode; trend?: (number | null)[] }) {
   return <div className="usage-stat"><dt>{label}</dt><dd>{value}</dd><div className="usage-stat-sub">{children}</div>{trend && <Spark values={trend} />}</div>;
 }
 function ViewToggle({ chart, setChart, daily = false }: { chart: boolean; setChart: (value: boolean) => void; daily?: boolean }) {
@@ -40,6 +47,7 @@ export function UsageMetrics({ request }: Props) {
   const [employees, setEmployees] = useState<Array<{ employeeId: string; employee: string }>>([]);
   const [projects, setProjects] = useState<string[]>([]); const [customProject, setCustomProject] = useState(false); const [advanced, setAdvanced] = useState(false);
   const [busy, setBusy] = useState(false); const [error, setError] = useState(''); const [retry, setRetry] = useState(0);
+  const [dayTooltip, setDayTooltip] = useState(''); const [agentTooltip, setAgentTooltip] = useState('');
   const [chart, setChart] = useState(true); const [peopleChart, setPeopleChart] = useState(true);
   const [chartError, setChartError] = useState(''); const [chartRetry, setChartRetry] = useState(0);
   const [exporting, setExporting] = useState(false); const [message, setMessage] = useState('');
@@ -68,7 +76,7 @@ export function UsageMetrics({ request }: Props) {
   useEffect(() => { if (complete) setProjects(previous => [...new Set([...previous, ...complete.sessions.map(session => session.project).filter(Boolean)])].sort((a, b) => a.localeCompare(b, 'zh-CN'))); }, [complete?.version]);
   function selectScope(next: MetricsQuery) {
     setDraft(next);
-    if (next.period !== 'custom' || next.from && next.to && next.from <= next.to) setQuery({ ...next, offset: 0, version: undefined });
+    setQuery({ ...next, offset: 0, version: undefined });
   }
   function apply(event: FormEvent) { event.preventDefault(); setQuery({ ...draft, offset: 0, version: undefined }); }
   async function recompute() {
@@ -96,18 +104,17 @@ export function UsageMetrics({ request }: Props) {
     const rows = allSessions?.filter(session => session.employeeId === person.employeeId && session.source === source) ?? [];
     return { source, input: rows.reduce((sum, session) => sum + session.knownInputTokens, 0), unknown: rows.some(session => session.inputTokens === null) };
   }) })) ?? [];
-  const hasInput = page && (page.totals.knownInputTokens > 0 || page.totals.inputTokens !== null);
-  const hasOutput = page && (page.totals.knownOutputTokens > 0 || page.totals.outputTokens !== null);
+  const hasInput = page && (page.sessions.length > 0 || page.totals.knownInputTokens > 0);
+  const hasOutput = page && (page.sessions.length > 0 || page.totals.knownOutputTokens > 0);
   const hasUsage = page && page.employees.length > 0 && (page.totals.sessions > 0 || page.totals.userTurns > 0 || page.totals.toolCalls > 0 || hasInput || hasOutput);
   const employeeMaximum = Math.max(1, ...people.map(person => person.knownInputTokens));
-  const dailyMaximum = Math.max(1, ...page?.daily.map(day => day.knownInputTokens + day.knownOutputTokens) ?? []);
+  const dailyMaximum = Math.max(1, ...page?.daily.map(day => (trendValue(day, 'inputTokens') ?? 0) + (trendValue(day, 'outputTokens') ?? 0)) ?? []);
   const dailyWidth = Math.max(600, (page?.daily.length ?? 0) * 44);
   return <section className="usage-metrics workspace-page" aria-label="用量指标" aria-busy={busy}>
     <div className="usage-page-head"><h1 aria-label="用量指标">用量与产出</h1>{page && <div className="usage-export-actions"><button disabled={busy} onClick={recompute}>从原件重算</button><button disabled={busy || exporting} onClick={download}>{exporting ? '正在导出…' : '导出当前版本'}</button></div>}</div>
     <form className="usage-filters" onSubmit={apply} aria-label="用量筛选"><div className="usage-filter-row">
       <div className="usage-periods" role="group" aria-label="时间范围">
         {([['this-week', '本周'], ['last-week', '上周'], ['since-enrollment', '接入至今']] as const).map(([period, label]) => <button key={period} type="button" aria-pressed={draft.period === period} onClick={() => selectScope({ ...draft, period })}>{label}</button>)}
-        <button type="button" aria-pressed={draft.period === 'custom'} onClick={() => setDraft({ ...draft, period: 'custom', from: draft.from ?? page?.scope.from, to: draft.to ?? page?.scope.to })}>自定义</button>
       </div>
       <label>员工<select value={draft.employeeId ?? ''} onChange={event => selectScope({ ...draft, employeeId: event.target.value || undefined })}>
         <option value="">全部员工</option>{employees.map(person => <option value={person.employeeId} key={person.employeeId}>{person.employee}</option>)}</select></label>
@@ -119,12 +126,10 @@ export function UsageMetrics({ request }: Props) {
         setCustomProject(false); selectScope({ ...draft, project: value === 'all' ? undefined : value === 'unclassified' ? '' : value.slice(8) });
       }}><option value="all">全部项目</option>{projects.map(project => <option value={`project:${project}`} key={project}>{project}</option>)}{draft.project === '' && <option value="unclassified">未归类项目</option>}<option value="custom">自定义路径…</option></select></label>
       </div>
-      {draft.period === 'custom' && <div className="usage-custom-dates"><label>开始日期<input type="date" value={draft.from ?? ''} max={draft.to} required onChange={event => setDraft({ ...draft, from: event.target.value })} /></label>
-        <label>结束日期<input type="date" value={draft.to ?? ''} min={draft.from} required onChange={event => setDraft({ ...draft, to: event.target.value })} /></label><button className="usage-apply" disabled={busy}>应用筛选</button></div>}
       <div className="usage-filter-meta"><button className="usage-advanced-toggle" type="button" aria-expanded={advanced} aria-controls="usage-advanced-filters" onClick={() => setAdvanced(value => !value)}>更多筛选{draft.project === '' ? ' · 未归类' : ''}</button>
-        <p>{page && <>{page.scope.from} — {page.scope.to} · 北京时间 · 版本 {page.revision}</>}</p></div>
+        <p>{page && <>{page.scope.from} — {page.scope.to} · 北京时间 · 数据截至 {new Date(page.dataAsOf).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false })}</>}</p></div>
       {advanced && <div className="usage-advanced-filters" id="usage-advanced-filters"><label className="usage-project-check"><input type="checkbox" checked={draft.project === ''} onChange={event => { setCustomProject(false); selectScope({ ...draft, project: event.target.checked ? '' : undefined }); }} />仅未归类项目</label>
-        {customProject && <div className="usage-custom-project"><label>项目路径<input value={draft.project ?? ''} maxLength={1024} placeholder="输入完整项目路径" onChange={event => setDraft({ ...draft, project: event.target.value || undefined })} /></label>{draft.period !== 'custom' && <button className="usage-apply" disabled={busy}>应用筛选</button>}</div>}
+        {customProject && <div className="usage-custom-project"><label>项目路径<input value={draft.project ?? ''} maxLength={1024} placeholder="输入完整项目路径" onChange={event => setDraft({ ...draft, project: event.target.value || undefined })} /></label><button className="usage-apply" disabled={busy}>应用筛选</button></div>}
       </div>}
     </form>
     <div className="workspace-scroll">
@@ -134,8 +139,8 @@ export function UsageMetrics({ request }: Props) {
     {page && !hasUsage && <p className="usage-empty">暂无用量</p>}
     {page && hasUsage && <>
       <dl className="usage-stats">
-        {hasInput && <Stat label="输入 Token" value={<TokenValue value={page.totals.knownInputTokens} unknown={tokenUnknown(page.totals, 'Input')} short />} trend={page.daily.map(day => day.knownInputTokens)} />}
-        {hasOutput && <Stat label="输出 Token" value={<TokenValue value={page.totals.knownOutputTokens} unknown={tokenUnknown(page.totals, 'Output')} short />} trend={page.daily.map(day => day.knownOutputTokens)} />}
+        {hasInput && <Stat label="输入 Token" value={<TokenValue value={page.totals.knownInputTokens} unknown={tokenUnknown(page.totals, 'Input')} short />} trend={page.daily.map(day => trendValue(day, 'inputTokens'))}>{page.totals.unknownInputSessions > 0 && <>未知 {page.totals.unknownInputSessions} 个会话</>}</Stat>}
+        {hasOutput && <Stat label="输出 Token" value={<TokenValue value={page.totals.knownOutputTokens} unknown={tokenUnknown(page.totals, 'Output')} short />} trend={page.daily.map(day => trendValue(day, 'outputTokens'))}>{page.totals.unknownOutputSessions > 0 && <>未知 {page.totals.unknownOutputSessions} 个会话</>}</Stat>}
         <Stat label="会话" value={number(page.totals.sessions)} />
         <Stat label="用户轮次" value={number(page.totals.userTurns)} />
         <Stat label="工具调用" value={number(page.totals.toolCalls)} />
@@ -145,17 +150,20 @@ export function UsageMetrics({ request }: Props) {
           {!allSessions ? chartError ? <div className="usage-error" role="alert"><p>{chartError}</p><button onClick={() => setChartRetry(value => value + 1)}>重试员工图表</button></div> : <p className="usage-status" role="status">正在读取当前版本的完整用量…</p>
             : peopleChart ? <div className="usage-horizontal-bars" role="list" aria-label="各员工按 Agent 归集的已知输入 Token">
               {people.map((person, index) => <div className="usage-bar-row" role="listitem" key={person.employeeId}><Person name={person.employee} index={index} /><div className="usage-bar-plot"><div className="usage-bar-track" style={{ '--bar-width': `${person.knownInputTokens / employeeMaximum * 80}%` } as CSSProperties}>
-                {person.agents.filter(agent => agent.input > 0).map(agent => <span className="usage-bar-segment" key={agent.source} data-series={sourceSeries(agent.source)} style={{ flexGrow: agent.input }} title={`${person.employee} · ${sourceLabel(agent.source)} · ${number(agent.input)}${agent.unknown ? '（部分）' : ''}`} />)}</div><span className="usage-bar-value"><TokenValue value={person.knownInputTokens} unknown={tokenUnknown(person, 'Input')} short /></span></div></div>)}
+                {person.agents.filter(agent => agent.input > 0).map(agent => <span className="usage-bar-segment" key={agent.source} data-series={sourceSeries(agent.source)} style={{ flexGrow: agent.input }} tabIndex={0} role="img" onFocus={event => setAgentTooltip(event.currentTarget.getAttribute('aria-label')!)} onBlur={() => setAgentTooltip('')} onMouseEnter={event => setAgentTooltip(event.currentTarget.getAttribute('aria-label')!)} onMouseLeave={() => setAgentTooltip('')} onKeyDown={event => { if (event.key === 'Escape') setAgentTooltip(''); }} aria-label={`${person.employee} · ${sourceLabel(agent.source)} · ${number(agent.input)}${agent.unknown ? '（部分）' : ''}`} />)}</div><span className="usage-bar-value"><TokenValue value={person.knownInputTokens} unknown={tokenUnknown(person, 'Input')} short /></span></div></div>)}
               {people.length > 0 && <div className="usage-bar-axis" aria-hidden="true"><div /><div>{[0, 0.25, 0.5, 0.75, 1].map(tick => <span key={tick} style={{ left: `${tick * 80}%` }}>{compact(employeeMaximum * tick)}</span>)}</div></div>}
             </div> : <div className="usage-table-scroll"><table><caption>员工按 Agent 的已知输入 Token</caption><thead><tr><th>员工</th>{displayedAgents.map(source => <th key={source}>{sourceLabel(source)}</th>)}<th>合计</th></tr></thead><tbody>{people.map(person => <tr key={person.employeeId}><th scope="row">{person.employee}</th>{person.agents.map(agent => <td key={agent.source}><TokenValue value={agent.input} unknown={agent.unknown} /></td>)}<td><TokenValue value={person.knownInputTokens} unknown={tokenUnknown(person, 'Input')} /></td></tr>)}</tbody></table></div>}
+          {agentTooltip && peopleChart && <p className="usage-chart-tooltip" role="tooltip">{agentTooltip}</p>}
           <ul className="usage-legend">{displayedAgents.map(source => <li key={source}><i data-series={sourceSeries(source)} />{sourceLabel(source)}</li>)}</ul>
         </section>}
       {(hasInput || hasOutput) && <section className="usage-figure" aria-label="每日用量"><div className="usage-figure-head"><div><h2>每日 Token</h2></div><ViewToggle chart={chart} setChart={setChart} daily /></div>
-        {chart ? <><div className="usage-daily-scroll"><svg className="usage-daily-chart" viewBox={`0 0 ${dailyWidth} 200`} style={{ minWidth: dailyWidth }} role="img" aria-label="每日已知输入与输出 Token；未知会话在日期上方以短横标记">
+        {chart ? <><div className="usage-daily-scroll"><svg className="usage-daily-chart" viewBox={`0 0 ${dailyWidth} 200`} style={{ minWidth: dailyWidth }} role="group" aria-label="每日 Token 趋势">
           <line className="usage-chart-grid" x1="24" y1="24" x2={dailyWidth - 8} y2="24" /><line className="usage-chart-grid" x1="24" y1="94" x2={dailyWidth - 8} y2="94" /><line className="usage-chart-axis" x1="24" y1="164" x2={dailyWidth - 8} y2="164" />
-          {page.daily.map((day, index) => { const unit = (dailyWidth - 40) / page.daily.length, x = 24 + unit * index + unit * 0.25, width = Math.max(4, unit * 0.5), input = day.knownInputTokens / dailyMaximum * 128, output = day.knownOutputTokens / dailyMaximum * 128;
-            return <g key={day.date}><title>{day.date}：输入 {tokens(day, 'Input')}；输出 {tokens(day, 'Output')}</title><rect data-series="1" x={x} y={164 - input} width={width} height={input} /><rect data-series="3" x={x} y={164 - input - output} width={width} height={output} />{day.unknownTokenSessions > 0 && <rect className="usage-daily-unknown" x={x} y="8" width={width} height="3" />}<text x={x + width / 2} y="186" textAnchor="middle">{day.date.slice(5)}</text></g>;
-          })}</svg></div><ul className="usage-legend"><li><i data-series="1" />输入 Token</li><li><i data-series="3" />输出 Token</li>{page.daily.some(day => day.unknownTokenSessions > 0) && <li title="当日有未上报用量"><i className="usage-legend-unknown" /><span aria-label="有未上报用量">*</span></li>}</ul></>
+          {page.daily.map((day, index) => { const unit = (dailyWidth - 40) / page.daily.length, x = 24 + unit * index + unit * 0.25, width = Math.max(4, unit * 0.5), input = (trendValue(day, 'inputTokens') ?? 0) / dailyMaximum * 128, output = (trendValue(day, 'outputTokens') ?? 0) / dailyMaximum * 128;
+            const excluded = day.tokenTrend?.excludedSessions ?? day.unknownTokenSessions;
+            const label = `${day.date}：输入 ${trendValue(day, 'inputTokens') === null ? '未知' : number(trendValue(day, 'inputTokens')!)}；输出 ${trendValue(day, 'outputTokens') === null ? '未知' : number(trendValue(day, 'outputTokens')!)}${excluded ? `；${excluded} 个未知会话未计入趋势` : ''}`;
+            return <g key={day.date} tabIndex={0} role="img" aria-label={label} onFocus={() => setDayTooltip(label)} onBlur={() => setDayTooltip('')} onMouseEnter={() => setDayTooltip(label)} onMouseLeave={() => setDayTooltip('')} onKeyDown={event => { if (event.key === 'Escape') setDayTooltip(''); }}><rect data-series="1" x={x} y={164 - input} width={width} height={input} /><rect data-series="3" x={x} y={164 - input - output} width={width} height={output} />{excluded > 0 && <rect className="usage-daily-unknown" x={x} y="8" width={width} height="3" />}<text x={x + width / 2} y="186" textAnchor="middle">{day.date.slice(5)}</text></g>;
+          })}</svg></div>{dayTooltip && <p className="usage-chart-tooltip" role="tooltip">{dayTooltip}</p>}<ul className="usage-legend"><li><i data-series="1" />输入 Token</li><li><i data-series="3" />输出 Token</li>{page.daily.some(day => day.unknownTokenSessions > 0) && <li title="当日有未上报用量"><i className="usage-legend-unknown" /><span>未知会话</span></li>}</ul></>
           : <div className="usage-table-scroll"><table><caption>按来源日期归期的已知用量与未知会话</caption><thead><tr><th>日期</th><th>会话</th><th>用户轮次</th><th>输入 Token</th><th>输出 Token</th></tr></thead><tbody>{page.daily.map(day => <tr key={day.date}><th scope="row">{day.date}</th><td>{day.sessions}</td><td>{day.userTurns}</td><td><TokenValue value={day.knownInputTokens} unknown={tokenUnknown(day, 'Input')} /></td><td><TokenValue value={day.knownOutputTokens} unknown={tokenUnknown(day, 'Output')} /></td></tr>)}</tbody></table></div>}
       </section>}
       </div>}
@@ -165,6 +173,7 @@ export function UsageMetrics({ request }: Props) {
         <div className="usage-pagination"><button disabled={busy || query.offset === 0} onClick={() => setQuery({ ...query, version: page.version, offset: Math.max(0, query.offset - 20) })}>上一页会话</button><span>版本 {page.revision} · 第 {Math.floor(query.offset / 20) + 1} 页</span><button disabled={busy || page.nextOffset === null} onClick={() => setQuery({ ...query, version: page.version, offset: page.nextOffset! })}>下一页会话</button></div>
       </section>
     </>}
+    {page && <details className="usage-data-status"><summary>指标口径 · 版本 {page.revision}</summary><p>{page.definition}</p><p>{page.catalogVersion}</p></details>}
     {page && !page.sourceInputsComplete && page.unknownReasons.length > 0 && <details className="usage-data-status"><summary>数据缺口 · {page.unknownReasons.length}</summary><ul>{page.unknownReasons.map(reason => <li key={reason}>{reason}</li>)}</ul></details>}
     </div>
   </section>;

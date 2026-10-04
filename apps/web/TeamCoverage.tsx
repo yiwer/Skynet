@@ -28,10 +28,16 @@ function CoverageGlyph({ cell, kind }: { cell?: CoverageCell; kind?: 'observed' 
 }
 
 function TokenTrend({ days }: { days: MetricsPage['daily'] }) {
-  if (!days.length) return null;
-  const maximum = Math.max(1, ...days.map(day => day.knownInputTokens));
-  const points = days.map((day, index) => `${4 + index / Math.max(1, days.length - 1) * 132},${29 - day.knownInputTokens / maximum * 24}`).join(' ');
-  return <svg className="coverage-token-trend" viewBox="0 0 140 34" role="img" aria-label={`每日已知 Token 输入：${days.map(day => `${day.date} ${day.knownInputTokens}${day.unknownInputSessions ? `，${day.unknownInputSessions}个会话未知` : ''}`).join('；')}`}><line x1="4" y1="29" x2="136" y2="29" /><polyline points={points} /></svg>;
+  const values = days.map(day => day.tokenTrend ? day.tokenTrend.inputTokens : day.inputTokens);
+  if (!values.some(value => value !== null)) return null;
+  const maximum = Math.max(1, ...values.filter((value): value is number => value !== null));
+  const segments: string[][] = []; let segment: string[] = [];
+  values.forEach((value, index) => {
+    if (value === null) { if (segment.length) segments.push(segment); segment = []; }
+    else segment.push(`${4 + index / Math.max(1, values.length - 1) * 132},${29 - value / maximum * 24}`);
+  });
+  if (segment.length) segments.push(segment);
+  return <svg className="coverage-token-trend" viewBox="0 0 140 34" role="img" aria-label={`每日 Token 输入：${days.map((day, index) => `${day.date} ${values[index] ?? '未知'}`).join('；')}`}><line x1="4" y1="29" x2="136" y2="29" />{segments.map((points, index) => <polyline key={index} points={points.join(' ')} />)}</svg>;
 }
 
 export function TeamCoverage({ request, onEvidence, currentEmployeeId }: { request: (path: string, signal?: AbortSignal) => Promise<Response>; onEvidence: () => void; currentEmployeeId: string }) {
@@ -49,7 +55,7 @@ export function TeamCoverage({ request, onEvidence, currentEmployeeId }: { reque
     setOverview(undefined); setOverviewError('');
     if (!from || !to) return;
     const abort = new AbortController();
-    void request(`/api/metrics?${new URLSearchParams({ period: 'custom', from, to })}`, abort.signal).then(response => response.json()).then((page: MetricsPage) => {
+    void request(`/api/team-coverage/metrics?${new URLSearchParams({ date: to, view: 'week' })}`, abort.signal).then(response => response.json()).then((page: MetricsPage) => {
       if (!abort.signal.aborted) setOverview(page);
     }).catch(failure => { if (!abort.signal.aborted) setOverviewError(failure.message); });
     return () => abort.abort();
@@ -58,7 +64,7 @@ export function TeamCoverage({ request, onEvidence, currentEmployeeId }: { reque
     setDayMetrics(undefined); setDayMetricsError('');
     if (!selection) return;
     const abort = new AbortController();
-    void request(`/api/metrics?${new URLSearchParams({ period: 'custom', from: selection.date, to: selection.date })}`, abort.signal).then(response => response.json()).then((page: MetricsPage) => {
+    void request(`/api/team-coverage/metrics?${new URLSearchParams({ date: selection.date, view: 'day' })}`, abort.signal).then(response => response.json()).then((page: MetricsPage) => {
       if (!abort.signal.aborted) setDayMetrics(page);
     }).catch(failure => { if (!abort.signal.aborted) setDayMetricsError(failure.message); });
     return () => abort.abort();

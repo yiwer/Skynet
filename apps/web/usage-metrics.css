@@ -76,6 +76,8 @@
 .usage-bar-plot { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; min-width: 0; }
 .usage-bar-track { display: flex; flex-shrink: 0; gap: 2px; width: var(--bar-width); height: 16px; }
 .usage-bar-segment { min-width: 2px; flex-basis: 0; background: var(--series-color); }
+.usage-metrics [tabindex="0"]:focus-visible { outline: 2px solid var(--color-focus); outline-offset: 3px; }
+.usage-metrics .usage-chart-tooltip { margin-top: 8px; padding: 8px 12px; border: 1px solid var(--color-rule); border-radius: var(--radius-sm); background: var(--color-paper-2); color: var(--color-ink); font-size: var(--text-xs); overflow-wrap: anywhere; }
 .usage-bar-segment:last-child { border-radius: 0 4px 4px 0; }
 .usage-bar-value { font-size: var(--text-sm); white-space: nowrap; font-variant-numeric: tabular-nums; }
 .usage-bar-axis > div:last-child { position: relative; height: 20px; border-top: 1px solid var(--viz-grid); }
