@@ -40,6 +40,7 @@ import { migrateDeliveryReceipts, saveDeliveryReceipt } from './delivery-receipt
 import { migrateAssembly, assemblyService, processingService, recordAssemblyRecipe } from './assembly.js';
 import { migrateWaits, waitsService } from './waits.js';
 import { migrateAssessments, assessmentService } from './assessment.js';
+import { migrateCapabilityPeople, capabilityPeopleService } from './capability-people.js';
 import { migrateWaitReports, waitReportService } from './wait-report.js';
 import { migrateActivity,activityService } from './activity.js';
 
@@ -61,6 +62,7 @@ export async function createApp(options: { db: Database; rawDirectory: string; w
   await migrateAssembly(db);
   await migrateWaits(db);
   await migrateAssessments(db);
+  await migrateCapabilityPeople(db);
   await migrateWaitReports(db);
   await migrateActivity(db);
   const raw = new RawStore(options.rawDirectory);
@@ -288,6 +290,13 @@ export async function createApp(options: { db: Database; rawDirectory: string; w
     return reply.header('Content-Disposition', `attachment; filename="skynet-usage-output-${data.version}.json"`).type('application/json').send(data);
   });
   const assessments = assessmentService(db, usage, insights, waits, options.reportClock);
+  const people = capabilityPeopleService(db, assessments, options.reportClock);
+  app.get('/api/capability-people', { onRequest: readerGuard }, request => people.read(request.query));
+  app.post('/api/capability-people/recompute', { onRequest: readerGuard }, request => people.recompute(request.body));
+  app.get('/api/capability-people/export', { onRequest: readerGuard }, async (request, reply) => {
+    const value = await people.export(request.query);
+    return reply.header('Content-Disposition', `attachment; filename="people-${value.version}.json"`).send(value);
+  });
   app.get('/api/assessment-models/:version', { onRequest: readerGuard }, request => assessments.model(hashSchema.parse((request.params as { version: string }).version)));
   app.get('/api/assessment-baselines/:version', { onRequest: readerGuard }, request => assessments.baseline(hashSchema.parse((request.params as { version: string }).version)));
   app.get('/api/assessments/:id', { onRequest: readerGuard }, request => assessments.read(z.uuid().parse((request.params as { id: string }).id), request.query));
