@@ -18,4 +18,23 @@ Its session-view INSERT statement ran 47 times, taking 5,693.7 / 5,378.3 ms. The
 
 The external `54-insight-persistence-cost-probe.mjs` accepts a worktree and evidence prefix. It records returned rows separately from affected rows and measures supplied parameter byte lengths without recording values. It preserves the strict 3,000ms/1,000ms single-sample assertions after functional evidence and cleanup. A successful single sample still cannot sign off P95. The old observer and outputs are preserved.
 
+## Measured candidate and limits
+
+The v2 observer compared clean accepted `1d2d926` with clean candidate `d6ea0da`, each using its own restored copy of the same public-upload source bundle. Both public profile reads returned HTTP 200 with 32,542 bytes; repeated and fixed reading pages were equal, with 100 selected employee sessions, 2,000 prompts and 1,900 known waits. The diagnostic completed and cleaned up before its unchanged timing assertions failed.
+
+| Measurement | Accepted first / subsequent | Candidate first / subsequent |
+| --- | --- | --- |
+| Complete profile elapsed time | 33,514 / 25,410 ms | 27,065 / 18,135 ms |
+| Session-view INSERT calls | 47 / 47 | 10 / 0 |
+| Session-view INSERT parameter bytes | 304,265,321 / 304,265,321 | 34,045,893 / 0 |
+| Session-view INSERT affected rows | 1,000 / 0 | 1,000 / 0 |
+| Session-view INSERT returned rows | 0 / 0 | 0 / 0 |
+| Fresh raw reads | 12,705 / 12,705 | 12,705 / 12,705 |
+
+The candidate's seven version-key queries supplied 301,842 parameter bytes per read. Fact INSERT remained ten calls and 1,000 affected rows on the first read, with none subsequently. Parameter byte totals describe supplied values, not PostgreSQL wire traffic. The measurements demonstrate that subsequent view persistence sends no full payload while new views still persist. They do not isolate all causes of total elapsed-time variation.
+
+The 3s/1s performance gates remain **failed**. These are instrumented single samples on a shared host, not the required independent first-read and subsequent-read P95 distribution. This slice is a partial optimization only.
+
+Candidate build and the three selected public regressions passed. The same-database old/new script passed all five stages (before Analysis, complete Analysis, correction, raw outage, recovery), full recomputation and historical reads after restart. The new semantic regression also passed on the accepted baseline; it is not mislabeled as a functional RED. Source data, fact strategy, public limits, and transaction retry budgets remain unchanged.
+
 Final candidate, exact public results, differential hashes and measured costs are recorded in the external `54-insight-persistence-author-verification.json` receipt. Independent review and deployment are separate steps.
