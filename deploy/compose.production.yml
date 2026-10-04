@@ -9,6 +9,8 @@ x-logging: &logging
 services:
   db:
     image: ${SKYNET_POSTGRES_IMAGE:?persist the PostgreSQL image digest}
+    # Concurrent PostgreSQL parallel queries need more than Docker's 64 MiB default.
+    shm_size: 256mb
     environment:
       POSTGRES_DB: skynet
       POSTGRES_USER: skynet
