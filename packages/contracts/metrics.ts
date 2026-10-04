@@ -22,6 +22,7 @@ export type MetricTotals = { sessions: number; userTurns: number; toolCalls: num
   inputTokens: number | null; outputTokens: number | null; knownInputTokens: number; knownOutputTokens: number;
   unknownTokenSessions: number; unknownInputSessions: number; unknownOutputSessions: number };
 export type MetricTokenTrend = { inputTokens: number | null; outputTokens: number | null; includedSessions: number; excludedSessions: number };
+export type MetricDailyPoint = { date: string; activeSessions: number } & MetricTokenTrend;
 export type SessionMetrics = MetricTotals & { sessionId: string; employeeId: string; employee: string; source: Source;
   project: string; sourceSessionId: string; snapshotId: string; snapshotIds: string[]; webPath: string; dates: string[];
   sourceInputsComplete: boolean; unknownReasons: string[] };
@@ -30,6 +31,7 @@ export type MetricCatalog = { version: string; timeZone: 'Asia/Shanghai'; defini
 export type MetricsPage = { version: string; revision: number; scope: MetricsScope; dataAsOf: string; createdAt: string;
   totals: MetricTotals; sessions: SessionMetrics[]; nextOffset: number | null;
   daily: ({ date: string; tokenTrend?: MetricTokenTrend } & MetricTotals)[];
+  employeeDaily?: { employeeId: string; days: MetricDailyPoint[] }[];
   employees: ({ employeeId: string; employee: string } & MetricTotals)[];
   sources: ({ source: Source } & MetricTotals)[];
   catalogVersion: string; definition: string; sourceInputsComplete: boolean; unknownReasons: string[] };

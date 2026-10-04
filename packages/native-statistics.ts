@@ -1,8 +1,8 @@
 import { createHash } from 'node:crypto';
-import type { Source } from './contracts/archive.js';
+import type { Manifest, Source } from './contracts/archive.js';
 import { sourceTimestamp } from './contracts/archive.js';
 
-export const statisticsExtractorVersion = 'native-recorded-statistics-1';
+export const statisticsExtractorVersion = 'native-recorded-statistics-2';
 export type TokenComponents = { input: number | null; cachedInput: number | null; cacheWriteInput: number | null;
   output: number | null; reasoningOutput: number | null; total: number | null };
 export type NativeUsage = { key: string; line: number; timestamp: string | null; value: TokenComponents | null };
@@ -14,12 +14,30 @@ const path = (value: unknown): value is string => typeof value === 'string' && v
 
 // Auxiliary rows do not become business EvidenceLine events. Invalid UTF-8 is
 // rejected rather than inventing replacement characters as verbatim evidence.
-export function nativeStatistics(bytes: Buffer, source: Source, version: string) {
+export function codexInitialBaseline(bytes: Buffer, manifest: Manifest): boolean {
+  if (manifest.source !== 'codex-cli' || manifest.sourceVersion !== '0.160.0' || !manifest.enrolledAt || manifest.restoredFrom) return false;
+  const capture = manifest.capture;
+  if (capture && (capture.gaps.length || capture.lineage.length || capture.compacted || capture.partialLine || ['rewrite', 'truncate'].includes(capture.change))) return false;
+  try {
+    const lines = new TextDecoder('utf-8', { fatal: true }).decode(bytes).split('\n');
+    if (lines.pop() !== '') return false;
+    const rows = lines.filter(line => line.trim()).map(line => JSON.parse(line));
+    const meta = rows[0]?.payload;
+    return rows[0]?.type === 'session_meta' && rows.filter(row => row.type === 'session_meta').length === 1
+      && meta?.id === manifest.sourceSessionId && meta?.cli_version === manifest.sourceVersion
+      && sourceTimestamp(meta.timestamp) !== null && Date.parse(meta.timestamp) >= Date.parse(manifest.enrolledAt)
+      && !['forked_from_id', 'forked_from_ordinal_exclusive', 'parent_thread_id', 'history_base', 'subagent_history_start_ordinal'].some(key => meta[key] != null)
+      && rows.every(row => row.type !== 'compacted' && !(row.type === 'event_msg' && ['context_compacted', 'thread_rolled_back'].includes(row.payload?.type)));
+  } catch { return false; }
+}
+
+export function nativeStatistics(bytes: Buffer, source: Source, version: string, options: { codexInitialBaseline?: boolean } = {}) {
   const text = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
   const lines = text.split('\n'); const complete = !lines.pop();
   const usage: NativeUsage[] = []; const files: NativeFile[] = [];
-  const supported = source === 'claude-code-cli' ? version === '2.1.281' : source === 'codex-cli' && version === '0.157.1';
+  const supported = source === 'claude-code-cli' ? version === '2.1.281' : source === 'codex-cli' && ['0.157.1', '0.160.0'].includes(version);
   let prior: TokenComponents | null = null;
+  let observed = false;
   const messages = new Map<string, NativeUsage>();
   for (const [index, raw] of lines.entries()) {
     if (!raw.trim()) continue;
@@ -34,6 +52,10 @@ export function nativeStatistics(bytes: Buffer, source: Source, version: string)
       const valid = supported && required.every(key => current[key] !== null)
         && current.cachedInput! <= current.input! && current.reasoningOutput! <= current.output!
         && current.input! + current.output! === current.total!;
+      // Only a complete, newly-created, post-enrollment native history may
+      // establish the protocol's default zero. A reset never reuses this proof.
+      if (!observed && valid && options.codexInitialBaseline) prior = { input: 0, cachedInput: 0, cacheWriteInput: 0, output: 0, reasoningOutput: 0, total: 0 };
+      observed = true;
       // Repeated cumulative observations are not new usage. A reset, inconsistent
       // counters or missing predecessor has no fabricated zero baseline.
       if (valid && prior && required.every(key => current[key] === prior![key])) continue;
