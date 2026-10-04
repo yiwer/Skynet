@@ -56,5 +56,7 @@ export function concludeAssessment(dims: CapabilityAssessment['dims'], sample: C
   return { index, margin: sample.sessions ? Math.round(assessmentModel.marginNumerator / Math.sqrt(sample.sessions)) : null,
     confidence: (['低', '中', '高'] as const)[confidence - 1]!,
     level: (confidence === 1 || index === null ? '待定' : assessmentModel.levels.find(level => index >= level.minimum)!.label) as CapabilityAssessment['level'],
-    strengths, priorities, tips, reason: !sample.sessions ? '暂无会话' : `${low.length} 个维度低于 60 分${strengths.length ? ` · ${strengths.map(key => dims[key].label).join('、')}为强项` : ''}` };
+    strengths, priorities, tips, reason: !sample.sessions ? '暂无会话' : confidence === 1
+      ? [!enough(assessmentModel.confidence.medium) ? `样本不足（${sample.sessions} 会话、${sample.prompts} 条提示词）` : null, issues.length ? '采集覆盖不完整' : null].filter(Boolean).join('；')
+      : index === null ? '暂无可计分指标' : `${low.length} 个维度低于 60 分${strengths.length ? ` · ${strengths.map(key => dims[key].label).join('、')}为强项` : ''}` };
 }
