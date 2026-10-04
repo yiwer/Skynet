@@ -9,7 +9,10 @@ import { analysisQueue } from '../apps/analysis/queue.js';
 import { executeAnalysis } from '../apps/analysis/execute.js';
 
 export async function assessmentFixture() {
-  const base = new Date(Date.now() + 86400000); while ([0,6].includes(base.getUTCDay())) base.setUTCDate(base.getUTCDate() + 1);
+  // Keep the default long-wait samples within one Beijing business date;
+  // tests of calendar boundaries override base explicitly.
+  const base = new Date(Date.now() + 86400000); base.setUTCHours(2, 0, 0, 0);
+  while ([0,6].includes(base.getUTCDay())) base.setUTCDate(base.getUTCDate() + 1);
   const now = new Date(Date.now() + 28 * 86400000), sandbox = await mcpSandbox({ reportClock: () => now });
   const json = (value: object) => ({ method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(value) });
   const configPath = join(sandbox.directory, 'assessment-analysis.json');

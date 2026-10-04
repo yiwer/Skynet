@@ -116,6 +116,8 @@ test('V2 public originals → conversation and metrics Web → real HTTPS OAuth 
     assert.equal(new URL(page.url()).hash, `#${snapshotId}`);
     await page.getByRole('navigation', { name: '平台页面', exact: true }).getByRole('button', { name: '用量与产出', exact: true }).click();
     await expect(page).toHaveURL(new RegExp(`#metrics$`));
+    await expect(page.getByRole('region', {name:'用量指标',exact:true})).toHaveAttribute('aria-busy','false');
+    await expect(page.getByRole('region', {name:'用量指标',exact:true}).getByRole('button',{name:'重试指标',exact:true})).toHaveCount(0);
     await page.getByRole('region', { name: '会话用量', exact: true }).locator(`a[href^="#${snapshotId}?insightVersion="]`).click();
     await expect(conversation).toContainText(inputText);
     assert.equal(new URL(page.url()).hash.split('?')[0], `#${snapshotId}`);
@@ -235,6 +237,12 @@ test('V2 public originals → conversation and metrics Web → real HTTPS OAuth 
     const usagePage = page.getByRole('region', { name: '用量指标', exact: true });
     await expect(usagePage.getByRole('heading', { name: '用量与产出', exact: true })).toBeVisible();
     await expect(usagePage.getByRole('region', { name: '会话用量', exact: true }).getByRole('link', { name: '查看会话', exact: true })).toHaveCount(2);
+    await page.evaluate(() => { location.hash = 'metrics?source=codex-cli'; });
+    const sessionLinks = usagePage.getByRole('region', { name: '会话用量', exact: true }).getByRole('link', { name: '查看会话', exact: true });
+    await expect(sessionLinks).toHaveCount(1);
+    await expect(sessionLinks).toHaveAttribute('href', new RegExp(`^#${unknownSnapshotId}\\?insightVersion=`));
+    await page.evaluate(() => { location.hash = 'metrics'; });
+    await expect(sessionLinks).toHaveCount(2);
     const dailyPoint = usagePage.getByRole('region', {name:'每日用量',exact:true}).locator('[tabindex="0"][aria-label*="110"]').first();
     await expect(dailyPoint).toHaveCount(1);
     await dailyPoint.focus();

@@ -43,6 +43,9 @@ test('zero outcomes, sample thresholds and a reopened restored leaf preserve evi
     const path = '/api/assessments/' + owner.employeeId, metric = (assessment: any, key: string) => Object.values(assessment.dims).flatMap((dim: any) => dim.metrics).find((m: any) => m.key === key) as any;
     for (let i = 0; i < 3; i++) await fixture.session(zero, { prompts: 15, verified: 0, claimed: 0, elements: 0, rework: true, long: true });
     const zeroBaseline = await (await fixture.api(zero, '/api/assessments/' + zero.employeeId)).json();
+    assert.deepEqual([zeroBaseline.sample.sessions, zeroBaseline.sample.activeDays, zeroBaseline.sample.unknownTokenSessions], [3, 1, 0]);
+    const zeroUsage = await (await fixture.api(zero, '/api/usage-output?period=since-enrollment&employeeId=' + zero.employeeId)).json();
+    assert.deepEqual([zeroUsage.totals.inputTokens, zeroUsage.totals.unknownTokenSessions], [3000, 0], 'zero-baseline scoring requires three Token-known sessions');
     assert.equal(metric(zeroBaseline, 'effIdx').value, null); assert.equal(metric(zeroBaseline, 'effIdx').state, 'unknown');
     const floor = await (await fixture.api(zero, '/api/assessment-baselines/' + zeroBaseline.inputs.baselineVersion)).json();
     assert.equal(floor.tasks.implementation.verifiedMean, .5); assert.equal(floor.tasks.implementation.efficiencyMedian, null);
