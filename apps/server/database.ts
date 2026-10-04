@@ -6,11 +6,7 @@ export const newCredential = () => randomBytes(32).toString('base64url');
 export const connect = (connectionString: string) => new pg.Pool({ connectionString, max: 8 });
 export type Database = ReturnType<typeof connect>;
 
-export async function migrate(db: Database) {
-  // A single transactional initial migration. Never changes an existing column silently.
-  await db.query(`
-    BEGIN;
-    SELECT pg_advisory_xact_lock(7402104);
+const baseMigration = `
     CREATE TABLE IF NOT EXISTS employees (
       id uuid PRIMARY KEY, name text NOT NULL, reader_hash text UNIQUE NOT NULL,
       enrollment_hash text UNIQUE NOT NULL, active boolean NOT NULL DEFAULT true
@@ -143,6 +139,25 @@ export async function migrate(db: Database) {
         o.context AS base_context,COALESCE(c.revision,0) AS qualification_revision,c.proof_snapshot_id,c.proof_line,c.proof_block,c.enrolled_at AS proof_enrolled_at
         FROM archive_event_origins o LEFT JOIN LATERAL(SELECT * FROM event_qualifications WHERE event_id=o.event_id ORDER BY revision DESC LIMIT 1)c ON true
         WHERE EXISTS(SELECT 1 FROM event_integrity i WHERE i.event_id=o.event_id AND i.version='original-utf8-1' AND i.valid);
-    COMMIT;
-  `);
+  `;
+
+export async function migrate(db: Database) {
+  const client = await db.connect();
+  try {
+    await client.query('BEGIN');
+    await client.query('SELECT pg_advisory_xact_lock(7402104)');
+    await client.query('CREATE TABLE IF NOT EXISTS schema_migrations(version text PRIMARY KEY,applied_at timestamptz NOT NULL DEFAULT now())');
+    const version = digest(baseMigration);
+    const applied = await client.query('SELECT 1 FROM schema_migrations WHERE version=$1', [version]);
+    // Provisioning runs against a live server. Even no-op ALTER statements take
+    // exclusive locks and can deadlock with background reads of related tables.
+    if (!applied.rowCount) {
+      await client.query(baseMigration);
+      await client.query('INSERT INTO schema_migrations(version) VALUES($1)', [version]);
+    }
+    await client.query('COMMIT');
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally { client.release(); }
 }

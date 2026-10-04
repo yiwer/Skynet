@@ -1,5 +1,7 @@
 import type {teamReportService} from './team-report.js';
 import {fixedTeamReportQuerySchema} from '../../packages/contracts/team-report.js';
+import type {capabilityPeopleService} from './capability-people.js';
+import {peopleQuery} from '../../packages/contracts/capability-people.js';
 import type { FastifyInstance } from 'fastify';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
@@ -37,11 +39,14 @@ import { efficiencyQuerySchema } from '../../packages/contracts/session-efficien
 
 import type {promptReportService} from './prompt-report.js';
 import {promptReportQuerySchema} from '../../packages/contracts/prompt-report.js';
+import { reviewNotesService } from './review-notes.js';
+import { reviewNotesQuery } from '../../packages/contracts/review-notes.js';
 
 import type { activityService } from './activity.js';
 import { activityQuerySchema } from '../../packages/contracts/activity.js';
-export async function registerMcp(app: FastifyInstance, db: Database, archive: ArchiveQuery, publicOrigin: string, analysis: AnalysisService, reports: ReportService, coverage: CoverageService, workStatistics: WorkStatisticsService, workViews: WorkViewService,operations:ServerOperationsService, conversation: ReturnType<typeof conversationQuery>, metrics: ReturnType<typeof metricsService>, assembly: ReturnType<typeof assemblyService>, processing: ReturnType<typeof processingService>, insights:ReturnType<typeof sessionInsightsService>, waits:ReturnType<typeof waitsService>, usage:ReturnType<typeof usageOutputService>, waitReport:ReturnType<typeof waitReportService>, prompts:ReturnType<typeof promptReportService>, activity:ReturnType<typeof activityService>, efficiency:ReturnType<typeof sessionEfficiencyService>, assessments:ReturnType<typeof assessmentService>, team:ReturnType<typeof teamReportService>) {
+export async function registerMcp(app: FastifyInstance, db: Database, archive: ArchiveQuery, publicOrigin: string, analysis: AnalysisService, reports: ReportService, coverage: CoverageService, workStatistics: WorkStatisticsService, workViews: WorkViewService,operations:ServerOperationsService, conversation: ReturnType<typeof conversationQuery>, metrics: ReturnType<typeof metricsService>, assembly: ReturnType<typeof assemblyService>, processing: ReturnType<typeof processingService>, insights:ReturnType<typeof sessionInsightsService>, waits:ReturnType<typeof waitsService>, usage:ReturnType<typeof usageOutputService>, waitReport:ReturnType<typeof waitReportService>, prompts:ReturnType<typeof promptReportService>, activity:ReturnType<typeof activityService>, efficiency:ReturnType<typeof sessionEfficiencyService>, assessments:ReturnType<typeof assessmentService>, team:ReturnType<typeof teamReportService>,people:ReturnType<typeof capabilityPeopleService>) {
   const { guard } = await registerMcpAuth(app, db, publicOrigin);
+  const reviewNotes = reviewNotesService(db);
   const offset = z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).default(0);
   const snapshotId = z.uuid().describe('Immutable snapshot ID from list_sessions, never a mutable session ID');
   const annotations = { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false };
@@ -58,6 +63,7 @@ export async function registerMcp(app: FastifyInstance, db: Database, archive: A
         return { isError: true, content: [{ type: 'text' as const, text: error instanceof HttpError ? error.message : '查询暂时不可用，请重试；上传不受影响' }] };
       }
     }
+    mcp.registerTool('list_capability',{description:'按等级分组读取员工使用能力，组内固定姓名顺序。每卡含固定个人评估版本、样本和覆盖。后续页传同一version和nextOffset，不支持按分数排序。',annotations,inputSchema:peopleQuery},input=>result(()=>people.read(input)));
     mcp.registerTool('read_conversation', { description: '按原件顺序分页读取对话，默认隐藏工具及系统、开发者与纯环境上下文；includeTools / includeContext 可分别展开。固定快照和解析版本，长消息沿 nextCursor 继续。默认 conversation-3；readingVersion 可固定 conversation-2。来源状态仅表示已记录的本轮与投递观察，不表示会话永久结束。anchor 使用原件 line/block/textOffset 并展开该记录；工具结果存在不表示助手结论已核验。',
       annotations, inputSchema: conversationInputSchema.safeExtend({ snapshotId }) },
       input => result(() => { const { snapshotId: id, ...query } = input; return conversation.page(id, query); }));
@@ -89,6 +95,8 @@ export async function registerMcp(app: FastifyInstance, db: Database, archive: A
       annotations, inputSchema: assessmentHistoryQuery.extend({ employeeId: z.uuid() }) }, input => result(() => { const { employeeId, ...query } = input; return assessments.history(employeeId, query); }));
     mcp.registerTool('read_assessment_model', { description: '读取评估结果引用的完整参数版本：13 项锚点、样本门槛、权重、分档、可信度与固定建议库。',
       annotations, inputSchema: { version: z.string().regex(/^[a-f0-9]{64}$/) } }, input => result(() => assessments.model(input.version)));
+    mcp.registerTool('read_review_notes', { description: '分页读取员工画像的追加复核备注、平台作者、北京时间及所附评估版本。所有已认证用户共享读取；备注不改变评估。沿 nextCursor 读取同一追加边界，每页最多10条。',
+      annotations, inputSchema: reviewNotesQuery.extend({ employeeId: z.uuid() }) }, input => result(() => { const { employeeId, ...query } = input; return reviewNotes.read(employeeId, query); }));
     mcp.registerTool('list_sessions', { description: '分页列出全体员工的会话快照。nextCursor 保持同一查询时间范围。',
       annotations, inputSchema: { cursor: z.string().max(1024).optional(), limit: z.number().int().min(1).max(10).default(10) } },
     input => result(() => archive.sessions(input.cursor, input.limit)));
