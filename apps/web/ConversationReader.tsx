@@ -2,6 +2,8 @@ import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { conversationAnchorSchema, conversationLink, type ConversationAnchor, type ConversationMessage,
   type ConversationPage, type ConversationTrace, type ConversationTracePage } from '../../packages/contracts/conversation.js';
 import { evidenceLink } from '../../packages/contracts/search.js';
+import type { WaitsPage } from '../../packages/contracts/waits.js';
+import { WaitMark } from './WaitingReport.js';
 
 type Request = (path: string, signal?: AbortSignal) => Promise<Response>;
 const date = (value: string) => new Date(value).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false });
@@ -38,7 +40,7 @@ export function conversationSelection(hash: string) {
   const result = conversationAnchorSchema.safeParse({ line: Number(params.get('line')), block: Number(params.get('block') ?? 0),
     textOffset: Number(params.get('textOffset') ?? 0), ...(params.has('parserVersion') ? { parserVersion: params.get('parserVersion') } : {}) });
   const matchLength = Number(params.get('matchLength'));
-  return { anchor: result.success ? result.data : undefined, includeTools: params.get('includeTools') === 'true',
+  return { anchor: result.success ? result.data : undefined, includeTools: params.get('includeTools') === 'true', waitVersion: params.get('waitVersion') ?? undefined,
     includeContext: params.get('includeContext') === 'true', matchLength: Number.isSafeInteger(matchLength) && matchLength > 0 ? matchLength : undefined };
 }
 
@@ -95,7 +97,7 @@ function SegmentLabel({ message }: { message: ConversationMessage }) {
 }
 
 export function ConversationReader({ snapshotId, initial, request, navigation, onTitle }: { snapshotId: string;
-  initial: { anchor?: ConversationAnchor; includeTools: boolean; includeContext?: boolean; matchLength?: number }; request: Request;
+  initial: { anchor?: ConversationAnchor; includeTools: boolean; includeContext?: boolean; matchLength?: number; waitVersion?: string }; request: Request;
   navigation?: ReactNode; onTitle?: (title: string) => void }) {
   const [includeTools, setIncludeTools] = useState(initial.includeTools);
   const [includeContext, setIncludeContext] = useState(initial.includeContext ?? false);
@@ -106,6 +108,19 @@ export function ConversationReader({ snapshotId, initial, request, navigation, o
   const [busy, setBusy] = useState(false); const [error, setError] = useState(''); const [retry, setRetry] = useState(0);
   const region = useRef<HTMLElement>(null);
   const cursor = cursors.at(-1);
+  const [waits, setWaits] = useState<WaitsPage>(); const [waitError, setWaitError] = useState('');
+  const waitVersion = useRef(initial.waitVersion);
+  const waitLines = page?.messages.filter(message => message.role === 'user' && !message.contextKind && message.textOffset === 0).map(message => message.line).slice(0, 25).join(',');
+  useEffect(() => {
+    if (!page) return;
+    const abort = new AbortController(); setWaits(undefined); setWaitError('');
+    const query = new URLSearchParams({ ...(initial.waitVersion ? { contextSnapshotId: snapshotId } : { snapshotId }), lines: waitLines || '0' });
+    if (waitVersion.current) query.set('version', waitVersion.current);
+    request('/api/waits?' + query, abort.signal).then(response => response.json()).then((result: WaitsPage) => {
+      if (!abort.signal.aborted) { setWaits(result); waitVersion.current = result.version; }
+    }).catch(failure => { if (!abort.signal.aborted) setWaitError(failure.message); });
+    return () => abort.abort();
+  }, [snapshotId, waitLines, !!page]);
   useEffect(() => {
     const abort = new AbortController(); setBusy(true); setError(''); setPage(null);
     const params = new URLSearchParams({ includeTools: String(includeTools), includeContext: String(includeContext) });
@@ -141,6 +156,8 @@ export function ConversationReader({ snapshotId, initial, request, navigation, o
     {page && <>
       <p className="sr-only">{page.totalMessages} 条消息 · {page.totalToolCalls} 次工具调用 · 来源时间按北京时间显示</p>
       <SourceStatus page={page}/>
+      {waitError && <p role="status" className="error">等待记录：{waitError}</p>}
+      {waits && <details className="conversation-wait-status"><summary>等待记录 · 版本 {waits.revision}<span>权限等待 · 未知</span></summary><p>{waits.definition}</p></details>}
       {page.traceCount > 0 && <details className="conversation-session-trace" open={traceOpen} onToggle={event => setTraceOpen(event.currentTarget.open)}><summary>Trace <span>{page.traceCount}</span></summary>
         <TracePanel key={page.tracePath} path={page.tracePath} open={traceOpen} request={request}/></details>}
       {page.messages.length === 0 && <p>暂无消息</p>}
@@ -161,6 +178,7 @@ export function ConversationReader({ snapshotId, initial, request, navigation, o
           key={`${message.id}:${message.textOffset}`} aria-label={`${roleName}消息`} tabIndex={focused ? -1 : undefined} data-conversation-focused={focused || undefined}>
           {isAssistant && <span className="conversation-avatar" aria-hidden="true"><AgentAvatar/></span>}
           <div className="conversation-column">
+            {isUser && message.textOffset === 0 && waits?.intervals.filter(wait => wait.displayLine === message.line && wait.end.block === message.block).map(wait => <WaitMark wait={wait} key={wait.id}/>)}
             {isTool ? <details className="conversation-tool-card" open={focused || undefined}>
               <summary><span className="conversation-tool-kind">{kind === 'request' ? '调用' : '结果'}</span><strong>{toolName ?? '工具'}</strong><SegmentLabel message={message}/></summary>
               <div className="conversation-tool-content"><pre className="conversation-tool-text">{text}</pre>

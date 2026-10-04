@@ -36,6 +36,7 @@ import { migrateSessionInsights,sessionInsightsService } from './session-insight
 import { sessionInsightsQuery } from '../../packages/contracts/session-insights.js';
 import { migrateDeliveryReceipts, saveDeliveryReceipt } from './delivery-receipts.js';
 import { migrateAssembly, assemblyService, processingService, recordAssemblyRecipe } from './assembly.js';
+import { migrateWaits, waitsService } from './waits.js';
 
 export async function createApp(options: { db: Database; rawDirectory: string; webDirectory?: string; publicOrigin?: string; reportClock?: () => Date }) {
   const { db } = options;
@@ -51,6 +52,7 @@ export async function createApp(options: { db: Database; rawDirectory: string; w
   await migrateMetrics(db);
   await migrateDeliveryReceipts(db);
   await migrateAssembly(db);
+  await migrateWaits(db);
   const raw = new RawStore(options.rawDirectory);
   await backfillOrigins(db, raw);
   await reconcileOriginIntegrity(db,raw);
@@ -207,6 +209,13 @@ export async function createApp(options: { db: Database; rawDirectory: string; w
   const archive = archiveQuery(db, raw);
   const conversation = conversationQuery(db, raw);
   const metrics = metricsService(db, raw, options.reportClock);
+  const waits = waitsService(db, raw, options.reportClock);
+  app.get('/api/waits', { onRequest: readerGuard }, request => waits.read(request.query));
+  app.post('/api/waits/recompute', { onRequest: readerGuard }, request => waits.recompute(request.body));
+  app.get('/api/waits/export', { onRequest: readerGuard }, async (request, reply) => {
+    const data = await waits.export(request.query);
+    return reply.header('Content-Disposition', `attachment; filename="skynet-waits-${data.version}.json"`).type('application/json').send(data);
+  });
   const assembly = assemblyService(db, raw);
   const processing = processingService(db, metrics);
   app.get('/api/processing', { onRequest: readerGuard }, request => processing(request.query));
@@ -375,7 +384,7 @@ export async function createApp(options: { db: Database; rawDirectory: string; w
     const file = await archive.exported((request.params as { id: string }).id, format);
     return reply.header('Content-Disposition', `attachment; filename="${file.filename}"`).type(file.contentType).send(file.bytes);
   });
-  if (options.publicOrigin) await registerMcp(app, db, archive, options.publicOrigin, analysis, reports, coverage, workStatistics, workViews,operations,conversation,metrics,assembly,processing,insights);
+  if (options.publicOrigin) await registerMcp(app, db, archive, options.publicOrigin, analysis, reports, coverage, workStatistics, workViews,operations,conversation,metrics,assembly,processing,insights,waits);
   if (options.webDirectory) {
     await app.register(fastifyStatic, { root: resolve(options.webDirectory), wildcard: false });
   }
