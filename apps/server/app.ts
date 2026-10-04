@@ -35,6 +35,7 @@ import { metricsQuerySchema } from '../../packages/contracts/metrics.js';
 import { migrateSessionInsights,sessionInsightsService } from './session-insights.js';
 import { sessionInsightsQuery } from '../../packages/contracts/session-insights.js';
 import { migrateUsageOutput, usageOutputService } from './usage-output.js';
+import {migrateSessionEfficiency,sessionEfficiencyService} from './session-efficiency.js';
 import { migrateDeliveryReceipts, saveDeliveryReceipt } from './delivery-receipts.js';
 import { migrateAssembly, assemblyService, processingService, recordAssemblyRecipe } from './assembly.js';
 import { migrateWaits, waitsService } from './waits.js';
@@ -53,6 +54,7 @@ export async function createApp(options: { db: Database; rawDirectory: string; w
   await migrateWorkViews(db);
   await migrateMetrics(db);
   await migrateUsageOutput(db);
+  await migrateSessionEfficiency(db);
   await migrateDeliveryReceipts(db);
   await migrateAssembly(db);
   await migrateWaits(db);
@@ -265,6 +267,13 @@ export async function createApp(options: { db: Database; rawDirectory: string; w
   const analysis = analysisService(db, archive);
   const insights = sessionInsightsService(db, archive, analysis, raw);
   const usage = usageOutputService(db, metrics, insights);
+  const efficiency=sessionEfficiencyService(db,usage,insights);
+  app.get('/api/session-efficiency',{onRequest:readerGuard},request=>efficiency.read(request.query));
+  app.post('/api/session-efficiency/recompute',{onRequest:readerGuard},request=>efficiency.recompute(request.body));
+  app.get('/api/session-efficiency/export',{onRequest:readerGuard},async(request,reply)=>{
+    const value=await efficiency.export(request.query);
+    return reply.header('Content-Disposition',`attachment; filename="skynet-session-efficiency-${value.version}.json"`).type('application/json').send(value);
+  });
   app.get('/api/usage-output', { onRequest: readerGuard }, request => usage.read(request.query));
   app.post('/api/usage-output/recompute', { onRequest: readerGuard }, request => usage.recompute(request.body));
   app.get('/api/usage-output/export', { onRequest: readerGuard }, async (request, reply) => {

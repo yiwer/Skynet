@@ -1,0 +1,102 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {randomUUID} from 'node:crypto';
+import {createApp} from '../apps/server/app.js';
+import {connect,digest} from '../apps/server/database.js';
+import {createSandbox} from './support.js';
+import {writeFile} from 'node:fs/promises';
+import {join} from 'node:path';
+import {readAnalysisConfig,publicConfig} from '../apps/analysis/config.js';
+import {analysisQueue} from '../apps/analysis/queue.js';
+import {executeAnalysis} from '../apps/analysis/execute.js';
+
+test('session efficiency keeps missing analysis and zero or unknown token denominators out of ratios and review selection', {timeout:120000},async()=>{
+  const sandbox=await createSandbox(),db=connect(sandbox.env.DATABASE_URL!);
+  let app:Awaited<ReturnType<typeof createApp>>|undefined;
+  try{
+    const person=await sandbox.provision('产效合成员工'),now=new Date(Date.now()+60000),timestamp=now.toISOString();
+    app=await createApp({db,rawDirectory:sandbox.env.RAW_DIRECTORY!,reportClock:()=>now});
+    const api=(url:string,payload?:unknown,credential=person.readerCredential,method:'GET'|'POST'|'PUT'='GET')=>app!.inject({url,method,headers:{Authorization:`Bearer ${credential}`,...(Buffer.isBuffer(payload)?{'Content-Type':'application/octet-stream'}:{})},...(payload===undefined?{}:{payload:payload as object})});
+    const device=(await api('/api/devices/enroll',{installationId:randomUUID(),name:'产效设备'},person.enrollmentCredential,'POST')).json();
+    async function upload(cost:number|null){
+      const id=randomUUID(),rows=[{type:'user',uuid:randomUUID(),sessionId:id,timestamp,message:{role:'user',content:'检查接口并保留原有行为'}},
+        {type:'assistant',uuid:randomUUID(),sessionId:id,timestamp,message:{id:randomUUID(),role:'assistant',content:[{type:'text',text:'记录本轮观察'}],...(cost===null?{}:{usage:{input_tokens:cost,output_tokens:0,cache_read_input_tokens:0,cache_creation_input_tokens:0}})}}];
+      const bytes=Buffer.from(rows.map(row=>JSON.stringify(row)).join('\n')+'\n');
+      await api('/api/chunks/'+digest(bytes),bytes,device.deviceCredential,'PUT');
+      const result=await api('/api/snapshots',{protocolVersion:1,sourceSessionId:id,source:'claude-code-cli',sourceVersion:'2.1.281',sourceOs:process.platform,project:'/synthetic/efficiency',hash:digest(bytes),byteLength:bytes.length,qualifiedAt:timestamp,capability:'unverified'},device.deviceCredential,'POST');
+      assert.equal(result.statusCode,200,result.body);return result.json().snapshotId;
+    }
+    const ids:string[]=[];for(const cost of [0,10,20,1000,null])ids.push(await upload(cost));
+    const query='period=since-enrollment';
+    assert.equal((await api('/api/session-efficiency?'+query,undefined,device.deviceCredential)).statusCode,401);
+    const response=await api('/api/session-efficiency?'+query);assert.equal(response.statusCode,200,response.body);
+    const report=response.json();
+    assert.equal(report.total,5);assert.equal(report.tokenP75,265);
+    assert.equal(report.reviewCount,0,'unavailable verification is not a known zero even when tokens exceed P75');
+    assert.ok(report.sessions.every((row:any)=>row.efficiency.value===null&&row.efficiency.numerator===null&&row.rework===null&&row.reviewReasons.length===0));
+    const zero=report.sessions.find((row:any)=>row.snapshotId===ids[0]),unknown=report.sessions.find((row:any)=>row.snapshotId===ids[4]);
+    assert.equal(zero.efficiency.denominator,0);assert.equal(zero.codeOutput.value,null);
+    assert.equal(unknown.efficiency.denominator,null);assert.equal(unknown.codeOutput.value,null);
+    assert.ok(report.sessions.every((row:any)=>row.taskType==='unknown'));
+    const frozen='/api/session-efficiency?'+query+'&version='+report.version;
+    assert.deepEqual((await api('/api/session-efficiency/export?'+query+'&version='+report.version)).json(),report);
+    await upload(30);assert.equal((await api('/api/session-efficiency?'+query)).json().total,6);
+    assert.deepEqual((await api(frozen)).json(),report);
+    await app.close();app=await createApp({db,rawDirectory:sandbox.env.RAW_DIRECTORY!,reportClock:()=>now});
+    assert.deepEqual((await api(frozen)).json(),report);
+    assert.equal((await api('/api/session-efficiency?period=this-week&version='+report.version)).statusCode,409);
+  }finally{await app?.close();await db.end();await sandbox.close();}
+});
+
+test('review selection uses scoped strict P75, evidenced claims and original nonfirst rework with task-type medians', {timeout:120000},async()=>{
+  const sandbox=await createSandbox(),db=connect(sandbox.env.DATABASE_URL!);let app:Awaited<ReturnType<typeof createApp>>|undefined;
+  try{
+    const person=await sandbox.provision('复盘合成员工'),base=Date.now()+60000,stamp=(n:number)=>new Date(base+n*1000).toISOString();
+    app=await createApp({db,rawDirectory:sandbox.env.RAW_DIRECTORY!,reportClock:()=>new Date(base+3600000)});
+    const api=(url:string,payload?:unknown,credential=person.readerCredential,method:'GET'|'POST'|'PUT'='GET')=>app!.inject({url,method,headers:{Authorization:`Bearer ${credential}`,...(Buffer.isBuffer(payload)?{'Content-Type':'application/octet-stream'}:{})},...(payload===undefined?{}:{payload:payload as object})});
+    const device=(await api('/api/devices/enroll',{installationId:randomUUID(),name:'复盘设备'},person.enrollmentCredential,'POST')).json();
+    const configPath=join(sandbox.directory,'efficiency-analysis.json');
+    await writeFile(configPath,JSON.stringify({mode:'fixture',executable:process.execPath,runtimeVersion:'2.1.281',model:'deterministic',workDirectory:join(sandbox.directory,'jobs'),fixtureOrigin:'http://127.0.0.1:12345',budgetId:'efficiency-synthetic',budgetCny:0,inputCnyPerMillion:0,outputCnyPerMillion:0,maxInputBytes:32768,maxSessionBytes:131072,maxRequests:4,maxAttempts:1,timeoutSeconds:60}));
+    const config=await readAnalysisConfig(configPath),queue=analysisQueue(db,config,'efficiency-synthetic');
+    await db.query('INSERT INTO analysis_workers(id,config) VALUES($1,$2)',['efficiency-synthetic',publicConfig(config)]);
+    async function analyze(key:string,cost:number,verified:boolean,claims:boolean,rework:boolean,task:'implementation'|'fix'){
+      const id=randomUUID(),counter=(n:number,at:number)=>({type:'event_msg',timestamp:stamp(at),payload:{type:'token_count',info:{total_token_usage:{input_tokens:n,cached_input_tokens:0,output_tokens:0,reasoning_output_tokens:0,total_tokens:n}}}});
+      const message=(role:string,text:string,n:number)=>({type:'response_item',timestamp:stamp(n),payload:{type:'message',role,content:[{type:role==='user'?'input_text':'output_text',text}]}});
+      const rows=[{type:'session_meta',timestamp:stamp(-86400),payload:{id}},counter(0,-86400),message('user',key+'：检查接口',1),
+        {type:'response_item',timestamp:stamp(2),payload:{type:'function_call',name:'exec_command',call_id:'tests',arguments:'{"cmd":"node --test"}'}},
+        {type:'response_item',timestamp:stamp(3),payload:{type:'function_call_output',call_id:'tests',output:'# tests 1\n# pass 1\n# fail 0'}},
+        message('assistant','已完成改动',4),message('user','请保留旧接口',5),message('assistant','已部署服务',6),message('user','请补充检查',7),message('assistant','记录检查过程',8),counter(cost,9)];
+      const bytes=Buffer.from(rows.map(row=>JSON.stringify(row)).join('\n')+'\n');await api('/api/chunks/'+digest(bytes),bytes,device.deviceCredential,'PUT');
+      const upload=await api('/api/snapshots',{protocolVersion:1,sourceSessionId:id,source:'codex-cli',sourceVersion:'0.157.1',sourceOs:process.platform,project:'/synthetic/efficiency-review',hash:digest(bytes),byteLength:bytes.length,qualifiedAt:stamp(0),capability:'unverified'},device.deviceCredential,'POST');assert.equal(upload.statusCode,200,upload.body);
+      const snapshotId=upload.json().snapshotId;
+      const job=await api('/api/snapshots/'+snapshotId+'/analysis',{},person.readerCredential,'POST');assert.equal(job.statusCode,202,job.body);
+      const claim=await queue.claim();assert.equal(claim?.id,job.json().id);
+      const result=await executeAnalysis(config,claim!.input,new AbortController().signal,()=>queue.allowForward(claim!),async(_config,input,_signal,forward)=>{
+        assert.equal(await forward!(),true);const cite=(event:number)=>({event,textOffset:0,quote:input.events[event]!.text});
+        const users=input.events.map((event,index)=>({event,index})).filter(({event})=>event.role==='user'),assistants=input.events.map((event,index)=>({event,index})).filter(({event})=>event.role==='assistant');
+        const tool=input.events.findIndex(event=>event.role==='tool result');
+        return{usage:{inputTokens:10,outputTokens:10,runtimeCostUsd:null,providerBilledCny:null,requests:1},output:{items:[{category:'topic',assessment:'inferred',text:key,citations:[cite(0)]}],insights:{version:'session-insights-1',taskType:{value:task,citations:[cite(0)]},
+          prompts:users.map(({index},position)=>({event:index,elements:{goal:true,constraints:true,context:false,acceptance:false},rework:position===0?true:rework,citations:[cite(index)]})),
+          replies:assistants.map(({index})=>({event:index,clarification:false,citations:[cite(index)]})),
+          outcomes:[...(verified?[{status:'verified',text:input.events[tool]!.text,citations:[cite(tool)]}]:[]),...(claims?assistants.slice(0,2).map(({event,index})=>({status:'claimed',text:event.text,citations:[cite(index)]})):[])],suggestions:[]}}};
+      });assert.equal(await queue.finish(claim!,result),true);return snapshotId;
+    }
+    const a=await analyze('a',100,true,false,false,'implementation'),b=await analyze('b',200,false,true,false,'implementation'),c=await analyze('c',400,false,false,true,'fix'),d=await analyze('d',1000,false,false,false,'fix');
+    const response=await api('/api/session-efficiency?period=since-enrollment');assert.equal(response.statusCode,200,response.body);const report=response.json();
+    assert.equal(report.tokenP75,550);assert.equal(report.reviewCount,3);
+    const byId=(id:string)=>report.sessions.find((row:any)=>row.snapshotId===id);
+    assert.deepEqual(byId(a).efficiency,{numerator:1,denominator:100,value:10000});assert.deepEqual(byId(a).reviewReasons,[]);
+    assert.deepEqual(byId(b).reviewReasons,['声称多于已验证']);assert.deepEqual(byId(c).reviewReasons,['返工 2 次']);assert.deepEqual(byId(d).reviewReasons,['Token 高于 P75 且没有已验证结果']);
+    assert.equal(byId(d).rework,0,'a first prompt never enters rework count');
+    assert.equal(report.distributions.find((row:any)=>row.taskType==='implementation').median,5000);
+    assert.equal(report.distributions.find((row:any)=>row.taskType==='fix').median,0);
+    assert.ok(byId(c).reworkEvidence.length>=2);assert.ok(byId(c).taskEvidence[0].webPath);
+    const sorted=(await api('/api/session-efficiency?period=since-enrollment&version='+report.version+'&sort=tokens&direction=asc')).json();
+    assert.deepEqual(sorted.sessions.map((row:any)=>row.tokens),[100,200,400,1000]);
+    const only=(await api('/api/session-efficiency?period=since-enrollment&version='+report.version+'&reviewOnly=true')).json();assert.equal(only.filteredTotal,3);
+    await analyze('equal threshold',1000,false,false,false,'fix');
+    const newer=(await api('/api/session-efficiency?period=since-enrollment')).json();assert.equal(newer.tokenP75,1000);
+    assert.ok(newer.sessions.filter((row:any)=>row.tokens===1000).every((row:any)=>row.reviewReasons.length===0),'equal P75 does not pass the strictly-higher rule');
+    assert.deepEqual((await api('/api/session-efficiency/export?period=since-enrollment&version='+report.version)).json(),report);
+  }finally{await app?.close();await db.end();await sandbox.close();}
+});
