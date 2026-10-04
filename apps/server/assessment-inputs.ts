@@ -48,6 +48,7 @@ export async function assessmentInputs(db: Database, usage: ReturnType<typeof us
     }
     const observations = gaps.filter(gap => !empty && gap.employee_id === person.id && gap.date >= (from ?? report.scope.from));
     const issues = [...new Set([...observations.map(gap => `${gap.source || '客户端'} · ${gap.date} 采集缺口`),
+      ...(totals?.unscopedSources ? ['来源原件不完整 · 日期或接入范围未确定'] : []),
       ...(sessions.some(s => s.unknownReasons.some(reason => /缺口|不可读取|无效编码/.test(reason))) ? ['来源原件不完整'] : [])])];
     const mine = factors.filter(s => s.employeeId === person.id), filled = fillAssessmentFactors(dims, mine, baseline, waitReport, person.id);
     const verdict = concludeAssessment(dims, sample, issues);

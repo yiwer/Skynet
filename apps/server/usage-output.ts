@@ -140,14 +140,18 @@ export function usageOutputService(db: Database, metrics: MetricsService, insigh
     }));
     const employees = metric.employees.filter(person => !q.employeeId || person.employeeId === q.employeeId).map(person => {
       const mine = selected.filter(row => row.employeeId === person.employeeId);
-      return { ...person, activeDates: metric.employeeDaily?.find(series=>series.employeeId===person.employeeId)?.days.filter(day=>day.activeSessions>0).map(day=>day.date)??[], outputs: outputTotals(mine), agents: metric.sources.map(({ source }) => ({ source, ...totals(mine.filter(row => row.source === source)) })),
+      const outputs = outputTotals(mine); if (person.unscopedSources) for (const kind of kinds) outputs[kind].value = null;
+      return { ...person, activeDates: metric.employeeDaily?.find(series=>series.employeeId===person.employeeId)?.days.filter(day=>day.activeSessions>0).map(day=>day.date)??[], outputs, agents: metric.sources.map(({ source }) => ({ source, ...totals(mine.filter(row => row.source === source)) })),
         daily: (metric.employeeDaily?.find(series => series.employeeId === person.employeeId)?.days ?? []).map(day => ({ ...day, outputs: { verified: dailyOutputs(mine, day.date).verified } })) };
     });
+    const outputs = outputTotals(selected), scopedTotals = q.employeeId ? totals(selected) : metric.totals;
+    if (employees.some(person => person.unscopedSources)) { scopedTotals.inputTokens = null; scopedTotals.outputTokens = null; for (const kind of kinds) outputs[kind].value = null; }
     const content = { metricVersion: metric.version, catalogVersion, scope: { ...metric.scope, ...(q.employeeId ? { employeeId: q.employeeId } : {}) },
-      totals: q.employeeId ? totals(selected) : metric.totals, outputs: outputTotals(selected), employees,
+      totals: scopedTotals, outputs, employees,
       dailyOutputs: [...new Set(selected.flatMap(row => row.dates))].sort().map(date => ({ date, outputs: dailyOutputs(selected, date) })),
       daily: q.employeeId ? employees[0]?.daily ?? [] : metric.daily.map(day=>({date:day.date,activeSessions:day.sessions,...(day.tokenTrend??{inputTokens:day.inputTokens,outputTokens:day.outputTokens,includedSessions:day.sessions-day.unknownTokenSessions,excludedSessions:day.unknownTokenSessions}),outputs:{verified:dailyOutputs(selected,day.date).verified}})), sessions: rows, nextOffset: null,
-      sourceInputsComplete: metric.sourceInputsComplete, unknownReasons: metric.unknownReasons, dataAsOf: metric.dataAsOf };
+      sourceInputsComplete: q.employeeId ? employees.every(person => person.sourceInputsComplete !== false) : metric.sourceInputsComplete,
+      unknownReasons: q.employeeId ? [...new Set(employees.flatMap(person => person.unknownReasons ?? []))] : metric.unknownReasons, dataAsOf: metric.dataAsOf };
     const version = digest(JSON.stringify(content)), request = selection(q), scopeKey = digest(JSON.stringify(request));
     const client = await db.connect();
     try {

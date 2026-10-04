@@ -8,7 +8,7 @@ import type { activityService } from './activity.js';
 import type { ReportService } from './reports.js';
 import type { workViewService } from './work-views.js';
 import { dailyPath, monday, addDays } from '../../packages/contracts/work-views.js';
-import type { DailyItem } from '../../packages/contracts/reports.js';
+import { beijingDate, type DailyItem } from '../../packages/contracts/reports.js';
 import { profileQuery, profileSections, type CapabilityProfile, type CapabilityProfilePage } from '../../packages/contracts/capability-profile.js';
 
 export async function migrateCapabilityProfiles(db: Database) {
@@ -99,21 +99,28 @@ export function capabilityProfileService(db: Database, assessments: ReturnType<t
         ({ sessionId, snapshotId, source, sourceSessionId, projects, dates, tokens, knownTokens, userTurns, toolCalls, verified, codeChanges, efficiency, rework, taskType, webPath, waitFraction: timing?.waitFraction ?? null }));
       const taskCounts = new Map<CapabilityProfile['taskDistribution'][number]['taskType'], number>();
       for (const session of sessions) taskCounts.set(session.taskType, (taskCounts.get(session.taskType) ?? 0) + 1);
-      const recentActivity: CapabilityProfile['recentActivity'] = { events: [], references: [], hasEarlier: false }, dates = [...activeDates].sort().reverse();
+      const receiptDates = (await db.query(`SELECT r.receipt->>'firstDisconnectedAt' AS disconnected,r.receipt->>'acknowledgedAt' AS acknowledged
+        FROM delivery_receipts r JOIN devices d ON d.id=r.device_id WHERE d.employee_id=$1`, [employeeId])).rows
+        .flatMap(row => [row.disconnected, row.acknowledged].filter(Boolean).map(time => beijingDate(new Date(time))))
+        .filter(date => date >= report.scope.from && date <= report.scope.to);
+      const recentActivity: CapabilityProfile['recentActivity'] = { events: [], references: [], hasEarlier: false }, dates = [...new Set([...activeDates, ...receiptDates])].sort().reverse(), seenActivity = new Set<string>();
       for (const [index, date] of dates.entries()) {
         const page = await activity.export({ date, employeeId });
         recentActivity.references.push({ date, version: page.version, path: '#activity?' + new URLSearchParams({ date, employeeId, version: page.version }) });
-        const events = [...page.events].sort((a, b) => (b.timestamp ?? '').localeCompare(a.timestamp ?? '') || a.id.localeCompare(b.id));
+        const events = [...page.events].filter(event => !seenActivity.has(event.id)).sort((a, b) => (b.timestamp ?? '').localeCompare(a.timestamp ?? '') || a.id.localeCompare(b.id));
         const remaining = 20 - recentActivity.events.length;
         recentActivity.events.push(...events.slice(0, remaining));
+        for (const event of events.slice(0, remaining)) seenActivity.add(event.id);
         if (recentActivity.events.length >= 20) { recentActivity.hasEarlier = events.length > remaining || index + 1 < dates.length; break; }
       }
       return { algorithmVersion: 'capability-profile-1', employeeId, employee: assessment.employee, range: assessment.range, assessment,
-        header: await header(employeeId), kpis: { ...totals, activeDays: activeDates.length }, usage: { version: report.version, metricVersion: report.metricVersion, daily, agents },
+        header: await header(employeeId), kpis: { ...totals, activeDays: activeDates.length }, usage: { version: report.version, metricVersion: report.metricVersion, daily, agents,
+          sourceInputsComplete: mine?.sourceInputsComplete ?? true, unknownReasons: mine?.unknownReasons ?? [], unscopedSources: mine?.unscopedSources ?? 0 },
         sessions, taskDistribution: [...taskCounts].sort(([a], [b]) => a.localeCompare(b)).map(([taskType, sessions]) => ({ taskType, sessions })), recentActivity,
         work: await workContent(employeeId, assessment.range.from, assessment.range.to, activeDates),
         references: { efficiency: { version: efficiencyReport.version, metricVersion: efficiencyReport.metricVersion, path: '#efficiency?' + new URLSearchParams({ period: scope.period, employeeId, version: efficiencyReport.version }) } } };
     }, async client => ({
+      delivery: (await client.query('SELECT device_id,upload_id,snapshot_id,receipt_hash,received_at FROM delivery_receipts ORDER BY device_id,upload_id')).rows,
       devices: (await client.query('SELECT id,name,active FROM devices WHERE employee_id=$1 ORDER BY id', [employeeId])).rows,
       daily: (await client.query('SELECT date,revision,version FROM daily_report_revisions WHERE employee_id=$1 ORDER BY date,revision', [employeeId])).rows,
       dailyPending: (await client.query('SELECT date,generation,refresh_pending,qualification_revision,source_revision FROM daily_report_periods WHERE employee_id=$1 ORDER BY date', [employeeId])).rows,
@@ -142,7 +149,8 @@ export function capabilityProfileService(db: Database, assessments: ReturnType<t
       rows.splice(0, offset); rows.splice(limit);
       value.pages[section] = { total, offset, nextOffset: offset + rows.length < total ? offset + rows.length : null };
     }
-    while (Buffer.byteLength(JSON.stringify(value)) > 80 * 1024) {
+    // Leave room for the MCP text envelope, including worst-case JSON escaping.
+    while (Buffer.byteLength(JSON.stringify(value)) > 48 * 1024 - 512) {
       const section = profileSections.filter(key => sections[key].length > (q.section === key ? 1 : 0))
         .sort((a, b) => Buffer.byteLength(JSON.stringify(sections[b])) - Buffer.byteLength(JSON.stringify(sections[a])))[0];
       if (!section) throw new HttpError(413, '画像单条内容超过响应上限，请使用完整导出');
@@ -150,5 +158,8 @@ export function capabilityProfileService(db: Database, assessments: ReturnType<t
     }
     return value;
   }
-  return { read, export: load, recompute: (employeeId: string, input: unknown) => read(employeeId, input, true) };
+  return { read, export: (employeeId: string, input: unknown) => {
+    const q = profileQuery.parse(input); if (q.section || q.offset) throw new HttpError(400, '完整导出不能指定分页');
+    return load(employeeId, q);
+  }, recompute: (employeeId: string, input: unknown) => read(employeeId, input, true) };
 }

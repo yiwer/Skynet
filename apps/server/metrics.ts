@@ -271,7 +271,8 @@ export function metricsService(db: Database, raw: RawStore, clock: () => Date = 
       // committed ordinary source. Later captures cannot reassign it through a
       // changed project label; copies of a restored prefix never enter this map.
       const usageOrigins = new Map<string, { slice?: Slice; value: TokenComponents | null }>();
-      const discoveryGaps = new Set<string>();
+      const discoveryGaps = new Set<string>(), ownerDiscoveryGaps = new Map<string, { snapshotId: string; reason: string }[]>();
+      const gapForOwner = (record: Snapshot, reason: string) => { discoveryGaps.add(reason); const gaps = ownerDiscoveryGaps.get(record.employee_id) ?? []; gaps.push({ snapshotId: record.id, reason }); ownerDiscoveryGaps.set(record.employee_id, gaps); };
       for (const record of candidates) {
         const session = identity(record);
         const groupKey = JSON.stringify([session, record.employee_id, record.manifest.project]);
@@ -292,7 +293,7 @@ export function metricsService(db: Database, raw: RawStore, clock: () => Date = 
           // that serialization conflict as an original-storage gap.
           if (['40001', '40P01'].includes((error as { code?: string }).code ?? '')) throw error;
           for (const slice of relevant) slice.reasons.add('已存档原件不可读取或含无效编码');
-          if (ownerSelected) discoveryGaps.add('已存档原件不可读取或含无效编码，无法确认所选日期的 Token');
+          if (ownerSelected) gapForOwner(record, '已存档原件不可读取或含无效编码，无法确认所选日期的 Token');
           continue;
         }
         rawBuffers.set(record.id, content);
@@ -303,7 +304,7 @@ export function metricsService(db: Database, raw: RawStore, clock: () => Date = 
           && (!parsed.complete || !parsed.coverageComplete)) reasons.add('来源原件有缺口，已知部分不代表全部');
         if (record.provenance?.warning && record.provenance.relation !== 'unconfirmed') reasons.add(record.provenance.warning);
         for (const slice of relevant) for (const reason of reasons) slice.reasons.add(reason);
-        if (!record.enrolled_at) { if (ownerSelected) discoveryGaps.add('来源接入边界未经验证，无法确认所选日期的 Token'); continue; }
+        if (!record.enrolled_at) { if (ownerSelected) gapForOwner(record, '来源接入边界未经验证，无法确认所选日期的 Token'); continue; }
         const prefixLines = record.manifest.restoredFrom ? content.subarray(0, record.manifest.restoredFrom.byteLength).toString('utf8').split('\n').length - 1 : 0;
         for (const item of parsed.usage) {
           if (item.line <= prefixLines || !item.timestamp || Date.parse(item.timestamp) < record.enrolled_at.getTime()) continue;
@@ -396,11 +397,11 @@ export function metricsService(db: Database, raw: RawStore, clock: () => Date = 
         days:employeeDays.filter(day=>day.employeeId===employeeId).map(({employeeId:_id,...day})=>day)}));
       const byEmployee = new Map<string, SessionMetrics[]>();
       for (const session of sessions) byEmployee.set(session.employeeId, [...byEmployee.get(session.employeeId) ?? [], session]);
-      const employees = [...new Map(sessions.map(s => [s.employeeId, s.employee])).entries()]
+      let employees: MetricsPage['employees'] = [...new Map(sessions.map(s => [s.employeeId, s.employee])).entries()]
         .sort((a, b) => a[1].localeCompare(b[1], 'zh-CN') || a[0].localeCompare(b[0]))
         .map(([employeeId, employee]) => ({ employeeId, employee, ...total(byEmployee.get(employeeId)!) }));
       const sources = [...new Set(sessions.map(s => s.source))].sort().map(source => ({ source, ...total(sessions.filter(s => s.source === source)) }));
-      const unscoped = (await client.query(`SELECT s.id,s.committed_at,p.complete,p.revision FROM (
+      const unscoped = (await client.query(`SELECT s.id,s.employee_id,s.committed_at,p.complete,p.revision FROM (
         SELECT DISTINCT ON (s.device_id,s.source,s.source_session_id) s.*,d.employee_id FROM snapshots s JOIN devices d ON d.id=s.device_id
         WHERE ($1::uuid IS NULL OR d.employee_id=$1) AND ($2::text IS NULL OR s.source=$2)
           AND ($3::text IS NULL OR s.manifest->>'project'=$3)
@@ -409,6 +410,15 @@ export function metricsService(db: Database, raw: RawStore, clock: () => Date = 
         WHERE s.manifest->'restoredFrom' IS NULL AND p.complete IS NOT TRUE ORDER BY s.id LIMIT ${limits.snapshots + 1}`,
       [q.employeeId ?? null, q.source ?? null, q.project ?? null, inputIntegrityVersion])).rows;
       if (unscoped.length > limits.snapshots) throw bounded();
+      const ownerIds = new Set([...employees.map(person => person.employeeId), ...unscoped.map(row => row.employee_id as string), ...ownerDiscoveryGaps.keys()]);
+      employees = [...ownerIds].map(employeeId => {
+        const mine = sessions.filter(session => session.employeeId === employeeId), unresolved = unscoped.filter(row => row.employee_id === employeeId), failures = ownerDiscoveryGaps.get(employeeId) ?? [];
+        const employee = employees.find(person => person.employeeId === employeeId) ?? { employeeId, employee: snapshots.find(row => row.employee_id === employeeId)!.employee, ...total(mine) };
+        const unscopedSources = new Set([...unresolved.map(row => row.id), ...failures.map(row => row.snapshotId)]).size;
+        const unknownReasons = [...new Set([...mine.flatMap(row => row.unknownReasons), ...failures.map(row => row.reason), ...(unresolved.length ? ['存在来源日期不能确定的原件缺口，范围完整性未知'] : [])])].sort();
+        return { ...employee, ...(unscopedSources ? { inputTokens: null, outputTokens: null } : {}), unscopedSources,
+          sourceInputsComplete: !unscopedSources && mine.every(row => row.sourceInputsComplete), unknownReasons };
+      }).sort((a, b) => a.employee.localeCompare(b.employee, 'zh-CN') || a.employeeId.localeCompare(b.employeeId));
       const unknownReasons = [...new Set([...sessions.flatMap(s => s.unknownReasons), ...discoveryGaps, ...(unscoped.length ? ['存在来源日期不能确定的原件缺口，范围完整性未知'] : [])])].sort();
       const dataAsOf = new Date(Math.max(0, ...candidates.map(s => s.committed_at.getTime()), ...unscoped.map(s => (s.committed_at as Date).getTime()))).toISOString();
       const inputVersion = digest(JSON.stringify([events, rawInputs, unscoped]));
