@@ -155,6 +155,8 @@ test('corrected prompt elements, rework and task type generate report and team b
     const path=`/api/snapshots/${records[0]!.snapshotId}`,apath='/api/assessments/'+a.employeeId,bpath='/api/assessments/'+b.employeeId;
     const promptPath='/api/prompt-report?period=since-enrollment&employeeId='+a.employeeId;
     const before=await(await f.api(a,path+'/insights')).json(),oldA=await(await f.api(a,apath)).json(),oldB=await(await f.api(b,bpath)).json(),oldPrompt=await(await f.api(a,promptPath)).json();
+    const peoplePath='/api/capability-people?period=since-enrollment',teamPath='/api/team-report?period=since-enrollment&employeeId='+a.employeeId;
+    const oldPeople=await(await f.api(a,peoplePath)).json(),oldTeam=await(await f.api(a,teamPath)).json();assert.ok(oldPeople.version);assert.ok(oldTeam.version);
     const metric=(v:any,key:string)=>(Object.values(v.dims) as any[]).flatMap(dim=>dim.metrics).find(m=>m.key===key);
     assert.equal(metric(oldB,'outIdx').value,1.5);
     const elements={goal:false,constraints:false,context:false,acceptance:false};
@@ -166,12 +168,16 @@ test('corrected prompt elements, rework and task type generate report and team b
     const rework=await f.api(a,path+'/inference-corrections',{requestId:randomUUID(),expectedVersion:current.version,kind:'rework',promptEvent:current.inferences.prompts[1].event,value:true,reason:'第二条要求纠正错误实现'});
     assert.equal(rework.status,201,await rework.clone().text());
     for(const record of records){current=await(await f.api(a,`/api/snapshots/${record.snapshotId}/insights`)).json();const saved=await f.api(a,`/api/snapshots/${record.snapshotId}/inference-corrections`,{requestId:randomUUID(),expectedVersion:current.version,kind:'task-type',value:'investigation',reason:'工作范围为排查'});assert.equal(saved.status,201,await saved.clone().text());}
+    const people=await(await f.api(a,peoplePath)).json(),team=await(await f.api(a,teamPath)).json();
     const report=await(await f.api(a,promptPath)).json(),newA=await(await f.api(a,apath)).json(),newB=await(await f.api(b,bpath)).json();
     assert.deepEqual(report.kpis.rework,{numerator:1,denominator:6,unknown:0,value:1/6});
     assert.equal(report.examples.negative[0].correctionIds.length,2);
     assert.deepEqual(report.kpis.context,{numerator:8,denominator:9,unknown:0,value:8/9});
     assert.equal(metric(newA,'elem').value,.5);assert.equal(metric(newA,'rework').value,1/6);
     assert.equal(metric(newB,'outIdx').value,1);assert.notEqual(newB.version,oldB.version);assert.notEqual(newB.inputs.baselineVersion,oldB.inputs.baselineVersion);
+    assert.equal(people.employees.find((person:any)=>person.employeeId===b.employeeId).assessmentVersion,newB.version);assert.equal(people.baselineVersion,newB.inputs.baselineVersion);
+    assert.notEqual(people.version,oldPeople.version);assert.equal(team.prompts.rework.value,1/6);assert.notEqual(team.version,oldTeam.version);
+    assert.deepEqual(await(await f.api(a,peoplePath+'&version='+oldPeople.version)).json(),oldPeople);assert.deepEqual(await(await f.api(a,teamPath+'&version='+oldTeam.version)).json(),oldTeam);
     const baseline=await(await f.api(a,'/api/assessment-baselines/'+newB.inputs.baselineVersion)).json();
     assert.equal(baseline.tasks.implementation.verifiedMean,3);assert.equal(baseline.tasks.investigation.verifiedMean,1);
     assert.deepEqual(await(await f.api(a,promptPath+'&version='+oldPrompt.version)).json(),oldPrompt);
