@@ -11,7 +11,7 @@ import {dimKeys} from '../../packages/contracts/assessment.js';
 import {monday} from '../../packages/contracts/work-views.js';
 
 export function profileCoachingService(insights:ReturnType<typeof sessionInsightsService>,waits:ReturnType<typeof waitsService>,assessments:ReturnType<typeof assessmentService>){
-  async function read(assessment:CapabilityAssessment,source:UsageOutputPage):Promise<ProfileCoaching>{
+  async function read(assessment:CapabilityAssessment,source:UsageOutputPage,weeks?:{previous:CapabilityAssessment;current:CapabilityAssessment}):Promise<ProfileCoaching>{
     const rows=source.sessions.filter(row=>row.selected),keys=[...new Map(rows.flatMap(row=>row.insightVersions).map(key=>[key.version,key])).values()];
     const views=await insights.readVersions(keys),facts=await insights.readMessageFacts(views);
     const all=[...new Map(facts.flatMap(fact=>fact.messages).map(message=>[message.id,message])).values()];
@@ -42,7 +42,7 @@ export function profileCoachingService(insights:ReturnType<typeof sessionInsight
     const waitSummary=summarizeWaits({...waitSource,intervals}),bins=Array.from({length:24},()=>[] as number[]);
     for(const row of intervals)if(row.durationMs!==null&&row.startedAt)bins[new Date(Date.parse(row.startedAt)+8*3600000).getUTCHours()]!.push(row.durationMs);
     async function week(period:'last-week'|'this-week'):Promise<ProfileCoaching['trend']['current']>{
-      const value=assessment.selection?.period===period?assessment:await assessments.export(assessment.employeeId,{period,preset:assessment.preset});
+      const value=assessment.selection?.period===period?assessment:weeks?.[period==='last-week'?'previous':'current']??await assessments.export(assessment.employeeId,{period,preset:assessment.preset});
       return {state:!value.sample.sessions&&!value.coverageIssues.length?'empty':value.index===null?'unknown':'available',range:{from:monday(value.range.to),to:value.range.to},
         assessmentVersion:value.version,modelVersion:value.modelVersion,baselineVersion:value.inputs.baselineVersion,frontierVersion:value.inputs.frontierVersion,usageVersion:value.inputs.usageVersion,waitsVersion:value.inputs.waitsVersion,
         sessions:value.sample.sessions,prompts:value.sample.prompts,confidence:value.confidence,index:value.index,dimensions:Object.fromEntries(dimKeys.map(key=>[key,value.dims[key].score])) as ProfileCoaching['trend']['current']['dimensions']};

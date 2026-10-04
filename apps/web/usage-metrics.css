@@ -55,7 +55,7 @@
 .usage-scatter text, .usage-small text { fill: var(--color-muted); font-size: 11px; }
 .usage-scatter circle { fill: var(--viz-1); stroke: var(--color-card); stroke-width: 2; transition: r 120ms ease; }
 .usage-scatter a:is(:hover,:focus-visible) circle { r: 8px; stroke: var(--color-focus); }
-.usage-scatter circle[data-reference=true] { fill: var(--viz-deemph); }
+.usage-scatter circle[data-reference=true] { fill: var(--viz-deemph); stroke:var(--color-muted); }
 .usage-metrics [data-reference=true] { color: var(--color-muted); }
 .usage-scatter-unknown { padding-top: 12px; border-top: 1px solid var(--color-rule-soft); }
 .usage-scatter-unknown h3 { margin: 0 0 8px; font-size: var(--text-xs); font-weight: 500; color: var(--color-muted); }
@@ -196,3 +196,15 @@
 .platform-main .usage-metrics :is(button, select, summary) { min-height:44px; min-width:44px; height:auto; }
 .platform-main .usage-metrics summary { padding-block:10px; }
 .platform-main .usage-metrics :is(.usage-table-scroll a, .usage-scatter-unknown a) { display:inline-flex; align-items:center; min-height:44px; min-width:44px; }
+.platform-main .usage-metrics button.usage-bar-detail { min-height:44px; padding:0; border:0; background:transparent; text-align:left; white-space:normal; }
+.platform-main .usage-metrics button.usage-day-target { width:100%; height:120px; padding:0; border:0; background:transparent; }
+.platform-main .usage-metrics button.usage-day-target:focus-visible { outline-offset:-3px; }
+.usage-metrics .usage-figure { position:relative; }
+.usage-metrics .usage-detail-popup { position:absolute; z-index:5; overflow:auto; overscroll-behavior:contain; margin:0; padding:8px 12px; border:1px solid var(--color-rule); border-radius:var(--radius-sm); background:var(--color-paper-2); color:var(--color-ink); font-size:var(--text-xs); overflow-wrap:anywhere; }
+.usage-point-detail+.usage-point-detail { border-top:1px solid var(--color-rule); padding-top:8px; }
+.usage-metrics .usage-point-detail a { display:inline-flex; align-items:center; min-height:44px; min-width:44px; }
+.usage-metrics .usage-scatter { min-width:860px; }
+.platform-main .usage-metrics button.usage-point-target { width:44px; height:44px; padding:0; border:0; background:transparent; }
+.platform-main .usage-metrics button.usage-point-target:focus-visible { outline-offset:-3px; }
+.usage-scatter-unknown button { display:inline-flex; align-items:center; gap:12px; border-style:dashed; }
+.usage-scatter-unknown button span { color:var(--color-muted); font-size:var(--text-xs); }

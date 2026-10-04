@@ -302,7 +302,7 @@ export async function createApp(options: { db: Database; rawDirectory: string; w
     return sendReportDownload(request,reply,await efficiency.download(request.query),'skynet-session-efficiency');
   });
   const prompts=promptReportService(db,usage,insights);
-  const assessments = assessmentService(db, usage, insights, waits, options.reportClock);
+  const assessments = assessmentService(db, usage, insights, waits, raw, options.reportClock);
   const people = capabilityPeopleService(db, assessments, options.reportClock);
   const team=teamReportService(db,usage,prompts,waitReport,people,options.reportClock);
   app.post('/api/team-report/recompute',{onRequest:readerGuard},request=>team.recompute(request.body));

@@ -4,6 +4,7 @@ import { sourceLabel, type Source } from '../../packages/contracts/archive.js';
 import type { UsageOutputPage, UsageReadingPage, UsageQuery } from '../../packages/contracts/usage-output.js';
 import {readUsageCollections} from './usage-reading.js';
 import { OutputKpis, OutputTable, UsageScatter, UsageDailyPeople } from './UsageOutputCharts.js';
+import {useUsageChartDetail} from './UsageChartDetail.js';
 import './usage-metrics.css';
 
 type Props = { request: (path: string, signal?: AbortSignal, method?: 'POST', body?: unknown) => Promise<Response> };
@@ -37,7 +38,8 @@ export function UsageMetrics({ request }: Props) {
   const [employees, setEmployees] = useState<Array<{ employeeId: string; employee: string }>>([]);
   const [projects, setProjects] = useState<string[]>([]); const [customProject, setCustomProject] = useState(false); const [advanced, setAdvanced] = useState(false);
   const [busy, setBusy] = useState(false); const [error, setError] = useState(''); const [retry, setRetry] = useState(0);
-  const [agentTooltip, setAgentTooltip] = useState('');
+  const employeeDetail=useUsageChartDetail();
+  useEffect(()=>employeeDetail.close(),[page?.version]);
   const [peopleChart, setPeopleChart] = useState(true);
   const [chartError, setChartError] = useState(''); const [chartRetry, setChartRetry] = useState(0);
   const [exporting, setExporting] = useState(false); const [message, setMessage] = useState('');
@@ -108,6 +110,7 @@ export function UsageMetrics({ request }: Props) {
   const hasUsage = page && (page.totals.sessions > 0 || page.totals.userTurns > 0 || page.totals.toolCalls > 0 || hasInput || hasOutput || !page.sourceInputsComplete);
   const sessions=loaded?.sessions.filter(session=>session.selected),sessionRows=(sessions??page?.sessions.filter(session=>session.selected)??[]).slice(sessionOffset,sessionOffset+20);
   const employeeMaximum = Math.max(1, ...people.map(person => person.knownInputTokens));
+  const agentDetails=(person:typeof people[number])=>`${person.employee} · ${person.agents.map(agent=>`${sourceLabel(agent.source)} · ${agent.unknown&&!agent.input?'未知':number(agent.input)}${agent.unknown&&agent.input>0?'（部分）':''}`).join('；')}`;
   return <section className="usage-metrics workspace-page" aria-label="用量指标" aria-busy={busy}>
     <div className="usage-page-head"><h1>用量与产出</h1>{page && <div className="usage-export-actions">{!query.week&&<button disabled={busy} onClick={recompute}>从原件重算</button>}<button disabled={busy || exporting} onClick={download}>{exporting ? '正在导出…' : '导出当前版本'}</button></div>}</div>
     <form className="usage-filters" onSubmit={apply} aria-label="用量筛选"><div className="usage-filter-row">
@@ -138,14 +141,14 @@ export function UsageMetrics({ request }: Props) {
     {page && hasUsage && <>
       <OutputKpis page={page}/>
       {(hasInput || hasOutput) && <div className="usage-figure-grid">
-        {hasInput && <section className="usage-figure" aria-label="员工用量"><div className="usage-figure-head"><div><h2>每人输入 Token</h2></div><ViewToggle chart={peopleChart} setChart={setPeopleChart} /></div>
+        {hasInput && <section className="usage-figure" aria-label="员工用量" {...employeeDetail.boundary}><div className="usage-figure-head"><div><h2>每人输入 Token</h2></div><ViewToggle chart={peopleChart} setChart={value=>{employeeDetail.close();setPeopleChart(value);}} /></div>
           {!allSessions ? chartError ? <div className="usage-error" role="alert"><p>{chartError}</p><button onClick={() => setChartRetry(value => value + 1)}>重试员工图表</button></div> : <p className="usage-status" role="status">正在读取当前版本的完整用量…</p>
             : peopleChart ? <div className="usage-horizontal-bars" role="list" aria-label="各员工按 Agent 归集的已知输入 Token">
-              {people.map((person, index) => <div className="usage-bar-row" role="listitem" key={person.employeeId}><Person name={person.employee} index={index} /><div className="usage-bar-plot"><div className="usage-bar-track" style={{ '--bar-width': `${person.knownInputTokens / employeeMaximum * 80}%` } as CSSProperties}>
-                {person.agents.filter(agent => agent.input > 0).map(agent => <span className="usage-bar-segment" key={agent.source} data-series={sourceSeries(agent.source)} style={{ flexGrow: agent.input }} tabIndex={0} role="img" onFocus={event => setAgentTooltip(event.currentTarget.getAttribute('aria-label')!)} onBlur={() => setAgentTooltip('')} onMouseEnter={event => setAgentTooltip(event.currentTarget.getAttribute('aria-label')!)} onMouseLeave={() => setAgentTooltip('')} onKeyDown={event => { if (event.key === 'Escape') setAgentTooltip(''); }} aria-label={`${person.employee} · ${sourceLabel(agent.source)} · ${number(agent.input)}${agent.unknown ? '（部分）' : ''}`} />)}</div><span className="usage-bar-value"><TokenValue value={person.knownInputTokens} unknown={tokenUnknown(person, 'Input')} short />{person.unknownTokenSessions>0&&<span className="usage-cell-detail">{person.unknownTokenSessions} 会话未知</span>}</span></div></div>)}
+              {people.map((person, index) => <div className="usage-bar-row" role="listitem" key={person.employeeId}><Person name={person.employee} index={index} /><button type="button" className="usage-bar-plot usage-bar-detail" {...employeeDetail.bind(person.employeeId,agentDetails(person))}><span className="usage-bar-track" aria-hidden="true" style={{ '--bar-width': `${person.knownInputTokens / employeeMaximum * 80}%` } as CSSProperties}>
+                {person.agents.filter(agent => agent.input > 0).map(agent => <span className="usage-bar-segment" key={agent.source} data-series={sourceSeries(agent.source)} style={{ flexGrow: agent.input }} />)}</span><span className="usage-bar-value"><TokenValue value={person.knownInputTokens} unknown={tokenUnknown(person, 'Input')} short />{person.unknownTokenSessions>0&&<span className="usage-cell-detail">{person.unknownTokenSessions} 会话未知</span>}</span></button></div>)}
               {people.some(person=>person.knownInputTokens>0) && <div className="usage-bar-axis" aria-hidden="true"><div /><div>{[0, 0.25, 0.5, 0.75, 1].map(tick => <span key={tick} style={{ left: `${tick * 80}%` }}>{compact(employeeMaximum * tick)}</span>)}</div></div>}
             </div> : <div className="usage-table-scroll"><table><caption>员工按 Agent 的已知输入 Token</caption><thead><tr><th>员工</th>{displayedAgents.map(source => <th key={source}>{sourceLabel(source)}</th>)}<th>合计</th><th>未知会话</th></tr></thead><tbody>{people.map(person => <tr key={person.employeeId}><th scope="row">{person.employee}</th>{person.agents.map(agent => <td key={agent.source}><TokenValue value={agent.input} unknown={agent.unknown} /></td>)}<td><TokenValue value={person.knownInputTokens} unknown={tokenUnknown(person, 'Input')} /></td><td>{person.unknownTokenSessions}</td></tr>)}</tbody></table></div>}
-          {agentTooltip && peopleChart && <p className="usage-chart-tooltip" role="tooltip">{agentTooltip}</p>}
+          {peopleChart&&employeeDetail.element}
           <ul className="usage-legend">{displayedAgents.map(source => <li key={source}><i data-series={sourceSeries(source)} />{sourceLabel(source)}</li>)}</ul>
         </section>}
       {loaded&&<OutputTable page={loaded}/>}
