@@ -8,7 +8,7 @@ import {mcpSandbox} from './mcp-support.js';
 
 // Reuse only the verified, stopped source bundle; each test gets its own DB/raw
 // copy. Without an explicit bundle, prepare the same full public-upload fixture.
-test('a waiting report includes all 19,000 intervals without inheriting the download response budget', {timeout:600000}, async()=>{
+test('complete reports retain 1,000 sessions and 19,000 waits independently of bounded transport pages', {timeout:600000}, async()=>{
   const directory=process.env.SKYNET_CAPACITY_SOURCE??await mkdtemp(join(tmpdir(),'skynet-capacity-'));
   const source=process.env.SKYNET_CAPACITY_SOURCE??join(directory,'source');
   if(!process.env.SKYNET_CAPACITY_SOURCE)await seedBundle(source,'capacity-functional',false,true);
@@ -31,5 +31,8 @@ test('a waiting report includes all 19,000 intervals without inheriting the down
     assert.deepEqual(await read('/api/wait-report?'+query+'&version='+report.version),report);
     assert.deepEqual(await read('/api/waits/recompute',{period:'since-enrollment'}),waits);
     assert.deepEqual(await read('/api/wait-report?'+query),report);
+    const prompts=await read('/api/prompt-report?'+query);
+    assert.deepEqual([prompts.kpis.sessions,prompts.kpis.prompts,prompts.kpis.context.denominator,prompts.kpis.context.unknown],[1000,20000,400,19600]);
+    assert.deepEqual(await read('/api/prompt-report/recompute',{period:'since-enrollment'}),prompts);
   }finally{await disposeOwned(f,owner);if(!process.env.SKYNET_CAPACITY_SOURCE)await rm(directory,{recursive:true,force:true});}
 });
