@@ -15,3 +15,21 @@ The public source-disappearance regression fails on accepted `726e32e` and passe
 `tests/assessment-periods-upgrade.ts` uses the same database with the accepted old binary and candidate. It compares complete current profiles, bounded pages, full recomputation, referenced assessments and fixed history across three periods and presets, nullable inference correction, unavailable original, recovery, late input and future-week context. It pins unrelated report refresh scheduling while retaining all work-content assertions, then checks fixed history after restart.
 
 `tests/assessment-periods-budget.ts` is an explicit 2,001-session public-upload capacity journey proving that the optimization boundary falls back to the complete result, including unknown inferences. External evidence under `54-assessment-periods-*` records exact commits, failures and timings. Performance diagnostics retain the unchanged 3 s / 1 s gates and are not P95 acceptance.
+
+## Fixed candidate evidence
+
+Candidate `e810304` passed all 24 same-database comparison groups, including a Wednesday as-of date with a future Friday append carrier and independent source. The 2,001-reference fallback retained all 2,001 sessions, 20,010 input Tokens, one known and 2,000 unknown first-prompt element observations; its 1,633,676-byte complete result matched full recomputation and fixed history after restart. A separate same-database 1,000-session old/new run compared the entire 134,021-byte employee export, including its work revisions, strictly equal.
+
+One serial instrumented first/subsequent read on each binary used the same original public-upload source bundle (10 employees, four weeks, 1,000 logical sessions, 80,000 events and 19,000 waits):
+
+| Measurement | Accepted 726e32e | Candidate e810304 |
+| --- | ---: | ---: |
+| First profile | 29,867 ms | 21,935 ms |
+| Subsequent profile | 19,361 ms | 12,986 ms |
+| Raw reads per request | 12,705 | 9,705 |
+| Subsequent cached fact rows | 4,505 | 2,505 |
+| Subsequent insight-view INSERTs | 0 | 0 |
+
+The candidate's raw reads include the final 1,000-source fresh verification. This is removal of repeated preparation, not a raw cache. Both 3,000/1,000 ms assertions still fail; the sample is not P95 or AC32 acceptance. The independent restored databases produced different profile versions, with no complete cross-clone payload retained to establish a cause. Consequently those runs establish cost and within-run current/fixed consistency only. Semantic equivalence is established separately by the same-database differential evidence; the cross-clone hash difference is not silently normalized or called equal.
+
+Earlier fixture scheduling failures and the same-employee activity-lock observation remain in `54-assessment-periods-fixture-triage.md`. The pre-freeze `upgrade-final.json` recorded HEAD `8cfb674` with uncommitted whole-callback changes; the clean `upgrade-e810304.json` supersedes it for final code provenance. No old failure log is overwritten.
