@@ -51,7 +51,7 @@ export function sessionEfficiencyService(db:Database,usage:ReturnType<typeof usa
   async function load(input:unknown,full=false,metricVersion?:string):Promise<{q:EfficiencyQuery;revision:EfficiencyRevision}>{
     const q=efficiencyQuerySchema.parse(input),request=selection(q);
     if(metricVersion!==undefined&&q.version)throw new HttpError(400,'固定产效版本不能混用新的指标输入');
-    if(full&&(q.version||q.offset||q.sessionId||q.segmentOffset))throw new HttpError(400,'重算不能指定固定版本或分页');
+    if(full&&(q.version||q.offset||q.sessionId||q.segmentOffset||q.section))throw new HttpError(400,'重算不能指定固定版本或分页');
     if(q.version){const revision=await revisions.open(q.version,request);if(!revision)throw new HttpError(404,'会话产效版本不存在');return{q,revision};}
     const source=metricVersion===undefined?await usage.complete(request,{full}):await usage.forMetric(request,metricVersion,full);
     const grouped=new Map<string,UsageSession[]>();for(const row of source.sessions.filter(row=>row.selected&&row.sessions)){if(!grouped.has(row.sessionId))grouped.set(row.sessionId,[]);grouped.get(row.sessionId)!.push(row);}
@@ -78,13 +78,28 @@ export function sessionEfficiencyService(db:Database,usage:ReturnType<typeof usa
   async function read(input:unknown,full=false){const {q,revision}=await load(input,full),value=revision.header;let sessions=revision.sessions.filter(row=>q.reviewOnly!=='true'||row.reviewReasons.length);
     const get=(row:EfficiencySession)=>q.sort==='date'?row.dates.at(-1)??'':q.sort==='prompts'?row.userTurns:q.sort==='code'?row.codeChanges:q.sort==='efficiency'?row.efficiency.value:row[q.sort];
     sessions=[...sessions].sort((a,b)=>{const x=get(a),y=get(b);if(x===null)return y===null?a.sessionId.localeCompare(b.sessionId):1;if(y===null)return-1;return(x<y?-1:x>y?1:0)*(q.direction==='asc'?1:-1)||a.sessionId.localeCompare(b.sessionId);});
-    let selected=q.sessionId?revision.sessions.filter(row=>row.sessionId===q.sessionId):sessions.slice(q.offset,q.offset+20);
+    const selected=q.section==='distributionPoints'?[]:q.sessionId?revision.sessions.filter(row=>row.sessionId===q.sessionId):sessions.slice(q.offset,q.offset+20);
     if(q.sessionId&&!selected.length)throw new HttpError(404,'该固定版本没有所选会话');
-    const projected=await Promise.all(selected.map(async row=>{if(!row.timing)return row;const offset=q.sessionId?q.segmentOffset:0,limit=q.sessionId?20:5;
-      return {...row,timing:{...row.timing,segments:await revision.segments(row.sessionId,offset,limit),segmentTotal:row.timing.segmentTotal,nextSegmentOffset:row.timing.segmentTotal>offset+limit?offset+limit:null}};}));
-    const result={...value,sessions:projected,filteredTotal:q.sessionId?1:sessions.length,nextOffset:!q.sessionId&&sessions.length>q.offset+selected.length?q.offset+selected.length:null};
-    while(!fitsPage(result)&&result.sessions.length>1){result.sessions.pop();if(!q.sessionId)result.nextOffset=q.offset+result.sessions.length;}
-    if(!fitsPage(result))throw new HttpError(413,'会话产效单项响应超过范围上限');return result;}
+    const projected=await Promise.all(selected.map(async row=>{if(!row.timing)return row;const offset=q.sessionId?q.segmentOffset:0,limit=q.section==='summaries'?0:q.sessionId?20:5;
+      const segments=limit?await revision.segments(row.sessionId,offset,limit):[];
+      return {...row,timing:{...row.timing,segments,segmentTotal:row.timing.segmentTotal,nextSegmentOffset:row.timing.segmentTotal>offset+segments.length?offset+segments.length:null}};}));
+    const points=value.distributions.flatMap(row=>row.points.map(point=>({taskType:row.taskType,point}))),pointOffset=q.section==='distributionPoints'?q.offset:0;
+    function distributionSlice(count:number){const selected=points.slice(pointOffset,pointOffset+count);return value.distributions.map(row=>({...row,points:selected.filter(item=>item.taskType===row.taskType).map(item=>item.point)}));}
+    const result:SessionEfficiencyPage={...value,sessions:projected,distributions:distributionSlice(0),filteredTotal:q.sessionId?1:sessions.length,
+      nextOffset:!q.sessionId&&q.section!=='distributionPoints'&&sessions.length>q.offset+selected.length?q.offset+selected.length:null};
+    if(points.length||q.section==='distributionPoints')result.distributionPage={total:points.length,offset:pointOffset,nextOffset:pointOffset<points.length?pointOffset:null};
+    while(!fitsPage(result)&&result.sessions.length>1){result.sessions.pop();result.nextOffset=q.offset+result.sessions.length;}
+    // A detail page can also adapt to long evidence URLs, without dropping any segment.
+    const only=result.sessions[0];while(!fitsPage(result)&&only?.timing&&only.timing.segments.length>1){only.timing.segments.pop();only.timing.nextSegmentOffset=(q.sessionId?q.segmentOffset:0)+only.timing.segments.length;}
+    if(!fitsPage(result))throw new HttpError(413,'会话产效单项响应超过范围上限：'+value.version+'/'+(q.section??q.sessionId??'sessions')+'/'+q.offset);
+    let lo=0,hi=points.length-pointOffset;
+    while(lo<hi){const mid=Math.ceil((lo+hi)/2);result.distributions=distributionSlice(mid);if(result.distributionPage)result.distributionPage.nextOffset=pointOffset+mid<points.length?pointOffset+mid:null;
+      if(fitsPage(result))lo=mid;else hi=mid-1;}
+    result.distributions=distributionSlice(lo);
+    if(result.distributionPage)result.distributionPage.nextOffset=pointOffset+lo<points.length?pointOffset+lo:null;
+    if(q.section!=='distributionPoints'&&pointOffset===0&&lo===points.length)delete result.distributionPage;
+    if(q.section==='distributionPoints'&&pointOffset<points.length&&!lo)throw new HttpError(413,'会话产效分布单项超过范围上限：'+value.version+'/'+pointOffset);
+    return result;}
 
   return{read,recompute:(input:unknown)=>read(input,true),export:async(input:unknown)=>(await load(input)).revision.complete(),
     exportFromMetric:async(input:unknown,metricVersion:string,full=false)=>(await load(input,full,metricVersion)).revision.complete()};

@@ -7,10 +7,12 @@ import type {WaitEvidence} from './waits.js';
 export const efficiencyQuerySchema=z.object({
   period:z.enum(['this-week','last-week','since-enrollment']).default('this-week'),employeeId:z.uuid().optional(),source:sourceSchema.optional(),project:z.string().max(1024).optional(),
   version:z.string().regex(/^[a-f0-9]{64}$/).optional(),offset:z.coerce.number().int().min(0).max(100000).default(0),
+  section:z.enum(['summaries','distributionPoints']).optional(),
   sort:z.enum(['date','tokens','prompts','code','verified','efficiency','rework']).default('date'),direction:z.enum(['asc','desc']).default('desc'),
   reviewOnly:z.enum(['true','false']).default('false'),
   sessionId:z.string().regex(/^[a-f0-9]{64}$/).optional(),segmentOffset:z.coerce.number().int().min(0).max(100000).default(0),
 }).strict().refine(q=>!q.offset||!!q.version,'后续分页必须固定版本')
+  .refine(q=>!q.section||!!q.version&&!q.sessionId&&!q.segmentOffset,'分区读取必须固定版本且不混用分段选择')
   .refine(q=>!q.sessionId||!!q.version&&!q.offset,'会话分段必须指定固定版本且不混用会话页码')
   .refine(q=>!q.segmentOffset||!!q.sessionId,'分段页码必须指定会话');
 export type EfficiencyQuery=z.infer<typeof efficiencyQuerySchema>;
@@ -24,4 +26,5 @@ export type EfficiencySession={sessionId:string;snapshotId:string;sourceSessionI
   inputVersions:{snapshotId:string;version:string}[];timing?:EfficiencyTiming};
 export type EfficiencyDistribution={taskType:typeof taskTypes[number];count:number;unknownCount:number;median:number|null;minimum:number|null;maximum:number|null;points:{value:number;count:number}[]};
 export type SessionEfficiencyPage={version:string;algorithmVersion:string;usageVersion:string;metricVersion:string;scope:MetricsScope;createdAt:string;dataAsOf:string;
-  total:number;reviewCount:number;tokenP75:number|null;sessions:EfficiencySession[];distributions:EfficiencyDistribution[];nextOffset:number|null;filteredTotal:number;definition:string};
+  total:number;reviewCount:number;tokenP75:number|null;sessions:EfficiencySession[];distributions:EfficiencyDistribution[];nextOffset:number|null;filteredTotal:number;definition:string;
+  distributionPage?:{total:number;offset:number;nextOffset:number|null}};
