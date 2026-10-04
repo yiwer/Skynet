@@ -13,6 +13,7 @@
     "collector": "tsx apps/collector/cli.ts",
     "provision": "tsx apps/server/provision.ts",
     "test": "tsx tests/run.ts",
+    "test:metrics-performance": "tsx tests/metrics-performance.ts",
     "demo": "tsx tests/demo.ts",
     "test:linux": "tsx tests/linux-smoke.ts",
     "test:native-recovery": "tsx --test tests/native-recovery.test.ts",
