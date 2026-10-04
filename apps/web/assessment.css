@@ -1,0 +1,64 @@
+.platform-main .assessment-page{display:flex;flex-direction:column;min-height:0;height:100%;overflow:hidden;gap:16px}
+.platform-main .assessment-heading{display:flex;justify-content:space-between;align-items:center;gap:16px;flex:none}
+.platform-main .assessment-heading p{font-size:12px;color:var(--color-muted);margin:0 0 6px}
+.platform-main .assessment-heading h1{font-size:28px;font-family:var(--font-serif);margin:0}
+.platform-main .assessment-actions,.platform-main .assessment-controls{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.platform-main .assessment-actions button{white-space:nowrap;font-size:12px}
+.platform-main .assessment-controls{border-bottom:1px solid var(--color-rule);padding-bottom:14px;font-size:12px;flex:none;color:var(--color-muted)}
+.platform-main .assessment-controls label{display:flex;align-items:center;gap:8px;margin:0;min-width:0;white-space:nowrap}
+.platform-main .assessment-controls select{max-width:220px;margin:0;min-height:34px}
+.platform-main .assessment-controls>span{padding-left:10px;border-left:1px solid var(--color-rule)}
+.platform-main .assessment-content{overflow:auto;min-height:0;flex:1;padding:0 10px 24px 0;scrollbar-gutter:stable}
+.platform-main .assessment-empty{padding:56px 20px;border:1px solid var(--color-rule);border-radius:12px;background:var(--color-card);text-align:center;color:var(--color-muted);font-size:14px}
+.platform-main .assessment-verdict{display:grid;grid-template-columns:1.2fr 1fr;border:1px solid var(--color-rule);border-radius:16px;background:var(--color-card);overflow:hidden}
+.platform-main .assessment-verdict>div{padding:24px 28px}
+.platform-main .assessment-eyebrow{font-size:12px;color:var(--color-muted);margin:0 0 18px}
+.platform-main .assessment-score{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.platform-main .assessment-score>strong{font-family:var(--font-mono);font-size:54px;line-height:1.1;letter-spacing:-3px;font-weight:600}
+.platform-main .assessment-score>span:last-child{font-size:14px;color:var(--color-muted)}
+.platform-main .assessment-level{padding:4px 10px;border-radius:6px;background:var(--color-paper-2);font-size:14px}
+.platform-main .assessment-level[data-level=较好]{background:var(--color-ok-soft);color:var(--color-ok)}
+.platform-main .assessment-level[data-level=需提升]{background:var(--color-warn-soft);color:var(--color-warn)}
+.platform-main .assessment-reason{font-size:15px;margin:20px 0 8px}
+.platform-main .assessment-confidence,.platform-main .assessment-sample{font-size:12px;color:var(--color-muted)}
+.platform-main .assessment-sample{display:flex;gap:14px;flex-wrap:wrap;margin-top:18px}
+.platform-main .assessment-verdict aside{border-left:1px solid var(--color-rule-soft);padding:24px;background:var(--color-paper)}
+.platform-main .assessment-verdict aside h2{font-size:12px;color:var(--color-muted);font-weight:500;margin:0 0 10px}
+.platform-main .assessment-chips{display:flex;gap:8px;margin-bottom:20px;flex-wrap:wrap}
+.platform-main .assessment-chips span{padding:4px 8px;color:var(--color-ok);background:var(--color-ok-soft);border-radius:6px;font-size:12px}
+.platform-main .assessment-verdict ul{list-style:none;margin:0;padding:0;display:grid;gap:14px}
+.platform-main .assessment-verdict li{font-size:13px;display:grid;gap:5px;line-height:1.7}
+.platform-main .assessment-verdict li strong{font-size:12px;color:var(--color-warn)}
+.platform-main .assessment-section-title{display:flex;justify-content:space-between;align-items:center;gap:12px;margin:26px 0 12px}
+.platform-main .assessment-section-title h2{margin:0;font-size:16px}
+.platform-main .assessment-section-title>span{font-size:11px;color:var(--color-muted);display:flex;gap:7px;align-items:center}
+.platform-main .assessment-section-title i{height:12px;border-left:2px solid var(--color-muted);margin-left:8px}
+.platform-main .assessment-dimensions{border:1px solid var(--color-rule);border-radius:12px;overflow:hidden;background:var(--color-card)}
+.platform-main .assessment-dimension+details{border-top:1px solid var(--color-rule)}
+.platform-main .assessment-dimension>summary{display:grid;grid-template-columns:minmax(100px,1fr) minmax(120px,2fr) 36px 68px;gap:16px;align-items:center;padding:17px 20px;cursor:pointer;list-style:none;font-size:13px}
+.platform-main .assessment-dimension>summary:hover{background:var(--color-hover)}
+.platform-main .assessment-dimension>summary>b{font-family:var(--font-mono);text-align:right}
+.platform-main .assessment-dim-state{font-size:11px;color:var(--color-muted);text-align:right}
+.platform-main .assessment-dim-state[data-low]{color:var(--color-warn)}
+.platform-main .assessment-bar{position:relative;background:var(--color-paper-2);height:8px;border-radius:3px}
+.platform-main .assessment-bar>i{display:block;height:100%;background:var(--color-accent);border-radius:3px;transition:width var(--dur-long) var(--ease-out)}
+.platform-main .assessment-bar>em{position:absolute;top:-3px;width:2px;height:14px;background:var(--color-muted)}
+.platform-main .assessment-metrics{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,260px),1fr));gap:12px;padding:0 20px 14px}
+.platform-main .assessment-metrics article{padding:14px;border:1px solid var(--color-rule-soft);border-radius:8px;background:var(--color-paper);min-width:0}
+.platform-main .assessment-metric-heading{display:flex;justify-content:space-between;gap:10px;font-size:12px;line-height:1.5}
+.platform-main .assessment-metric-heading span{font-weight:500;white-space:nowrap;color:var(--color-muted)}
+.platform-main .assessment-metrics dl{display:flex;flex-wrap:wrap;gap:12px 18px;margin:14px 0 0}
+.platform-main .assessment-metrics dt{font-size:11px;color:var(--color-muted);margin-bottom:4px}
+.platform-main .assessment-metrics dd{font:12px var(--font-mono);margin:0}
+.platform-main .assessment-metrics article>p,.platform-main .assessment-weight{font-size:11px;color:var(--color-muted);line-height:1.6}
+.platform-main .assessment-weight{margin:0;padding:0 20px 14px}
+.platform-main .assessment-evidence{display:flex;flex-wrap:wrap;gap:12px;margin-top:12px;font-size:11px}
+.platform-main .assessment-method,.platform-main .assessment-coverage{margin-top:18px;font-size:12px;line-height:1.7;color:var(--color-muted)}
+.platform-main .assessment-method summary,.platform-main .assessment-coverage summary{cursor:pointer}
+.platform-main .assessment-method dl>div{display:grid;grid-template-columns:140px 1fr;gap:12px;margin:8px 0}
+.platform-main .assessment-method dd{margin:0;font-size:11px;overflow-wrap:anywhere}
+.platform-main .assessment-representatives{margin-top:24px;display:flex;gap:18px;align-items:center;flex-wrap:wrap;font-size:13px}
+.platform-main .assessment-representatives h2{font-size:16px;margin:0}
+@media(max-width:760px){.platform-main .assessment-verdict{grid-template-columns:1fr}.platform-main .assessment-verdict aside{border-left:0;border-top:1px solid var(--color-rule-soft)}.platform-main .assessment-heading{align-items:flex-start}.platform-main .assessment-heading h1{font-size:23px}.platform-main .assessment-actions{gap:6px}.platform-main .assessment-dimension>summary{grid-template-columns:1fr 36px 60px;gap:8px;padding:15px}.platform-main .assessment-bar{grid-row:2;grid-column:1/-1}.platform-main .assessment-metrics{padding:0 14px 14px}.platform-main .assessment-verdict>div,.platform-main .assessment-verdict aside{padding:20px}.platform-main .assessment-section-title{align-items:flex-start;flex-direction:column;gap:6px}.platform-main .assessment-method dl>div{grid-template-columns:1fr;gap:3px}}
+@media(max-width:390px){.platform-main .assessment-heading{flex-direction:column;gap:10px}.platform-main .assessment-controls{gap:8px}.platform-main .assessment-controls label{width:100%}.platform-main .assessment-controls select{flex:1;max-width:100%;min-width:0}.platform-main .assessment-controls>span{border:0;padding:0;margin-right:8px}.platform-main .assessment-score>strong{font-size:46px}.platform-main .assessment-verdict>div,.platform-main .assessment-verdict aside{padding:16px}.platform-main .assessment-content{padding-right:4px}}
+@media(prefers-reduced-motion:reduce){.platform-main .assessment-bar>i{transition:none}}
