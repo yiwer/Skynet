@@ -42,7 +42,7 @@ type NavigationItem = { label: string; icon: IconName; view?: string; activeView
 const navigation: { label: string; items: NavigationItem[] }[] = [
   { label: '观察', items: [
     { label: '团队概览', icon: 'overview', view: 'coverage', activeViews: ['coverage', 'daily'] },
-    { label: '活动记录', icon: 'list' },
+    { label: '活动记录', icon: 'list', view: 'activity' },
     { label: '员工', icon: 'person', view: 'profile' },
     { label: '项目', icon: 'folder', view: 'work' },
     { label: '会话', icon: 'session', view: 'archive' },
@@ -50,7 +50,7 @@ const navigation: { label: string; items: NavigationItem[] }[] = [
   { label: '报表', items: [
     { label: '用量与产出', icon: 'chart', view: 'metrics' },
     { label: '会话产效', icon: 'gauge' },
-    { label: '提示词分析', icon: 'quote' },
+    { label: '提示词分析', icon: 'quote', view:'prompts' },
     { label: '响应与等待', icon: 'clock', view: 'waits' },
   ] },
   { label: '存档', items: [{ label: '会话找回', icon: 'restore', view: 'recovery' }] },

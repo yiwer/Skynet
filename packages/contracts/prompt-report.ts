@@ -1,0 +1,20 @@
+import {z} from 'zod';
+import {sourceSchema} from './archive.js';
+import type {MetricsScope} from './metrics.js';
+import type {InsightCitation,taskTypes,promptElementLabels} from './session-insights.js';
+const version=z.string().regex(/^[a-f0-9]{64}$/);
+export const promptReportQuerySchema=z.object({period:z.enum(['this-week','last-week','since-enrollment']).default('this-week'),
+  employeeId:z.uuid().optional(),source:sourceSchema.optional(),project:z.string().max(1024).optional(),version:version.optional(),usageVersion:version.optional()}).strict();
+export type PromptReportQuery=z.infer<typeof promptReportQuerySchema>;
+export type PromptFraction={numerator:number;denominator:number;unknown:number;value:number|null};
+export type PromptExample={employeeId:string;employee:string;messageId:string;citations:InsightCitation[];followingCitations:InsightCitation[];elements:(keyof typeof promptElementLabels)[];analysisVersions:string[]};
+export type PromptSuggestion={employeeId:string;employee:string;text:string;citations:InsightCitation[];analysisVersions:string[]};
+export type PromptReport={version:string;algorithmVersion:string;usageVersion:string;createdAt:string;dataAsOf:string;scope:MetricsScope;
+  kpis:{prompts:number;sessions:number;medianLength:{value:number|null;knownMedian:number|null;knownCount:number;unknownCount:number};context:PromptFraction;rework:PromptFraction;cleanSessions:PromptFraction;clarification:PromptFraction};
+  employees:{employeeId:string;employee:string;prompts:number;elements:Record<keyof typeof promptElementLabels,PromptFraction>;taskMix:{taskType:typeof taskTypes[number];prompts:number}[]}[];
+  lengths:{label:string;minimum:number;maximum:number|null;count:number;rework:PromptFraction}[];
+  contextComparison:{withContext:PromptFraction;withoutContext:PromptFraction;unknownPairs:number};
+  examples:{positive:PromptExample[];negative:PromptExample[];positiveCount:number;negativeCount:number};suggestions:PromptSuggestion[];
+  projects:string[];
+  sourceInputsComplete:boolean;unknownReasons:string[];
+};
