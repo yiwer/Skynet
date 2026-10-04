@@ -6,7 +6,7 @@ Qoder 的 [Credits 文档](https://docs.qoder.cn/cli/sdk/cost-usage) 区分 Toke
 
 ## 配置
 
-以下为手动分析、仅允许免费模型的有限请求样例。路径对应专用 Qoder 镜像；专用 PAT 文件应由部署者另行配置，不能放进仓库、网页或公开配置。
+以下为关闭增量自动分析、仅允许免费模型的有限请求样例。路径对应专用 Qoder 镜像；专用 PAT 文件应由部署者另行配置，不能放进仓库、网页或公开配置。
 
 ```json
 {
@@ -29,7 +29,7 @@ Qoder 的 [Credits 文档](https://docs.qoder.cn/cli/sdk/cost-usage) 区分 Toke
 }
 ```
 
-`requestBudget` 必须是 1–1,000,000,000 的整数，至少能预留一次 `maxRequests`。`requireFreeModel` 在 Qoder 模式默认 true；运行时仍需逐次核对模型目录的 enabled、isFree 和 priceFactor，不能用此静态字段宣称任意模型免费。样例关闭自动分析。
+`requestBudget` 必须是 1–1,000,000,000 的整数，至少能预留一次 `maxRequests`。`requireFreeModel` 在 Qoder 模式默认 true；运行时仍需逐次核对模型目录的 enabled、isFree 和 priceFactor，不能用此静态字段宣称任意模型免费。样例关闭采集更新后的增量自动分析；日报读取仍可按既有流程安排分析，并消耗同一持久请求额度。
 
 Qoder 模式的 `maxRequestBytes` 限制平台构造的完整分析请求：系统指令、引用规则、JSON Schema、带来源的用户输入、model 和 maxOutputTokens 合并序列化后的 UTF-8 字节。SDK 与提供商内部协议的额外字节不可观察，不属于这一上限；此值不能作为提供商计费依据。SDK 的 stderr 接口由平台接管并丢弃，宿主调试环境变量也不能把历史对话内容写入日志。
 
