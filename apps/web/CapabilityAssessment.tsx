@@ -20,13 +20,17 @@ export function CapabilityAssessment({ request, currentEmployeeId, appendNote, f
   const [retry, setRetry] = useState(0), [people, setPeople] = useState<{ id: string; name: string }[]>([]), [next, setNext] = useState<number | null>(null);
   const [history, setHistory] = useState<AssessmentHistoryPage>(), [historyBusy, setHistoryBusy] = useState(false);
   const historyAbort = useRef<AbortController | null>(null);
+  const [dimensionChart, setDimensionChart] = useState(true);
+  const pendingDimension = useRef<string | null>(null);
   const employeeId = query.get('employeeId') ?? currentEmployeeId, version = query.get('version');
   const returnTo = query.get('returnTo');
   const profileLink = (id: string, period: string, preset: string, version?: string) => profileWithReturn(profile(id, period, preset, version), returnTo);
   const requestedPeriod = query.get('period'), requestedPreset = query.get('preset');
   const period = version ? data?.selection?.period ?? requestedPeriod ?? 'since-enrollment' : requestedPeriod ?? 'since-enrollment';
   const preset = version ? data?.preset ?? requestedPreset ?? '默认' : requestedPreset ?? '默认';
-  function dimension(key:string){const element=document.getElementById('profile-dimension-'+key) as HTMLDetailsElement|null;if(!element)return;element.open=true;element.querySelector('summary')?.focus({preventScroll:true});element.scrollIntoView({block:'start',behavior:matchMedia('(prefers-reduced-motion: reduce)').matches?'instant':'smooth'});}
+  function focusDimension(key:string){const element=document.getElementById('profile-dimension-'+key) as HTMLDetailsElement|null;if(!element)return;element.open=true;element.querySelector('summary')?.focus({preventScroll:true});element.scrollIntoView({block:'start',behavior:matchMedia('(prefers-reduced-motion: reduce)').matches?'instant':'smooth'});}
+  function dimension(key:string){if(dimensionChart)focusDimension(key);else{pendingDimension.current=key;setDimensionChart(true);}}
+  useEffect(()=>{if(dimensionChart&&pendingDimension.current){focusDimension(pendingDimension.current);pendingDimension.current=null;}},[dimensionChart]);
   useEffect(() => { const change = () => setQuery(selection()); window.addEventListener('hashchange', change); return () => window.removeEventListener('hashchange', change); }, []);
   useEffect(() => {
     if (frozen) return;
@@ -85,14 +89,14 @@ export function CapabilityAssessment({ request, currentEmployeeId, appendNote, f
         {!!(data.strengths.length || data.priorities.length) && <aside>{data.strengths.length > 0 && <><h2>强项</h2><div className="assessment-chips">{data.strengths.map(key => <button key={key} onClick={()=>dimension(key)}>{data.dims[key].label} {number(data.dims[key].score)}</button>)}</div></>}
           {data.tips.length > 0 && <><h2>优先提升</h2><ul>{data.tips.map(tip => <li key={tip.dim}><strong><button onClick={()=>dimension(tip.dim)}>{data.dims[tip.dim].label}</button></strong><span>{tip.text}</span></li>)}</ul></>}</aside>}</section>
       {data.coverageIssues.length > 0 && <details className="assessment-coverage"><summary>采集覆盖 · {data.coverageIssues.length} 项</summary><ul>{data.coverageIssues.map(issue => <li key={issue}>{issue}</li>)}</ul></details>}
-      <div id="profile-dimensions" tabIndex={-1} className="assessment-section-title"><h2>能力维度</h2><span>本人得分 <i /> 团队中位数</span></div>
-      <div className="assessment-dimensions">{dimKeys.map(key => { const dim = data.dims[key], score = dim.score === null ? null : Math.round(dim.score), unknown = dim.metrics.every(metric => metric.state === 'unknown'); return <details id={'profile-dimension-'+key} className="assessment-dimension" key={key} open={score !== null && score < 60}>
+      <div id="profile-dimensions" tabIndex={-1} className="assessment-section-title"><h2>能力维度</h2><span>本人得分 <i /> 团队中位数</span><div className="assessment-segments" role="group" aria-label="能力维度显示方式"><button aria-label="能力维度图表" aria-pressed={dimensionChart} onClick={()=>setDimensionChart(true)}>图表</button><button aria-label="能力维度表格" aria-pressed={!dimensionChart} onClick={()=>setDimensionChart(false)}>表格</button></div></div>
+      {dimensionChart?<div className="assessment-dimensions">{dimKeys.map(key => { const dim = data.dims[key], score = dim.score === null ? null : Math.round(dim.score), unknown = dim.metrics.every(metric => metric.state === 'unknown'); return <details id={'profile-dimension-'+key} className="assessment-dimension" key={key} open={score !== null && score < 60}>
         <summary><strong>{dim.label}</strong><div className="assessment-bar" role="img" aria-label={`${dim.label} ${number(score)} 分，团队中位数 ${number(dim.teamMedian)}`}><i style={{ width: (score ?? 0) + '%' }} />{dim.teamMedian !== null && <em style={{ left: dim.teamMedian + '%' }} />}</div>
           <b>{number(score)}</b><span className="assessment-dim-state" data-low={score !== null && score < 60 || undefined}>{score === null ? unknown ? '来源未知' : '样本不足' : score < 60 ? '待提升' : score >= 70 ? '强项' : '一般'}</span></summary>
         <div className="assessment-metrics" aria-label={dim.label + '指标'}>{dim.metrics.map(metric => <article key={metric.key}><div className="assessment-metric-heading"><strong>{metric.label}</strong><span>{metric.state === 'scored' ? `${number(metric.score)} 分` : metric.state === 'unknown' ? '来源未知' : '样本不足'}</span></div>
           <dl><div><dt>原始值</dt><dd>{formatted(metric.value, metric.unit)}</dd></div><div><dt>0 → 100 分</dt><dd>{formatted(metric.anchor[0], metric.unit)} → {formatted(metric.anchor[1], metric.unit)}</dd></div><div><dt>样本 {metric.samples}</dt><dd>门槛 {metric.minimum}</dd></div></dl>
           {metric.reason && <p>{metric.reason}</p>}{metric.evidence.length > 0 && <div className="assessment-evidence">{metric.evidence.map((item, index) => <a key={item.webPath + index} href={item.webPath}>{item.quote ? `原文 ${index + 1}` : '查看会话'}</a>)}</div>}</article>)}</div>
-        <p className="assessment-weight">方案权重 {dim.weight}% · 本次权重 {Number(dim.effectiveWeight.toFixed(1))}%</p></details>; })}</div>
+        <p className="assessment-weight">方案权重 {dim.weight}% · 本次权重 {Number(dim.effectiveWeight.toFixed(1))}%</p></details>; })}</div>:<table className="assessment-dimension-table" aria-label="能力维度对照"><thead><tr><th>维度</th><th>本人得分</th><th>团队中位数</th></tr></thead><tbody>{dimKeys.map(key=><tr key={key}><th scope="row">{data.dims[key].label}</th><td>{data.dims[key].score===null?'未知':number(data.dims[key].score)}</td><td>{data.dims[key].teamMedian===null?'未知':number(data.dims[key].teamMedian)}</td></tr>)}</tbody></table>}
       {!additions?.hideRepresentatives&&(data.representatives.best || data.representatives.rework) && <section className="assessment-representatives"><h2>代表性会话</h2>{data.representatives.best && <a href={data.representatives.best.webPath}>最佳示例</a>}{data.representatives.rework && <a href={data.representatives.rework.webPath}>返工较多</a>}</section>}
       </>}
       {additions?.content}
