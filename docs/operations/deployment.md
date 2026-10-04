@@ -191,3 +191,9 @@ sudo bash /opt/skynet/current/deploy/ubuntu-release.sh \
 切换前一致备份回执 `/opt/skynet/receipts/backup-20261004T042255Z-2193158.json` 为 completed，备份 ID `76f2de59-971a-48f0-8ad1-836ce50d18c7`，含 5 个原件对象、132,332 bytes，SQL dump 为 141,928 bytes。app/db 健康，数据库容器保持运行，previous 为 `v2-ec9b2d3bcd0b-1`。已有四个 nginx site 哈希不变、配置检查通过、证书续期 active，分析 Worker 禁用。
 
 34 项只读生产检查通过，增加用量、等待及等待统计的授权与固定历史导出一致性，并确认旧发布的固定指标仍可读取。真实会话原件仍为 106,317 bytes，SHA-256 `0efa7692784020f5ea2dead09df32b949e722039d9d32c865ab81583971cc437`，3 条消息、2 次工具调用、8 条 Trace 保留。浏览器实测用量、响应等待与真实对话，1280×720 文档尺寸等于视口，工具/Trace 可展开，无控制台错误。已知部分 Token 为输入 67,091、输出 700；完整计数基线仍未知，组装状态仍有缺口，未据已知小计宣称完整。证据目录 `E:/GenCode/Skynet-evidence/v2-2026-10-04/deploy-v2-91544e8b1424-1/` 包含发布/冒烟记录和页面截图。本轮没有新增生产合成会话或模型调用；AC-32 未签收。
+
+2026-10-04 14:00（北京时间）发布活动记录、会话产效、提示词报表与使用能力模型 **`v2-235bdd4a2335-1`**。固定 Git `235bdd4a23355b5d080a410a9ab8bcf384d4a022`；归档 SHA-256 `147cf16038c18022b39d20a02273ae8e5d6e37865270b079bd06e9884a628ff7`，服务器源码 SHA-256 `91a37d83f61eb1c121cab68e49d5ad37602d0c07d3b23934597521465a55fd13`，镜像 `sha256:a77725acdd238bf8793a3a1daf4aeecd6229595b0e6cf30473c8a6a2725aa329`。实际资产为 `index-CxmCfPDL.js` / `index-DU1lXB3p.css`。
+
+切换前备份回执 `/opt/skynet/receipts/backup-20261004T060047Z-2323412.json` 为 completed，ID `9d7c230b-37e2-4ed0-ba86-d69175e4ae95`，5个原件对象132,332 bytes，SQL dump158,712 bytes。app/db健康，数据库保持运行，previous为`v2-91544e8b1424-1`。四个既有nginx站点哈希一致，配置检查通过，Certbot timer active；分析Worker禁用。
+
+53项只读生产检查通过，新增活动、产效、提示词、评估的鉴权、固定读取与导出，上一发布的用量/等待/等待报表固定结果仍可读。真实会话原件仍为106,317 bytes且上述SHA不变，3条消息、2次工具、8条Trace均保留。员工低可信度保持待定；有可计分维度时可有参考指数，不据指数判断评级完成。生产日期10月3日实际有12条活动；各新页面在1280×720外层不滚动。浏览器发现日期输入紧接点击“应用”会被旧筛选值覆写，已交原作者修复，记录真实问题而不宣称完整视觉交互验收。证据在`E:/GenCode/Skynet-evidence/v2-2026-10-04/deploy-v2-235bdd4a2335-1/`。本批没有新增测试存档或调用模型；#46及后续功能、真实试点、AC-32尚待后续验收。
