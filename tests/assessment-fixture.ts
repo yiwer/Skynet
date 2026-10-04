@@ -51,7 +51,7 @@ export async function assessmentFixture() {
     original.push(counter(input.tokens ?? 1000, timestamp((input.prompts ?? 5) * (input.long ? 601_100 : 1100))));
     return { rows: original, sessionId: id };
   }
-  async function analyze(person: Owner, snapshotId: string, options:{beforeFinish?:()=>Promise<void>;expectedState?:string;taskCitations?:number}={}) {
+  async function analyze(person: Owner, snapshotId: string, options:{beforeFinish?:()=>Promise<void>;expectedState?:string;taskCitations?:number;clarification?:boolean}={}) {
     await sandbox.testDatabase.query("UPDATE analysis_workers SET updated_at=now() WHERE id='assessment-fixture'");
     const response = await api(person, `/api/snapshots/${snapshotId}/analysis`, {}); assert.equal(response.status, 202, await response.clone().text());
     const job = await response.json(), claim = await queue.claim(); assert.equal(claim?.id, job.id);
@@ -62,7 +62,7 @@ export async function assessmentFixture() {
       return { usage: { inputTokens: 100, outputTokens: 20, runtimeCostUsd: null, providerBilledCny: null, requests: 1 }, output: input.analysisContext?.phase === 'aggregate' ? { items } : { items, insights: {
         version: 'session-insights-1', taskType: { value: 'implementation', citations: input.events.flatMap((event,index)=>event.role==='user'?[cite(index)]:[]).slice(0,options.taskCitations??1) },
         prompts: input.events.flatMap((event, index) => event.role === 'user' ? [{ event: index, elements: Object.fromEntries(['goal','constraints','context','acceptance'].map((key, n) => [key, n < Number(/elements=(\d)/.exec(event.text)?.[1] ?? 3)])), rework: event.text.startsWith('返工'), citations: [cite(index)] }] : []),
-        replies: input.events.flatMap((event, index) => event.role === 'assistant' ? [{ event: index, clarification: false, citations: [cite(index)] }] : []),
+        replies: input.events.flatMap((event, index) => event.role === 'assistant' ? [{ event: index, clarification: options.clarification??false, citations: [cite(index)] }] : []),
         outcomes: input.events.flatMap((event, index) => event.role === 'tool result' ? [{ status: 'verified', text: event.text, citations: [cite(index)] }]
           : event.role === 'assistant' && event.text.startsWith('声称 ') && !event.text.startsWith('声称 0') ? [{ status: 'claimed', text: event.text, citations: [cite(index)] }] : []), suggestions: [] } } };
     });

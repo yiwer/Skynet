@@ -3,38 +3,35 @@ import type { SessionInsights, SessionInferences, InsightCitation } from '../../
 import type { CapabilityAssessment, MetricScore } from '../../packages/contracts/assessment.js';
 import type { WaitsPage } from '../../packages/contracts/waits.js';
 import { assessmentModel, scoreMetric } from './assessment-model.js';
+import type {RecordedMessage} from '../../packages/contracts/message-facts.js';
+import {promptFactors} from './prompt-factors.js';
 
 const mean = (xs: number[]) => xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : null;
 export const median = (xs: number[]) => { const values = [...xs].sort((a, b) => a - b), middle = Math.floor(values.length / 2); return !values.length ? null : values.length % 2 ? values[middle]! : (values[middle - 1]! + values[middle]!) / 2; };
 const sumKnown = (values: (number | null)[]) => values.some(n => n === null) ? null : values.reduce<number>((n, value) => n + value!, 0);
-type Prompt = SessionInferences['prompts'][number];
-type Reply = SessionInferences['replies'][number];
+type Prompt = Pick<SessionInferences['prompts'][number],'elements'|'rework'|'complete'|'citations'> & {first:boolean|null};
+type Reply = {clarifications:number|null;citations:InsightCitation[]};
 export type AssessmentSession = {
   sessionId: string; employeeId: string; snapshotId: string; webPath: string; versions: { snapshotId: string; version: string }[];
   analysisVersions: string[]; task: string; done: boolean; turnKnown: boolean; historyKnown: boolean; inferenceComplete: boolean;
   userTurns: number; tokens: number | null; verified: number | null; claimed: number | null; tests: number | null;
   prompts: Prompt[]; replies: Reply[]; rework: number | null; evidence: InsightCitation[];
 };
-function citedEvent(citations: InsightCitation[], employeeId: string, from: string, to: string) {
-  const eligible = citations.filter(c => c.context === 'after-enrollment' && c.origin?.employeeId === employeeId && c.origin.sourceDate && c.origin.sourceDate >= from && c.origin.sourceDate <= to);
-  if (!eligible.length || eligible.length !== citations.length) return null;
-  const ids = new Set(eligible.map(c => c.origin!.eventId)); return ids.size === 1 ? [...ids][0]! : null;
-}
-export function assessmentSessions(rows: UsageSession[], views: SessionInsights[], range: { from: string; to: string }): AssessmentSession[] {
+export function assessmentSessions(rows: UsageSession[], views: SessionInsights[], range: { from: string; to: string },messages:RecordedMessage[]): AssessmentSession[] {
   const byVersion = new Map(views.map(view => [view.version, view])), groups = new Map<string, UsageSession[]>();
   for (const row of rows.filter(row => row.sessions)) {
     const key = row.employeeId + '/' + row.sessionId; groups.set(key, [...groups.get(key) ?? [], row]);
   }
+  const scoped=messages.filter(message=>message.context==='after-enrollment'&&message.sourceDate&&message.sourceDate>=range.from&&message.sourceDate<=range.to&&rows.some(row=>
+    row.employeeId===message.employeeId&&row.project===message.project&&row.source===message.source&&row.sourceSessionId===message.sourceSessionId&&row.snapshotIds.includes(message.originalSnapshotId)));
+  const native=promptFactors(rows.filter(row=>row.sessions),views,scoped,messages);
   return [...groups.values()].map(group => {
     const first = group[0]!, versions = [...new Map(group.flatMap(row => row.insightVersions).map(v => [v.version, v])).values()];
     const inputs = versions.map(v => byVersion.get(v.version)!), leafIds = new Set(group.flatMap(row => row.latestCarrierSnapshotIds));
     const leaves = inputs.filter(view => leafIds.has(view.snapshotId));
-    const prompts = new Map<string, Prompt>(), replies = new Map<string, Reply>();
-    for (const view of inputs) {
-      for (const prompt of view.inferences?.prompts ?? []) { const id = citedEvent(prompt.citations, first.employeeId, range.from, range.to); if (id) prompts.set(id, prompt); }
-      for (const reply of view.inferences?.replies ?? []) { const id = citedEvent(reply.citations, first.employeeId, range.from, range.to); if (id) replies.set(id, reply); }
-    }
-    const promptList = [...prompts.values()], nonFirst = promptList.filter(p => !p.first), userTurns = group.reduce((n, row) => n + row.userTurns, 0);
+    const selected=native.prompts.filter(prompt=>prompt.sessionId===first.sessionId&&prompt.employeeId===first.employeeId);
+    const promptList:Prompt[]=selected.map(prompt=>({...prompt,complete:leaves.length>0&&leaves.every(view=>view.state==='complete'&&view.inferences?.complete)}));
+    const nonFirst = promptList.filter(p => p.first===false), userTurns = group.reduce((n, row) => n + row.userTurns, 0);
     const complete = leaves.length > 0 && leaves.every(v => v.state === 'complete') && promptList.length === userTurns;
     const historyKnown = leaves.length > 0 && leaves.every(v => v.messageHistoryComplete === true);
     const tasks = new Set(leaves.map(view => view.state === 'complete' ? view.inferences?.taskType.value ?? 'unknown' : 'unknown'));
@@ -43,7 +40,7 @@ export function assessmentSessions(rows: UsageSession[], views: SessionInsights[
       task: tasks.size === 1 ? [...tasks][0]! : 'unknown', done: leaves.length > 0 && leaves.every(v => v.sourceState?.turn.state === 'waiting-input'),
       turnKnown: leaves.length > 0 && leaves.every(v => v.sourceState && v.sourceState.turn.state !== 'unknown'), historyKnown, inferenceComplete: complete, userTurns,
       tokens: sumKnown(group.map(row => row.inputTokens)), verified: sumKnown(group.map(row => row.outputs.verified.value)), claimed: sumKnown(group.map(row => row.outputs.claimed.value)), tests: sumKnown(group.map(row => row.outputs.tests.value)),
-      prompts: promptList, replies: [...replies.values()], rework: historyKnown && complete && nonFirst.every(p => p.complete && p.rework !== null) ? nonFirst.filter(p => p.rework).length : null,
+      prompts: promptList, replies: selected.map(prompt=>({clarifications:prompt.clarifications,citations:prompt.clarificationCitations})), rework: historyKnown && complete && promptList.every(p=>p.first!==null) && nonFirst.every(p => p.complete && p.rework !== null) ? nonFirst.filter(p => p.rework).length : null,
       evidence: inputs.flatMap(v => [...v.inferences?.outcomes.flatMap(o => o.citations) ?? [], ...v.facts.tests.evidence]) };
   });
 }
@@ -72,12 +69,12 @@ export function fillAssessmentFactors(dims: CapabilityAssessment['dims'], sessio
   const metric = (key: string) => Object.values(dims).flatMap(dim => dim.metrics).find(item => item.key === key)!;
   if (!sessions.length) return { promptTip: null, representatives: { best: null, rework: null } };
   const prompts = sessions.flatMap(s => s.prompts), ordered = sessions.filter(s => s.historyKnown).flatMap(s => s.prompts);
-  const first = ordered.filter(p => p.first), nonFirst = ordered.filter(p => !p.first), complete = sessions.every(s => s.inferenceComplete);
+  const first = ordered.filter(p => p.first===true), nonFirst = ordered.filter(p => p.first===false), complete = sessions.every(s => s.inferenceComplete);
   const promptN = sessions.reduce((n, s) => n + s.userTurns, 0), verified = sumKnown(sessions.map(s => s.verified)), claimed = sumKnown(sessions.map(s => s.claimed));
-  const firstComplete = complete && sessions.every(s => s.historyKnown) && first.every(p => p.complete && Object.values(p.elements).every(value => value !== null));
+  const firstComplete = complete && sessions.every(s => s.historyKnown) && ordered.every(p=>p.first!==null) && first.every(p => p.complete && Object.values(p.elements).every(value => value !== null));
   scoreMetric(metric('elem'), firstComplete ? mean(first.map(p => Object.values(p.elements).filter(Boolean).length / 4)) ?? 0 : null, first.length, sessions.every(s => s.historyKnown) ? '首条提示词推断不完整' : '原始提示词起点未知');
-  const replies = sessions.flatMap(s => s.replies), clarifyKnown = complete && replies.every(r => r.complete && r.clarification !== null);
-  scoreMetric(metric('clarify'), clarifyKnown ? promptN ? replies.filter(r => r.clarification).length / promptN : 0 : null, promptN, '追问推断不完整');
+  const replies = sessions.flatMap(s => s.replies), clarifyKnown = complete && replies.every(r => r.clarifications !== null);
+  scoreMetric(metric('clarify'), clarifyKnown ? promptN ? replies.reduce((n,r)=>n+r.clarifications!,0) / promptN : 0 : null, promptN, '追问推断不完整');
   const rework = sumKnown(sessions.map(s => s.rework));
   scoreMetric(metric('rework'), rework === null ? null : nonFirst.length ? rework / nonFirst.length : 0, nonFirst.length, '非首条边界或返工推断不完整');
   scoreMetric(metric('clean'), rework === null ? null : sessions.filter(s => s.rework === 0).length / sessions.length, sessions.length, '非首条边界或返工推断不完整');

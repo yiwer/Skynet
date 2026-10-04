@@ -5,7 +5,7 @@ import type {PromptFraction,PromptExample,PromptSuggestion} from '../../packages
 export const fraction=(numerator:number,denominator:number,unknown:number):PromptFraction=>({numerator,denominator,unknown,value:denominator?numerator/denominator:null});
 const keys=['goal','constraints','context','acceptance'] as const;
 type Elements=Record<keyof typeof promptElementLabels,boolean|null>;
-type Prompt=RecordedMessage&{sessionId:string;elements:Elements;rework:boolean|null;citations:InsightCitation[];analysisVersions:string[];correctionIds:string[];task:typeof taskTypes[number];clarifications:number|null};
+type Prompt=RecordedMessage&{sessionId:string;elements:Elements;rework:boolean|null;citations:InsightCitation[];analysisVersions:string[];correctionIds:string[];task:typeof taskTypes[number];clarifications:number|null;clarificationCitations:InsightCitation[]};
 const votes=(values:(boolean|null)[])=>values.length&&values.every(value=>value===values[0])?values[0]!:null;
 // Different text blocks belong to one native message. Any positive block proves presence;
 // absence requires every block to have a complete negative observation.
@@ -31,7 +31,8 @@ export function promptFactors(rows:UsageSession[],views:SessionInsights[],messag
     for(const message of selected.filter(m=>m.role==='user')){
       const replies=current.filter(reply=>reply.role==='assistant'&&reply.previousPromptId===message.id);
       const clarifications=replies.map(reply=>blocks(reply.eventIds.map(id=>votes((replyEntries.get(id)??[]).map(entry=>entry.complete?entry.clarification:null)))));
-      prompts.push({...message,sessionId,...model(message),task,clarifications:complete&&clarifications.length&&clarifications.every(v=>v!==null)?clarifications.filter(Boolean).length:null});
+      prompts.push({...message,sessionId,...model(message),task,clarifications:complete&&clarifications.length&&clarifications.every(v=>v!==null)?clarifications.filter(Boolean).length:null,
+        clarificationCitations:uniqueCites(replies.flatMap(reply=>reply.eventIds.flatMap(id=>(replyEntries.get(id)??[]).flatMap(entry=>entry.citations.filter(c=>c.event===entry.event)))))});
     }
     sessionCompleteness.set(sessionId,complete&&selected.filter(m=>m.role==='user').length===group.reduce((sum,row)=>sum+row.userTurns,0));
     // A scoped subsequent prompt may refer to the previous prompt outside its date/owner

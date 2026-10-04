@@ -41,7 +41,7 @@
 ## 复现
 
 ```powershell
-$env:SKYNET_TEST_POSTGRES_BIN='C:/Users/yiwer/AppData/Local/Temp/ticket28-pg-0eb735e987dc48d186870e8a96801e01/bin'
+$env:SKYNET_TEST_POSTGRES_BIN='E:/GenCode/Skynet-tools/postgresql-18.6/bin'
 $env:SKYNET_OPENSSL='D:/DevEnv/Git/usr/bin/openssl.exe'
 $env:SKYNET_GIT_BASH='D:/DevEnv/Git/bin/bash.exe'
 $env:SKYNET_CLAUDE_RUNTIME='E:/GenCode/Skynet-evidence/v2-2026-10-04/runtime/package/claude.exe'
@@ -56,3 +56,9 @@ node --import tsx --test --test-concurrency=1 tests/inference-corrections.test.t
 已合入集成 `e2da6ed6d41cf42bcd52df2e43a940757b553b89`（包括团队周视图、评估周期与触控修复、员工列表、复核备注）。保留团队视图的额外覆盖前沿及评估批量准备逻辑。`npm run build`、`git diff --check` 通过。
 
 最终运行本票两文件及 `assessment-model-public`、`assessment-concurrency`、`session-insights`、`prompt-report` 六个测试文件：**21/21 通过，335.06 秒**，日志 `20-integrated-public.txt`。其中本票 8 项包括公开并发、晚到分析、恢复、长审计、原生多文本块、团队依赖和真实浏览器/OAuth MCP/导出。截图位于 `integrated-browser/`；已目视 1280px 明色审计、320px 暗色审计和编辑表单，新增交互目标至少 44px，文档外层无滚动溢出。
+
+独立审查随后补充了评估跨端用例：四条 Claude 原生提示词、各两个文本块，更正后提示词报告正确给出返工 `1/3`，评估旧投影却把文本块当样本并显示未知。已在 `assessment-native-corrections.test.ts` 保留公开 RED，并改为批量读取已有固定 `MessageFacts`、复用提示词报告的原生消息推断分组。评估的首条要素、返工和追问均按消息计算，原员工/来源日期/历史缺口继续生效，不增加原件扫描。扩展合成用例为三会话、十二条提示词，更正后返工 `1/9`、首条要素覆盖 `0.5`，两个文本块的同一追问只计一次。旧评估和全量重算均核对。
+
+测试工具原先位于 TEMP 的 PostgreSQL 运行时出现文件缺失，`24-native-integrated.txt` 全部在建库前 ENOENT；这不是业务回归。已从既有 SHA-512 核验的 Maven 18.6 JAR 恢复至上方持久目录，独立数据库仍由每次测试创建/关闭。未触碰旧目录或其他运行进程。
+
+补修构建通过；原生消息、模型公开边界、截断历史、本票后端及提示词报告共 **16/16 通过，221.11 秒**，见 `25-native-integrated.txt`。已合入包含 #53 的集成 `36085ce`，交付前再合纯记录更新 `f5a08b6`；文档更新未重复运行无变化的代码测试。
