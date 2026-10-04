@@ -82,5 +82,12 @@ Claude runtime environment variables set:
 npx tsx --test --test-concurrency=1 tests/collector-routing-fairness.test.ts tests/codex-runtime-routing.test.ts
 ```
 
+After merging accepted `8048ecb4c37e9764f03a4f973168249b13beca7f`, the build and
+all five public tests passed (141.061 seconds for the whole serial suite). The
+final 16,384-hook run observed its new archive and fresh heartbeat at 2,200 ms;
+the 65.529-second test also includes seed creation and all retained-byte checks.
+These are individual regression observations, not P95 measurements. The raw
+report is `17-final-public.txt`, with per-fixture sanitized observation files.
+
 Real 0.2.6 installation upgrade, live heartbeat freshness and a new normal native
 CLI archive remain a separate operator acceptance step after independent merge.
