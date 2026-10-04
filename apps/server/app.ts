@@ -43,6 +43,7 @@ import { migrateWaits, waitsService } from './waits.js';
 import { migrateAssessments, assessmentService } from './assessment.js';
 import { migrateWaitReports, waitReportService } from './wait-report.js';
 import { migrateActivity,activityService } from './activity.js';
+import { migrateCapabilityProfiles, capabilityProfileService } from './capability-profile.js';
 
 export async function createApp(options: { db: Database; rawDirectory: string; webDirectory?: string; publicOrigin?: string; reportClock?: () => Date }) {
   const { db } = options;
@@ -65,6 +66,7 @@ export async function createApp(options: { db: Database; rawDirectory: string; w
   await migrateAssessments(db);
   await migrateWaitReports(db);
   await migrateActivity(db);
+  await migrateCapabilityProfiles(db);
   const raw = new RawStore(options.rawDirectory);
   await backfillOrigins(db, raw);
   await reconcileOriginIntegrity(db,raw);
@@ -297,6 +299,13 @@ export async function createApp(options: { db: Database; rawDirectory: string; w
     return reply.header('Content-Disposition', `attachment; filename="skynet-usage-output-${data.version}.json"`).type('application/json').send(data);
   });
   const assessments = assessmentService(db, usage, insights, waits, options.reportClock);
+  const profiles = capabilityProfileService(db, assessments, usage, options.reportClock);
+  app.get('/api/capability-profiles/:id', { onRequest: readerGuard }, request => profiles.read(z.uuid().parse((request.params as { id: string }).id), request.query));
+  app.post('/api/capability-profiles/:id/recompute', { onRequest: readerGuard }, request => profiles.recompute(z.uuid().parse((request.params as { id: string }).id), request.body));
+  app.get('/api/capability-profiles/:id/export', { onRequest: readerGuard }, async (request, reply) => {
+    const value = await profiles.export(z.uuid().parse((request.params as { id: string }).id), request.query);
+    return reply.header('Content-Disposition', `attachment; filename="profile-${value.version}.json"`).send(value);
+  });
   app.get('/api/assessment-models/:version', { onRequest: readerGuard }, request => assessments.model(hashSchema.parse((request.params as { version: string }).version)));
   app.get('/api/assessment-baselines/:version', { onRequest: readerGuard }, request => assessments.baseline(hashSchema.parse((request.params as { version: string }).version)));
   app.get('/api/assessments/:id', { onRequest: readerGuard }, request => assessments.read(z.uuid().parse((request.params as { id: string }).id), request.query));
