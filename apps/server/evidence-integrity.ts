@@ -7,6 +7,7 @@ import {nativeKey} from '../../packages/native/occurrences.js';
 import {readEvidence} from './evidence.js';
 import {activityFor} from '../../packages/activity.js';
 import {codexAuxiliaryReader} from '../../packages/native/codex-auxiliary.js';
+import type { PreparedOriginal } from '../../packages/native/prepared-original.js';
 type Query=Pick<Database,'query'>|Pick<pg.PoolClient,'query'>;
 export const integrityVersion='original-utf8-1';
 export const inputIntegrityVersion='native-input-2';
@@ -23,12 +24,12 @@ export const unscopedRawGapsSql=(employee:string)=>`(SELECT jsonb_build_object('
 /** Known auxiliary formats do not need a business event to be readable. This
  * grants neither activity nor Token values; the statistic extractor still
  * validates versions, counters, dates and baseline attribution separately. */
-export function primaryInputCoverage(bytes:Buffer,source:Source,parsed=readEvidence(bytes,source)){
+export function primaryInputCoverage(bytes:Buffer,source:Source,parsed=readEvidence(bytes,source),prepared?:PreparedOriginal){
   let auxiliary=0;
   const codexAuxiliary=codexAuxiliaryReader(parsed.events);
-  for(const line of completeOriginalLines(bytes)){
+  for(const line of prepared?.records??completeOriginalLines(bytes)){
     if(line.text===null||!line.text.trim())continue;
-    try{const row=JSON.parse(line.text);
+    try{const row='parsed' in line?(line.parsed?line.value:undefined):JSON.parse(line.text);
       if(source!=='claude-code-cli'&&codexAuxiliary(row))auxiliary++;
       if(source==='claude-code-cli'&&row?.type==='queue-operation'&&['enqueue','dequeue','remove'].includes(row.operation)&&typeof row.sessionId==='string')auxiliary++;
     }catch{/* Malformed original stays a gap. */}

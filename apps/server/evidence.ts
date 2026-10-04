@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { sourceTimestamp, type EvidenceLine, type Source } from '../../packages/contracts/archive.js';
 import { readClaudeEvidence } from '../../packages/native/claude.js';
 import {completeOriginalLines,partialOriginalLine} from '../../packages/native/raw-lines.js';
+import type { PreparedOriginal } from '../../packages/native/prepared-original.js';
 
 const identifier = z.string().min(1);
 const textPart = z.object({ type: z.enum(['input_text', 'output_text']), text: z.string() });
@@ -22,17 +23,23 @@ const recordSchema = z.discriminatedUnion('type', [
   }),
 ]);
 
-export function readEvidence(bytes: Buffer, source: Source = 'codex-desktop') {
-  if (source === 'claude-code-cli') return readClaudeEvidence(bytes);
+export function readEvidence(bytes: Buffer, source: Source = 'codex-desktop', prepared?: PreparedOriginal) {
+  if (source === 'claude-code-cli') return readClaudeEvidence(bytes, prepared);
   const events: EvidenceLine[] = [];
   let unrecognizedLines = 0;
-  for (const {line:lineNumber,text:line} of completeOriginalLines(bytes)) {
+  for (const record of prepared?.records ?? completeOriginalLines(bytes)) {
+    const { line: lineNumber, text: line } = record;
     if(line===null){unrecognizedLines++;continue;}
     if (!line.trim()) continue;
     try {
       // Count a source line only when its whole supported event is readable. In particular,
       // extracting text beside an unsupported image would falsely imply a complete message.
-      const parsed = recordSchema.safeParse(JSON.parse(line));
+      const value = 'parsed' in record ? (record.parsed ? record.value : undefined) : JSON.parse(line);
+      // Unsupported auxiliary rows still count as unrecognized here; only the
+      // coverage reader can qualify them. Avoid allocating a schema error per
+      // known non-business row while keeping the same accepted event formats.
+      if (value?.type !== 'session_meta' && value?.type !== 'response_item') { unrecognizedLines++; continue; }
+      const parsed = recordSchema.safeParse(value);
       if (!parsed.success) { unrecognizedLines++; continue; }
       const item = parsed.data;
       if (item.type === 'session_meta') continue;
