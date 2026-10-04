@@ -6,6 +6,24 @@ import { beijingDate } from '../packages/contracts/reports.js';
 import { monday, addDays } from '../packages/contracts/work-views.js';
 import { setTimeout } from 'node:timers/promises';
 
+test('fixed assessment links resolve the same profile without mixing a historical assessment with current sources', { timeout: 120000 }, async () => {
+  const fixture = await assessmentFixture();
+  try {
+    const owner = await fixture.owner('Linked profile'); await fixture.session(owner);
+    const path = '/api/capability-profiles/' + owner.employeeId;
+    const assessment = await (await fixture.api(owner, '/api/assessments/' + owner.employeeId)).json();
+    const response = await fixture.api(owner, path + '?assessmentVersion=' + assessment.version); assert.equal(response.status, 200, await response.clone().text());
+    const first = await response.json(); assert.equal(first.assessment.version, assessment.version);
+    const quality = await (await fixture.api(owner, '/api/assessments/' + owner.employeeId + '?preset=' + encodeURIComponent('重质量'))).json();
+    await fixture.session(owner);
+    assert.deepEqual(await (await fixture.api(owner, path + '?assessmentVersion=' + assessment.version)).json(), first);
+    const missing = await fixture.api(owner, path + '?assessmentVersion=' + quality.version);
+    assert.equal(missing.status, 409, 'an unfrozen historical profile must not be reconstructed from live sources');
+    assert.equal((await fixture.api(owner, path + '?assessmentVersion=' + assessment.version + '&preset=' + encodeURIComponent('重质量'))).status, 409);
+    assert.equal((await fixture.api(owner, path + '?version=' + first.version + '&assessmentVersion=' + quality.version)).status, 409);
+  } finally { await fixture.close(); }
+});
+
 test('large profiles page sessions at one frozen version while export retains every row', { timeout: 180000 }, async () => {
   const fixture = await assessmentFixture();
   try {

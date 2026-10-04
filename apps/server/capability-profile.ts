@@ -12,7 +12,8 @@ import type { DailyItem } from '../../packages/contracts/reports.js';
 import { profileQuery, profileSections, type CapabilityProfile, type CapabilityProfilePage } from '../../packages/contracts/capability-profile.js';
 
 export async function migrateCapabilityProfiles(db: Database) {
-  await db.query('CREATE TABLE IF NOT EXISTS capability_profiles(version text PRIMARY KEY,employee_id uuid NOT NULL REFERENCES employees(id),payload jsonb NOT NULL)');
+  await db.query(`CREATE TABLE IF NOT EXISTS capability_profiles(version text PRIMARY KEY,employee_id uuid NOT NULL REFERENCES employees(id),payload jsonb NOT NULL);
+    CREATE INDEX IF NOT EXISTS capability_profile_assessment ON capability_profiles(employee_id,(payload->'assessment'->>'version'))`);
 }
 export function capabilityProfileService(db: Database, assessments: ReturnType<typeof assessmentService>, usage: ReturnType<typeof usageOutputService>,
   efficiency: ReturnType<typeof sessionEfficiencyService>, activity: ReturnType<typeof activityService>,
@@ -72,12 +73,20 @@ export function capabilityProfileService(db: Database, assessments: ReturnType<t
       if (!row) throw new HttpError(404, '画像版本不存在');
       const result = row.payload as CapabilityProfile;
       if (q.period && q.period !== result.assessment.selection?.period || q.preset && q.preset !== result.assessment.preset) throw new HttpError(409, '画像版本与周期或方案不一致');
+      if (q.assessmentVersion && q.assessmentVersion !== result.assessment.version) throw new HttpError(409, '画像与评估版本不一致');
       return result;
     }
-    const scope = { period: q.period ?? 'since-enrollment' as const, preset: q.preset ?? '默认' as const };
+    if (full && (q.assessmentVersion || q.offset || q.section)) throw new HttpError(400, '画像重算不能指定固定来源或分页');
+    const requested = q.assessmentVersion ? await assessments.export(employeeId, { version: q.assessmentVersion, ...(q.period ? { period: q.period } : {}), ...(q.preset ? { preset: q.preset } : {}) }) : null;
+    if (requested) {
+      const stored = (await db.query("SELECT payload FROM capability_profiles WHERE employee_id=$1 AND payload->'assessment'->>'version'=$2 ORDER BY payload->>'generatedAt' DESC,version LIMIT 1", [employeeId, requested.version])).rows[0];
+      if (stored) return stored.payload;
+    }
+    const scope = { period: q.period ?? requested?.selection?.period ?? 'since-enrollment' as const, preset: q.preset ?? requested?.preset ?? '默认' as const };
     const content = await consistentReportingInputs(db, clock, async () => {
       const head = full ? await assessments.recompute(employeeId, scope) : null;
       const assessment = await assessments.export(employeeId, { ...scope, ...(head ? { version: head.version } : {}) });
+      if (requested && assessment.version !== requested.version) throw new HttpError(409, '此历史评估尚无完整画像；仍可读取固定评估');
       const report = await usage.export({ period: scope.period, version: assessment.inputs.usageVersion });
       const mine = report.employees.find(person => person.employeeId === employeeId);
       const { employeeId: _id, employee: _name, daily, agents, activeDates, ...totals } = mine ?? {
