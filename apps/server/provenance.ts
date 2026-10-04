@@ -163,7 +163,9 @@ export async function assignOrigins(q: Query, raw: RawStore, record: Record, bac
 }
 
 export async function eventOriginsBatch(q: Query, snapshotIds: string[], materialId?: string) {
-  const result=new Map<string,(EventOrigin&{originLine:number;originBlock:number})[]>(snapshotIds.map(id=>[id,[]]));
+  // PostgreSQL UUID values have canonical lower-case text, including when a
+  // public reader supplied a valid upper-case spelling of the same identity.
+  const result=new Map<string,(EventOrigin&{originLine:number;originBlock:number})[]>(snapshotIds.map(id=>[id.toLowerCase(),[]]));
   if(!snapshotIds.length)return result;
   const rows = await q.query(`SELECT s.snapshot_id AS carrier,s.line,s.block,o.event_id AS "eventId",o.snapshot_id AS "snapshotId",o.line AS "originLine",o.block AS "originBlock",
     o.employee_id AS "employeeId",e.name AS employee,o.device_id AS "deviceId",o.project,o.context,o.source_date AS "sourceDate",o.material_id AS "materialId",o.text_offset AS "textOffset",
@@ -179,7 +181,7 @@ export async function eventOriginsBatch(q: Query, snapshotIds: string[], materia
   return result;
 }
 export async function eventOrigins(q: Query, snapshotId: string, materialId?: string) {
-  return (await eventOriginsBatch(q,[snapshotId],materialId)).get(snapshotId)!;
+  return (await eventOriginsBatch(q,[snapshotId],materialId)).get(snapshotId.toLowerCase())!;
 }
 
 export async function backfillOrigins(db: Database, raw: RawStore) {

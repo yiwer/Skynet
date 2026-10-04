@@ -5,6 +5,22 @@ import {join} from 'node:path';
 import {digest} from '../apps/server/database.js';
 import {assessmentFixture} from './assessment-fixture.js';
 
+test('valid uppercase snapshot UUIDs preserve original, evidence and conversation readers',{timeout:120000},async()=>{
+  const f=await assessmentFixture();
+  try{
+    const owner=await f.owner('UUID identity owner'),source=f.rows({prompts:2}),record=await f.upload(owner,source.rows,source.sessionId);
+    const lower=record.snapshotId,upper=lower.toUpperCase();assert.notEqual(upper,lower);
+    for(const suffix of ['','/evidence','/conversation']){
+      const original=await f.api(owner,'/api/snapshots/'+lower+suffix);assert.equal(original.status,200,await original.clone().text());
+      const response=await f.api(owner,'/api/snapshots/'+upper+suffix);assert.equal(response.status,200,await response.clone().text());
+      // Existing links retain the caller's UUID spelling; compare the same
+      // canonical identity without changing any evidence content or version.
+      const canonical=(value:unknown)=>JSON.parse(JSON.stringify(value).replaceAll(upper,lower));
+      assert.deepEqual(canonical(await response.json()),await original.json(),'UUID case must not change the original evidence or fixed conversation');
+    }
+  }finally{await f.close();}
+});
+
 test('waiting preparation preserves full batches, pending legacy proofs, affected carriers and fixed history',{timeout:180000},async()=>{
   const f=await assessmentFixture();let restore:{path:string;bytes:Buffer}|undefined;
   try{
