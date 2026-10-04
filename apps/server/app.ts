@@ -36,6 +36,7 @@ import { migrateSessionInsights,sessionInsightsService } from './session-insight
 import { sessionInsightsQuery } from '../../packages/contracts/session-insights.js';
 import { migrateUsageOutput, usageOutputService } from './usage-output.js';
 import {migrateSessionEfficiency,sessionEfficiencyService} from './session-efficiency.js';
+import {migratePromptReports,promptReportService} from './prompt-report.js';
 import { migrateDeliveryReceipts, saveDeliveryReceipt } from './delivery-receipts.js';
 import { migrateAssembly, assemblyService, processingService, recordAssemblyRecipe } from './assembly.js';
 import { migrateWaits, waitsService } from './waits.js';
@@ -56,6 +57,7 @@ export async function createApp(options: { db: Database; rawDirectory: string; w
   await migrateMetrics(db);
   await migrateUsageOutput(db);
   await migrateSessionEfficiency(db);
+  await migratePromptReports(db);
   await migrateDeliveryReceipts(db);
   await migrateAssembly(db);
   await migrateWaits(db);
@@ -280,6 +282,12 @@ export async function createApp(options: { db: Database; rawDirectory: string; w
     const value=await efficiency.export(request.query);
     return reply.header('Content-Disposition',`attachment; filename="skynet-session-efficiency-${value.version}.json"`).type('application/json').send(value);
   });
+  const prompts=promptReportService(db,usage,insights);
+  app.get('/api/prompt-report',{onRequest:readerGuard},request=>prompts.read(request.query));
+  app.post('/api/prompt-report/recompute',{onRequest:readerGuard},request=>prompts.recompute(request.body));
+  app.get('/api/prompt-report/export',{onRequest:readerGuard},async(request,reply)=>{
+    const data=await prompts.read(request.query);return reply.header('Content-Disposition',`attachment; filename="skynet-prompts-${data.version}.json"`).type('application/json').send(data);
+  });
   app.get('/api/usage-output', { onRequest: readerGuard }, request => usage.read(request.query));
   app.post('/api/usage-output/recompute', { onRequest: readerGuard }, request => usage.recompute(request.body));
   app.get('/api/usage-output/export', { onRequest: readerGuard }, async (request, reply) => {
@@ -416,7 +424,7 @@ export async function createApp(options: { db: Database; rawDirectory: string; w
     const file = await archive.exported((request.params as { id: string }).id, format);
     return reply.header('Content-Disposition', `attachment; filename="${file.filename}"`).type(file.contentType).send(file.bytes);
   });
-  if (options.publicOrigin) await registerMcp(app, db, archive, options.publicOrigin, analysis, reports, coverage, workStatistics, workViews,operations,conversation,metrics,assembly,processing,insights,waits,usage,waitReport,activity,efficiency);
+  if (options.publicOrigin) await registerMcp(app, db, archive, options.publicOrigin, analysis, reports, coverage, workStatistics, workViews,operations,conversation,metrics,assembly,processing,insights,waits,usage,waitReport,prompts,activity,efficiency);
   if (options.webDirectory) {
     await app.register(fastifyStatic, { root: resolve(options.webDirectory), wildcard: false });
   }
