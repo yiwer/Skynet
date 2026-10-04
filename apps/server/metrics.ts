@@ -339,6 +339,7 @@ export function metricsService(db: Database, raw: RawStore, clock: () => Date = 
           if (ownerSelected) gapForOwner(record, '已存档原件不可读取或含无效编码，无法确认所选日期的 Token');
           continue;
         }
+        await inputBatch.checkpoint();
         rawBuffers.set(record.id, content);
         materialized.set(record.id, parsed);
         const reasons = new Set<string>();
@@ -378,6 +379,9 @@ export function metricsService(db: Database, raw: RawStore, clock: () => Date = 
           usageOrigins.set(key, { slice, value: item.value });
         }
       }
+      // Observe the original SQL failure before a material-source query can
+      // replace it with an aborted-transaction error and hide retry semantics.
+      await inputBatch.drainFacts();
       // The evidence reader intentionally preserves compacted text as evidence.
       // A native, explicit summary/meta flag prevents counting that preserved
       // text as a new user submission; never guess from message wording.

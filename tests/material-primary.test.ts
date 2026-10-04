@@ -127,6 +127,7 @@ test('restored associated native transcript qualifies only through host capture;
     assert.ok(JSON.stringify(mcpLocation).includes('材料中的历史活动'));
     browser = await chromium.launch(); const page = await browser.newPage({ ignoreHTTPSErrors: true });
     await page.goto(s.origin + `/#${cId}`); await page.getByLabel('个人读取凭据').fill(B.readerCredential); await page.getByRole('button', { name: '进入存档' }).click();
+    await page.getByRole('link', { name: '时间线', exact: true }).click();
     const link = page.getByRole('link', { name: '原始材料第 2 行' }); await expect(link).toHaveAttribute('href', detail.events[0].origin.webPath);
     await link.click(); await expect(page.getByRole('region', { name: '命中证据' })).toContainText('材料中的历史活动');
     await page.screenshot({ path: join(s.directory, 'material-primary.png'), fullPage: true });

@@ -1,4 +1,5 @@
 import type pg from 'pg';
+import { setImmediate } from 'node:timers/promises';
 import { digest } from './database.js';
 import { readEvidence } from './evidence.js';
 import { conversationContext } from './conversation-trace.js';
@@ -40,6 +41,7 @@ export async function metricInputBatch(client: pg.PoolClient, identities: Identi
   const cached = new Map<string, MetricInputFacts>(stored.map(row => [row.version, row.payload]));
   const pending = new Map<string, { version: string; snapshot_id: string; attribution_revision: string; parser_version: string; payload: MetricInputFacts }>();
   const coverageProofs = new Map<string, ReturnType<typeof primaryInputCoverage>>();
+  let inFlight: Promise<void> | undefined, writeFailure: { error: unknown } | undefined;
   function read(input: Identity & { bytes: Buffer }): MetricInputFacts {
     const { key, parserVersion } = identify(input);
     const known = cached.get(key); if (known) return known;
@@ -56,18 +58,44 @@ export async function metricInputBatch(client: pg.PoolClient, identities: Identi
     pending.set(key, { version: key, snapshot_id: input.snapshotId, attribution_revision: input.attributionRevision, parser_version: parserVersion, payload: facts });
     return facts;
   }
+  function takeRows() {
+    const rows = [...pending.values()].slice(0, 100);
+    for (const row of rows) pending.delete(row.version);
+    return rows;
+  }
+  async function writeRows(rows: ReturnType<typeof takeRows>) {
+    await client.query(`INSERT INTO metric_input_revisions(version,snapshot_id,attribution_revision,parser_version,payload)
+      SELECT version,snapshot_id,attribution_revision,parser_version,payload FROM jsonb_to_recordset($1::jsonb)
+      AS x(version text,snapshot_id uuid,attribution_revision text,parser_version text,payload jsonb) ON CONFLICT(version) DO NOTHING`, [JSON.stringify(rows)]);
+  }
+  async function settle() {
+    await inFlight; inFlight = undefined;
+    if (writeFailure) throw writeFailure.error;
+  }
+  /** Only primary parsing may overlap a fact write. The caller drains before
+   * any further SQL, preserving the first database error and transaction retry. */
+  async function checkpoint() {
+    if (pending.size < 100) return;
+    await settle();
+    // No continuation schedules another query: at most one strict 100-row
+    // batch is in flight, with rejection handled even if parsing later fails.
+    inFlight = writeRows(takeRows()).catch(error => { writeFailure ??= { error }; });
+    await setImmediate();
+  }
+  async function drainFacts() {
+    await settle();
+    while (pending.size) await writeRows(takeRows());
+  }
   async function flush() {
+    // Every request size takes fact locks before coverage locks. Mixing this
+    // order for small and pipelined batches would introduce a deadlock cycle.
+    await drainFacts();
     const proofs = [...coverageProofs].map(([snapshotId, proof]) => ({ snapshotId, ...proof }));
     for (let offset=0; offset<proofs.length; offset+=100) await client.query(`INSERT INTO snapshot_input_integrity(snapshot_id,version,complete,unrecognized_lines,partial_line)
       SELECT x."snapshotId",$2,x.complete,x."unrecognizedLines",x."partialLine" FROM jsonb_to_recordset($1::jsonb) AS x("snapshotId" uuid,complete boolean,"unrecognizedLines" integer,"partialLine" boolean) ON CONFLICT DO NOTHING`, [JSON.stringify(proofs.slice(offset,offset+100)),inputIntegrityVersion]);
     coverageProofs.clear();
-    const rows = [...pending.values()];
-    for (let offset = 0; offset < rows.length; offset += 100) await client.query(`INSERT INTO metric_input_revisions(version,snapshot_id,attribution_revision,parser_version,payload)
-      SELECT version,snapshot_id,attribution_revision,parser_version,payload FROM jsonb_to_recordset($1::jsonb)
-      AS x(version text,snapshot_id uuid,attribution_revision text,parser_version text,payload jsonb) ON CONFLICT(version) DO NOTHING`, [JSON.stringify(rows.slice(offset, offset + 100))]);
-    pending.clear();
   }
-  return { read, flush };
+  return { read, checkpoint, drainFacts, flush };
 }
 export async function materializeMetricInput(client: pg.PoolClient, input: Identity & { bytes: Buffer; full: boolean }): Promise<MetricInputFacts> {
   const batch = await metricInputBatch(client, [input], input.full), facts = batch.read(input);
