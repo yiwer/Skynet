@@ -49,3 +49,14 @@ node node_modules/tsx/dist/cli.mjs --test tests/activity-public.test.ts tests/ac
 证据目录为 `E:/GenCode/Skynet-evidence/v2-2026-10-04/`，`activity-*-red.log` / `*-green.log` 保存纵向切片；`39-activity/evidence.json` 保存固定版本、页数、截图、计算的文字对比度和浏览器错误。CSS 文字颜色通过浏览器 sRGB 转换计算，检查 4.5:1（大字 3:1）；OS 弹出的下拉选项、禁用态及完整辅助技术兼容性不由这个计算替代人工验收。
 
 AC32 的 1000 会话最终性能验收由 #54 集中处理，本票未声称通过。归属 revision 已批量准备，但 `waitDataset` 内逐快照完整性、origins、waitInput 及 Insights 的再次核验仍需计时；不能绕过原件可读性、SHA-256、归属变化或历史版本以换取速度。
+
+
+### 2026-10-04 收口记录
+
+功能提交 `0305771`，共享等待物化边界提交 `fb2f5de`；已合入独立验收后的 #40/#43 集成 `91544e8`，以及纯部署/进度文档 `f7bc457`。窄接线冲突保留两个服务的 migration、HTTP 与 MCP 入口，没有修改对方业务算法。
+
+`npm run build` 通过。最终八个测试文件 11/11 通过（47.70 秒）：活动公开查询 3、模型推断边界 1、活动 Web/OAuth MCP 1、原等待公开/边界/旅程 4、等待统计公开/旅程 2。额外等待统计测试保护共同物化接口不会改变已经集成的 #43。证据为 `activity-final-build.log` 与 `activity-final-regression.log`。
+
+#40 同事独立只读核对 API 与 320/1280 截图，确认固定等待导航和未知来源处理；指出首条返工与 Escape 后，分别取得 `activity-first-rework-red.log` 和 `activity-tooltip-red.log`，修正后 `activity-review-green.log` 2/2 通过，并包含在上述最终 11 项回归中。八张主题截图的文字对比度最低浅色 4.76:1、深色 6.21:1，浏览器错误列表为空。早期切换主题过渡帧的即时计算不作为对比度验收；最终计算发生在有限动画完成后的稳定截图之后。
+
+本工作树不部署、不关闭远端 Issue。合并与发布由独立集成流程执行；原生权限与永久会话结束仍按来源支持边界保留未知，完整 AC32 性能和真实用户签收不在本票虚报完成。
