@@ -36,6 +36,9 @@ test('efficiency charts and selected segments use fixed pages while complete exp
       await panel.getByRole('button',{name:'上一页会话',exact:true}).click();await loaded;await expect(panel).toHaveAttribute('aria-busy','false');
     }
     await expect(panel.getByRole('table',{name:'会话明细',exact:true}).locator('tbody tr')).toHaveCount(first);
+    await panel.getByRole('button',{name:'下一页会话',exact:true}).click();await expect(panel.getByRole('navigation',{name:'产效会话分页'})).toContainText('第 2 页');
+    await expect(panel).toHaveAttribute('aria-busy','false');await panel.getByLabel('仅复盘会话').check();
+    await expect(panel).toHaveAttribute('aria-busy','false');await expect(panel.getByRole('navigation',{name:'产效会话分页'})).toContainText('第 1 页');
     assert.equal(requests.filter(path=>path.startsWith('/api/session-efficiency/export')).length,0);
     const downloaded=page.waitForEvent('download');await panel.getByRole('button',{name:'导出当前版本',exact:true}).click();const download=await downloaded;
     const {readFile}=await import('node:fs/promises');const output=JSON.parse(await readFile((await download.path())!,'utf8'));assert.equal(output.sessions.length,21);assert.ok(output.sessions.every((row:any)=>row.timing.segments.length===row.timing.segmentTotal));
