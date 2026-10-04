@@ -28,13 +28,16 @@ export function assessmentService(db: Database, usage: ReturnType<typeof usageOu
     if (q.version) {
       if (full) throw new HttpError(400, '固定版本不能重算');
       const row = (await db.query('SELECT payload FROM assessment_revisions WHERE version=$1 AND employee_id=$2', [q.version, employeeId])).rows[0];
-      if (!row) throw new HttpError(404, '评估版本不存在'); return row.payload;
+      if (!row) throw new HttpError(404, '评估版本不存在');
+      if (q.preset && q.preset !== row.payload.preset || q.period && q.period !== (row.payload.selection?.period ?? 'since-enrollment')) throw new HttpError(409, '评估版本与所选周期或方案不一致');
+      return row.payload;
     }
-    const inputSet = await assessmentInputs(db, usage, insights, waits, clock, full), employee = inputSet.people.find(person => person.id === employeeId);
+    const preset = q.preset ?? '默认', period = q.period ?? 'since-enrollment';
+    const inputSet = await assessmentInputs(db, usage, insights, waits, clock, full, preset), employee = inputSet.people.find(person => person.id === employeeId);
     if (!employee) throw new HttpError(404, '员工不存在');
     const { baselineVersion } = inputSet;
     await db.query('INSERT INTO assessment_baselines(version,payload) VALUES($1,$2) ON CONFLICT DO NOTHING', [baselineVersion, inputSet.baseline]);
-    const content = { employeeId, employee: employee.name, period: '接入至今' as const, preset: '默认' as const, modelVersion: assessmentModelVersion,
+    const content = { employeeId, employee: employee.name, period: '接入至今', preset, selection: { period, preset }, modelVersion: assessmentModelVersion,
       inputs: { metricsVersion: inputSet.report.metricVersion, usageVersion: inputSet.report.version, analysisVersions: employee.analysisVersions, insightVersions: employee.insightVersions, baselineVersion, waitsVersion: inputSet.waitsVersion, coverageVersion: employee.coverageVersion },
       range: employee.range, dims: employee.dims, ...employee.verdict,
       sample: employee.sample, coverageIssues: employee.issues, representatives: employee.representatives };

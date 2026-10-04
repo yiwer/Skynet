@@ -4,13 +4,13 @@ import type { sessionInsightsService } from './session-insights.js';
 import type { waitsService } from './waits.js';
 import { beijingDate } from '../../packages/contracts/reports.js';
 import { addDays } from '../../packages/contracts/work-views.js';
-import type { CapabilityAssessment } from '../../packages/contracts/assessment.js';
+import type { CapabilityAssessment, AssessmentPreset } from '../../packages/contracts/assessment.js';
 import { emptyDimensions, scoreMetric, concludeAssessment, assessmentModelVersion } from './assessment-model.js';
 import { assessmentSessions, assessmentBaseline, fillAssessmentFactors, median } from './assessment-factors.js';
 import { dimKeys } from '../../packages/contracts/assessment.js';
 
 const weekday = (date: string) => ![0, 6].includes(new Date(date + 'T00:00:00Z').getUTCDay());
-export async function assessmentInputs(db: Database, usage: ReturnType<typeof usageOutputService>, insights: ReturnType<typeof sessionInsightsService>, waits: ReturnType<typeof waitsService>, clock: () => Date, full = false) {
+export async function assessmentInputs(db: Database, usage: ReturnType<typeof usageOutputService>, insights: ReturnType<typeof sessionInsightsService>, waits: ReturnType<typeof waitsService>, clock: () => Date, full = false, preset: AssessmentPreset = '默认') {
   const selection = { period: 'since-enrollment' };
   const usageHead = full ? await usage.recompute(selection) : null, waitHead = full ? await waits.recompute(selection) : null;
   const report = await usage.export({ ...selection, ...(usageHead ? { version: usageHead.version } : {}) });
@@ -33,7 +33,7 @@ export async function assessmentInputs(db: Database, usage: ReturnType<typeof us
     const dates = new Set(totals?.activeDates ?? []), activeWorkdays = [...dates].filter(weekday).length;
     const sample: CapabilityAssessment['sample'] = { sessions: new Set(sessions.map(s => s.sessionId)).size, prompts: totals?.userTurns ?? 0,
       activeDays: dates.size, workdays, unknownTokenSessions: totals?.unknownTokenSessions ?? 0 };
-    const dims = emptyDimensions();
+    const dims = emptyDimensions(preset);
     if (sample.sessions) {
       for (const dim of Object.values(dims)) for (const metric of dim.metrics) scoreMetric(metric, null, 0, metric.key === 'permMed' ? '来源未记录可核对的权限请求与决定时刻' : '尚无完整且适用的分析');
       scoreMetric(dims.adopt.metrics[0]!, from && workdays ? activeWorkdays / workdays : null, workdays, from ? '范围内没有工作日' : '接入日期未知');
