@@ -1,6 +1,6 @@
 import { digest, type Database } from './database.js';
 import { HttpError } from './identities.js';
-import type { RawStore } from './raw-store.js';
+import { RawUnavailableError, type RawStore } from './raw-store.js';
 import type { Manifest, Source } from '../../packages/contracts/archive.js';
 import type { Provenance } from '../../packages/contracts/provenance.js';
 import { metricsQuerySchema, coverageMetricsQuerySchema, type MetricsQuery, type MetricsPage, type MetricsScope, type MetricTotals, type SessionMetrics, type MetricCatalog } from '../../packages/contracts/metrics.js';
@@ -9,7 +9,7 @@ import { beijingDate } from '../../packages/contracts/reports.js';
 import { monday, addDays } from '../../packages/contracts/work-views.js';
 import { inputIntegrityVersion } from './evidence-integrity.js';
 import { materialSource } from './material-provenance.js';
-import { metricInputBatch, type MetricInputFacts } from './metric-inputs.js';
+import { metricInputBatch, metricExcludedUserLines, type MetricInputFacts } from './metric-inputs.js';
 import { attributionRevisions } from './qualification.js';
 import { currentMetricInputs } from './metric-current-inputs.js';
 import { readMetricEvents, type MetricEvent as Event } from './metric-events.js';
@@ -19,6 +19,8 @@ const employeeNames = new Intl.Collator('zh-CN');
 const definition = '仅统计已验证原件中接入后、按北京时间来源日期归期的活动。eventId 去重；已验证服务器恢复链归为同一会话，未确认副本保持独立。员工和项目沿用每条活动的原始归属。会话数为所选范围内有业务事件的去重会话数，跨日或多人参与的会话不可直接相加；仅有原生 Token 记录的日期保留用量，不增加会话、轮次或调用。轮次、调用和已知 Token 可相加。Token 未知单列，不当作零或参加比值。';
 const limits = { snapshots: 20000, events: 100000, rawBytes: 128 * 1024 * 1024, sessions: 10000, exportBytes: 16 * 1024 * 1024 };
 const bounded = () => new HttpError(413, '指标范围超过单次计算上限，请缩小日期、员工或项目范围；未返回截断汇总');
+const metricSourceUnavailable = (error: unknown) => error instanceof RawUnavailableError
+  || (error instanceof TypeError && (error as NodeJS.ErrnoException).code === 'ERR_ENCODING_INVALID_ENCODED_DATA');
 function boundedPage<T>(value: T): T {
   if (Buffer.byteLength(JSON.stringify(value)) > 80 * 1024) throw new HttpError(413, '指标响应超过 Web/MCP 共用的 80 KiB 上限，请缩小日期、员工或项目范围；未返回截断汇总');
   return value;
@@ -330,10 +332,9 @@ export function metricsService(db: Database, raw: RawStore, clock: () => Date = 
             bytes: content, hash: record.hash, source: record.source, sourceVersion: record.manifest.sourceVersion, manifest: record.manifest, baselineContinuity: baselineContinuity(record) });
         }
         catch (error) {
-          // A competing scope can materialize this same input after our
-          // repeatable-read snapshot. Retry the whole transaction, never label
-          // that serialization conflict as an original-storage gap.
-          if (['40001', '40P01'].includes((error as { code?: string }).code ?? '')) throw error;
+          // Only source availability/encoding belongs to this owner's gap.
+          // Database, limit and concurrency failures retain their own boundary.
+          if (!metricSourceUnavailable(error)) throw error;
           for (const slice of relevant) slice.reasons.add('已存档原件不可读取或含无效编码');
           if (ownerSelected) gapForOwner(record, '已存档原件不可读取或含无效编码，无法确认所选日期的 Token');
           continue;
@@ -396,15 +397,28 @@ export function metricsService(db: Database, raw: RawStore, clock: () => Date = 
         if (!content) {
           totalBytes += length; if (totalBytes > limits.rawBytes) throw bounded();
           try { content = await readOriginal(device, hash); rawBuffers.set(key, content); }
-          catch { continue; } // Validated event remains an observed row; completeness is reported separately.
+          catch (error) {
+            if (!(error instanceof RawUnavailableError)) throw error;
+            continue; // Validated event remains observed; completeness is reported separately.
+          }
         }
         let facts = materialized.get(key);
         if (!facts) {
-          facts = inputBatch.read({ snapshotId: record.id, attributionRevision: record.attribution_revision,
-            materialId: first.material_id ?? undefined, bytes: content, hash, source: record.source, sourceVersion: record.manifest.sourceVersion });
-          materialized.set(key, facts);
+          try {
+            facts = inputBatch.read({ snapshotId: record.id, attributionRevision: record.attribution_revision,
+              materialId: first.material_id ?? undefined, bytes: content, hash, source: record.source, sourceVersion: record.manifest.sourceVersion });
+            materialized.set(key, facts);
+          } catch (error) {
+            if (!metricSourceUnavailable(error)) throw error;
+            for (const slice of slices.values()) if (slice.employeeId === first.employee_id && slice.snapshotIds.has(first.snapshot_id)) {
+              slice.reasons.add('已存档原件不可读取或含无效编码');
+            }
+            gapForOwner({ ...record, employee_id: first.employee_id }, '已存档原件含无效编码，无法确认所选日期的 Token');
+            // Preserve exact readable user/environment classification, without
+            // writing a statistics projection for the rejected original.
+          }
         }
-        const excluded = new Set(facts.excludedUserLines);
+        const excluded = new Set(facts?.excludedUserLines ?? metricExcludedUserLines(content, record.source));
         for (const event of sourceEvents) {
           if (excluded.has(event.line)) excludedTurns.add(JSON.stringify([event.snapshot_id, event.material_id, event.line]));
         }

@@ -6,6 +6,7 @@ import { primaryInputCoverage, inputIntegrityVersion } from './evidence-integrit
 import { codexInitialBaseline, nativeStatistics, statisticsExtractorVersion } from '../../packages/native-statistics.js';
 import type { Manifest, Source } from '../../packages/contracts/archive.js';
 import { prepareOriginal } from '../../packages/native/prepared-original.js';
+import { completeOriginalLines } from '../../packages/native/raw-lines.js';
 
 const version = `metric-input-3/${statisticsExtractorVersion}/${inputIntegrityVersion}`;
 export type MetricInputFacts = Pick<ReturnType<typeof nativeStatistics>, 'usage' | 'supported' | 'complete'> & {
@@ -18,6 +19,17 @@ const identify = (input: Identity) => {
   return { parserVersion, key: digest(JSON.stringify([version, parserVersion, input.snapshotId, input.attributionRevision,
     input.materialId ?? null, input.hash, input.source, input.sourceVersion, input.baselineContinuity === true])) };
 };
+
+/** User classification can still use exact readable lines beside a corrupt
+ * line. It does not infer usage or create a normal statistics projection. */
+export function metricExcludedUserLines(bytes: Buffer, source: Source, evidence = readEvidence(bytes, source)): number[] {
+  const excluded = new Set(evidence.events.filter(event => conversationContext(event) === 'environment').map(event => event.line));
+  if (source === 'claude-code-cli') for (const { line, text } of completeOriginalLines(bytes)) {
+    if (text === null) continue;
+    try { const row = JSON.parse(text); if (row.isCompactSummary === true || row.isMeta === true) excluded.add(line); } catch { /* Incomplete evidence stays unknown. */ }
+  }
+  return [...excluded].sort((a, b) => a - b);
+}
 
 /** Only derived facts are retained. Callers verify the original hash before
  * entering this module, including warm reads. Full recomputation bypasses the
@@ -35,14 +47,11 @@ export async function metricInputBatch(client: pg.PoolClient, identities: Identi
     const parsed = nativeStatistics(input.bytes, input.source, input.sourceVersion, { prepared,
       codexInitialBaseline: input.manifest && !input.materialId && input.baselineContinuity === true ? codexInitialBaseline(input.bytes, input.manifest, prepared) : false });
     const evidence = readEvidence(input.bytes, input.source, prepared);
-    const excluded = new Set(evidence.events.filter(event => conversationContext(event) === 'environment').map(event => event.line));
-    if (input.source === 'claude-code-cli') for (const [index, text] of input.bytes.toString('utf8').split('\n').entries()) {
-      try { const row = JSON.parse(text); if (row.isCompactSummary === true || row.isMeta === true) excluded.add(index + 1); } catch { /* Incomplete evidence stays unknown. */ }
-    }
+    const excluded = metricExcludedUserLines(input.bytes, input.source, evidence);
     const coverage = primaryInputCoverage(input.bytes, input.source, evidence, prepared);
     if (!input.materialId) coverageProofs.set(input.snapshotId, coverage);
     const facts: MetricInputFacts = { usage: parsed.usage, supported: parsed.supported, complete: parsed.complete,
-      coverageComplete: coverage.complete, excludedUserLines: [...excluded].sort((a, b) => a - b) };
+      coverageComplete: coverage.complete, excludedUserLines: excluded };
     cached.set(key, facts);
     pending.set(key, { version: key, snapshot_id: input.snapshotId, attribution_revision: input.attributionRevision, parser_version: parserVersion, payload: facts });
     return facts;

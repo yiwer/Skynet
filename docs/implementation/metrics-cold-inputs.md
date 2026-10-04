@@ -16,4 +16,8 @@
 
 后续最小切片复用同一次请求里已经准备的事件组，按组计算 native/session/slice 键，而各事件仍分别贡献消息 anchor、工具 eventId 和证明缺口。组的首个原序号决定处理顺序，保持原首载体选择；不新增缓存或更改输入指纹。公开 Reporting 差分探针将新消费逻辑与旧消费逻辑的完整报告（包括版本）进行逐项比较，覆盖团队、单员工、项目与恢复归属。该探针及指标/材料资格公开回归 7/7 通过。
 
+键复用候选在 clean `368e841` 的正式复测仍未通过：首次 4,501.53 ms，后续 P50 为 273.03 ms、P95 为 326.06 ms；正确性全部通过。精确候选 CPU/SQL 诊断也为首次 4,407.25 ms。采样中的 `computeOnce` 自耗时由先前约 560 ms 降为 237 ms，但事件 SQL 为 1,044 ms、归属为 603 ms、事实写入为 462 ms，因此不能用局部 CPU 减少宣称整体目标已经通过。当前继续按测量优化。
+
+扩大旧损坏映射的公开指标覆盖时，还在原查询上复现了既存 500：`userSources` 为严格可读的用户事件重读包含其他非法 UTF-8 行的原件，严格整件解码错误未被处理。该边界现仅将明确的原件不可用或编码错误归为本人来源缺口；数据库、并发和上限错误继续抛出。可读行仍以严格逐行解析排除机器环境或原生 summary/meta；该回退不写正常 Token 事实投影。旧载体的 current/full/fixed 及含机器环境与非法尾行的公开回归 5/5 通过，原件字节和旧固定报告保持相等。RED、调用栈与 GREEN 分别见 `54-metrics-invalid-original-{base-red,stack,green}.txt`。
+
 证据目录：`E:/GenCode/Skynet-evidence/v2-2026-10-04/`。设计与逐轮记录见 `54-metrics-cold-query-design.md`；诊断分别为 `54-metrics-cold-a2a757b-profile.*`、`54-metrics-cold-union-profile.*`、`54-metrics-cold-packed-profile.*`。紧凑身份正式性能为 `54-metrics-cold-compact-performance.{json,txt}`；请求内键复用构建与回归为 `54-metrics-group-keys-{build,public}.txt`。最后切片的正式性能复验待并行负载结束，尚未独立接受，#54 保持开放。

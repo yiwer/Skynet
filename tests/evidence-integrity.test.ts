@@ -104,6 +104,14 @@ test('legacy corrupt origins stay immutable while current counts and legal nativ
       assert.deepEqual(Buffer.from(await(await api('/api/snapshots/'+fixture.badId+'/raw')).arrayBuffer()),fixture.bad);
     }
     const final=await(await api('/api/activity-statistics')).json();assert.equal(final.rows.reduce((sum:number,row:any)=>sum+row.activityRecords,0),6);assert.equal(final.warnings.invalidIntegrityOrigins,2);
+    // Metrics must retain both the immutable base proof and the repaired legal
+    // carrier when preparing its batched attribution identity.
+    const metricResponse=await api('/api/metrics?period=since-enrollment');assert.equal(metricResponse.status,200,await metricResponse.clone().text());
+    const metric=await metricResponse.json();assert.deepEqual([metric.totals.sessions,metric.totals.userTurns,metric.totals.toolCalls],[2,3,2]);
+    const recomputed=await api('/api/metrics/recompute',undefined,{period:'since-enrollment'});assert.equal(recomputed.status,200);
+    assert.deepEqual(await recomputed.json(),metric);
+    const fixedMetric=await api('/api/metrics/export?period=since-enrollment&version='+metric.version);assert.equal(fixedMetric.status,200);
+    assert.deepEqual(await fixedMetric.json(),metric);
     const date=new Date(new Date(timestamp).getTime()+8*3600000).toISOString().slice(0,10),stats=await(await api(`/api/work-statistics/${employee.employeeId}?date=${date}`)).json();
     assert.equal(stats.records,6);assert.equal(stats.sourceInputsComplete,false,'retained corrupt original gaps cannot be declared complete');assert.equal(stats.files.complete,false);
     const configPath=join(s.directory,'integrity-analysis.json');await writeFile(configPath,JSON.stringify({mode:'fixture',executable:process.execPath,runtimeVersion:'2.1.281',model:'synthetic',workDirectory:join(s.directory,'jobs'),fixtureOrigin:'http://127.0.0.1:12345',budgetId:'integrity-only',budgetCny:0,inputCnyPerMillion:0,outputCnyPerMillion:0,autoAnalyzeUpdates:false}));
