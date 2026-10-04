@@ -97,21 +97,21 @@ export function reportService(db: Database, analysis: AnalysisService,statistics
       (SELECT string_agg(DISTINCT config->>'configurationHash',',' ORDER BY config->>'configurationHash') FROM analysis_workers WHERE updated_at>now()-interval '15 seconds') AS config`,[employeeId,date])).rows[0];
     return digest(JSON.stringify({row,parserVersions,statisticsExtractorVersion}));
   }
-  async function validate(employeeId: string, date: string) {
+  async function validate(employeeId: string, date: string, reader: Pick<Database, 'query'> = db) {
     reportDate.parse(date);
-    const employee = (await db.query('SELECT id,name FROM employees WHERE id=$1', [employeeId])).rows[0];
+    const employee = (await reader.query('SELECT id,name FROM employees WHERE id=$1', [employeeId])).rows[0];
     if (!employee) throw new HttpError(404, '员工不存在');
     return employee;
   }
-  async function read(employeeId: string, date: string, offset = 0, revision?: number): Promise<DailyReport> {
-    const employee = await validate(employeeId, date);
-    const row = (await db.query(`SELECT revision,version,payload,created_at,
+  async function readAt(reader: Pick<Database, 'query'>, employeeId: string, date: string, offset = 0, revision?: number): Promise<DailyReport> {
+    const employee = await validate(employeeId, date, reader);
+    const row = (await reader.query(`SELECT revision,version,payload,created_at,
       (SELECT refresh_pending OR qualification_revision<${qualificationForPeriod} FROM daily_report_periods p WHERE employee_id=$1 AND date=$2) AS refresh_pending
       FROM daily_report_revisions WHERE employee_id=$1 AND date=$2
       AND ($3::integer IS NULL OR revision=$3) ORDER BY revision DESC LIMIT 1`, [employeeId, date, revision ?? null])).rows[0];
     if (!row) {
       if (revision !== undefined) throw new HttpError(404, '报告版本不存在');
-      const queued = (await db.query('SELECT 1 FROM daily_report_periods WHERE employee_id=$1 AND date=$2', [employeeId, date])).rowCount;
+      const queued = (await reader.query('SELECT 1 FROM daily_report_periods WHERE employee_id=$1 AND date=$2', [employeeId, date])).rowCount;
       return { employeeId, employee: employee.name, date, timeZone: 'Asia/Shanghai', revision: 0, version: null,
         state: queued ? 'queued' : 'not-scheduled', createdAt: null, items: [], nextOffset: null, statistics: null, coverage: null, refreshPending: !!queued };
     }
@@ -120,12 +120,13 @@ export function reportService(db: Database, analysis: AnalysisService,statistics
       const size = Buffer.byteLength(JSON.stringify(item)); if (page.length && bytes + size > 80 * 1024) break;
       page.push(item); bytes += size;
     }
-    const period=revision===undefined?(await db.query('SELECT source_revision FROM daily_report_periods WHERE employee_id=$1 AND date=$2',[employeeId,date])).rows[0]:null;
-    const changed=period&&period.source_revision!==await sourceRevision(db,employeeId,date);
+    const period=revision===undefined?(await reader.query('SELECT source_revision FROM daily_report_periods WHERE employee_id=$1 AND date=$2',[employeeId,date])).rows[0]:null;
+    const changed=period&&period.source_revision!==await sourceRevision(reader,employeeId,date);
     return { ...report, employee: employee.name, revision: row.revision, version: row.version, createdAt: row.created_at.toISOString(),
       items: page, nextOffset: offset + page.length < report.items.length ? offset + page.length : null,
       refreshPending: revision === undefined ? row.refresh_pending||!!changed : false };
   }
+  const read = (employeeId: string, date: string, offset = 0, revision?: number) => readAt(db, employeeId, date, offset, revision);
   async function request(employeeId: string, date: string) {
     await validate(employeeId, date);
     if (date > beijingDate(clock())) throw new HttpError(422, '尚未到来的日期不能生成日报');
@@ -328,6 +329,6 @@ export function reportService(db: Database, analysis: AnalysisService,statistics
     const rows = (await db.query(`SELECT id,name FROM employees ORDER BY name,id LIMIT 101 OFFSET $1`, [offset])).rows;
     return { employees: rows.slice(0, 100), nextOffset: rows.length > 100 ? offset + 100 : null };
   }
-  return { read, request, list, tick, employees,correct,correctionHistory,inputRevision:sourceRevision };
+  return { read, readAt, request, list, tick, employees,correct,correctionHistory,inputRevision:sourceRevision };
 }
 export type ReportService = ReturnType<typeof reportService>;
