@@ -11,15 +11,41 @@ const votes=(values:(boolean|null)[])=>values.length&&values.every(value=>value=
 // absence requires every block to have a complete negative observation.
 const blocks=(values:(boolean|null)[])=>values.some(v=>v===true)?true:values.length&&values.every(v=>v===false)?false:null;
 const uniqueCites=(cites:InsightCitation[])=>[...new Map(cites.map(c=>[JSON.stringify([c.origin?.eventId,c.textOffset,c.quote]),c])).values()].slice(0,3);
+function messageGroups(rows:UsageSession[],messages:RecordedMessage[],allMessages:RecordedMessage[]){
+  const selectedMembership=new Map<string,Set<string>>(),currentMembership=new Map<string,Set<string>>();
+  const selectedKey=(employeeId:string,project:string,source:string,nativeId:string,snapshotId:string)=>JSON.stringify([employeeId,project,source,nativeId,snapshotId]);
+  const currentKey=(source:string,nativeId:string,snapshotId:string)=>JSON.stringify([source,nativeId,snapshotId]);
+  function add(index:Map<string,Set<string>>,key:string,sessionId:string){
+    let groups=index.get(key);if(!groups){groups=new Set();index.set(key,groups);}groups.add(sessionId);
+  }
+  for(const row of rows)for(const snapshotId of row.snapshotIds){
+    add(selectedMembership,selectedKey(row.employeeId,row.project,row.source,row.sourceSessionId,snapshotId),row.sessionId);
+    add(currentMembership,currentKey(row.source,row.sourceSessionId,snapshotId),row.sessionId);
+  }
+  function distribute(items:RecordedMessage[],index:Map<string,Set<string>>,key:(message:RecordedMessage)=>string){
+    const result=new Map<string,RecordedMessage[]>();
+    // Preserve every input occurrence and its order, including a message shared by
+    // multiple logical sessions. Only repeated row membership is deduplicated.
+    for(const message of items)for(const sessionId of index.get(key(message))??[]){
+      let group=result.get(sessionId);if(!group){group=[];result.set(sessionId,group);}group.push(message);
+    }
+    return result;
+  }
+  return {
+    selected:distribute(messages,selectedMembership,m=>selectedKey(m.employeeId,m.project,m.source,m.sourceSessionId,m.originalSnapshotId)),
+    // Predecessors and replies can be outside the selected owner/project/date.
+    current:distribute(allMessages,currentMembership,m=>currentKey(m.source,m.sourceSessionId,m.originalSnapshotId))
+  };
+}
 export function promptFactors(rows:UsageSession[],views:SessionInsights[],messages:RecordedMessage[],allMessages:RecordedMessage[]){
   const byVersion=new Map(views.map(view=>[view.version,view])),byMessage=new Map(allMessages.map(message=>[message.id,message]));
   const groups=new Map<string,UsageSession[]>();for(const row of rows)groups.set(row.sessionId,[...groups.get(row.sessionId)??[],row]);
+  const groupedMessages=messageGroups(rows,messages,allMessages);
   const prompts:Prompt[]=[],promptIds=new Set<string>(),sessionCompleteness=new Map<string,boolean>();const suggestions:PromptSuggestion[]=[];
   for(const [sessionId,group] of groups){
     const ids=new Set(group.flatMap(row=>row.latestCarrierSnapshotIds)),inputs=[...new Map(group.flatMap(row=>row.insightVersions).map(key=>[key.version,byVersion.get(key.version)!])).values()];
     const leaves=inputs.filter(view=>ids.has(view.snapshotId)),complete=leaves.length>0&&leaves.every(view=>view.state==='complete'&&view.inferences?.complete);
-    const eligible=(message:RecordedMessage)=>group.some(row=>message.employeeId===row.employeeId&&message.project===row.project&&message.source===row.source&&message.sourceSessionId===row.sourceSessionId&&row.snapshotIds.includes(message.originalSnapshotId));
-    const selected=messages.filter(eligible),current=allMessages.filter(message=>group.some(row=>message.source===row.source&&message.sourceSessionId===row.sourceSessionId&&row.snapshotIds.includes(message.originalSnapshotId)));
+    const selected=groupedMessages.selected.get(sessionId)??[],current=groupedMessages.current.get(sessionId)??[];
     const promptEntries=new Map<string,SessionInferences['prompts']>(),replyEntries=new Map<string,SessionInferences['replies']>();
     if(complete)for(const view of leaves){
       for(const prompt of view.inferences!.prompts){const self=prompt.citations.find(c=>c.event===prompt.event)?.origin;if(self)promptEntries.set(self.eventId,[...promptEntries.get(self.eventId)??[],prompt]);}
