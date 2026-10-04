@@ -23,7 +23,8 @@ test('Codex 0.160 new sessions count their first native usage while copied or in
       const id = randomUUID();
       const created = old ? new Date(now.getTime() - 86400000).toISOString() : timestamp;
       const meta = { timestamp: created, type: 'session_meta', payload: { id, timestamp: created, cli_version: '0.160.0', source: 'cli', cwd: '/synthetic/usage', ...extra } };
-      const bytes = encode([...(omitHeader ? [] : [meta]), user, counter(100, 10), counter(150, 20), counter(150, 20)]);
+      const bytes = encode([...(omitHeader ? [] : [meta]), user, counter(100, 10), counter(150, 20), counter(150, 20),
+        { timestamp, type: 'event_msg', payload: { type: 'task_complete', turn_id: 'synthetic-turn' } }]);
       assert.equal((await api(`/api/chunks/${digest(bytes)}`, bytes, device.deviceCredential, 'PUT')).statusCode, 201);
       const committed = await api('/api/snapshots', { protocolVersion: 1, sourceSessionId: id, source: 'codex-cli', sourceVersion: '0.160.0', sourceOs: process.platform,
         project: '/synthetic/usage', hash: digest(bytes), byteLength: bytes.length, qualifiedAt: timestamp, capability: 'unverified' }, device.deviceCredential, 'POST');
@@ -32,6 +33,8 @@ test('Codex 0.160 new sessions count their first native usage while copied or in
     const original = await upload();
     const first = await api('/api/metrics?period=since-enrollment'); assert.equal(first.statusCode, 200, first.body);
     assert.deepEqual([first.json().totals.inputTokens, first.json().totals.outputTokens], [150, 20], 'the verified new session includes first cumulative usage exactly once');
+    const insight = (await api(`/api/snapshots/${original.snapshotId}/insights`)).json();
+    assert.equal(insight.sourceState?.turn.state, 'waiting-input', 'the same immutable input binds native turn closure for shared report consumers');
     for (const value of [await upload({ forked_from_id: randomUUID() }), await upload({ history_base: { thread_id: randomUUID() } }), await upload({}, true), await upload({}, false, true)]) {
       const response = await api(`/api/snapshots/${value.snapshotId}/metrics?period=since-enrollment`); assert.equal(response.statusCode, 200, response.body);
       assert.equal(response.json().totals.inputTokens, null);

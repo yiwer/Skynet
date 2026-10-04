@@ -7,17 +7,22 @@ import { readEvidence } from './evidence.js';
 import { attributionRevision } from './qualification.js';
 import { HttpError } from './identities.js';
 import { recordedOutputFacts, outputFactsVersion } from './session-output-facts.js';
+import type { RawStore } from './raw-store.js';
+import type { AnalysisRun } from '../../packages/contracts/analysis.js';
+import { readInsightBatch } from './session-insight-batch.js';
+import { readNativeTurnState } from '../../packages/native/turn-state.js';
 
 export async function migrateSessionInsights(db:Database){
   const client=await db.connect();try{
     await client.query('BEGIN; SELECT pg_advisory_xact_lock(7402138)');
     await client.query(`CREATE TABLE IF NOT EXISTS session_insight_revisions(version text PRIMARY KEY,snapshot_id uuid NOT NULL REFERENCES snapshots(id),analysis_id uuid REFERENCES analysis_jobs(id),payload jsonb NOT NULL,created_at timestamptz NOT NULL DEFAULT now());
+      CREATE TABLE IF NOT EXISTS insight_fact_revisions(version text PRIMARY KEY,snapshot_id uuid NOT NULL REFERENCES snapshots(id),payload jsonb NOT NULL);
       CREATE INDEX IF NOT EXISTS session_insight_analysis ON session_insight_revisions(snapshot_id,analysis_id,created_at DESC)`);
     await client.query('COMMIT');
   }catch(error){await client.query('ROLLBACK');throw error;}finally{client.release();}
 }
 
-export function sessionInsightsService(db: Database, archive: ArchiveQuery, analysis: AnalysisService) {
+export function sessionInsightsService(db: Database, archive: ArchiveQuery, analysis: AnalysisService, raw: RawStore) {
   async function read(snapshotId: string, selection: { analysisId?: string;version?:string } = {}): Promise<SessionInsights> {
     const record = await archive.snapshot(snapshotId);
     if(selection.version){
@@ -30,6 +35,7 @@ export function sessionInsightsService(db: Database, archive: ArchiveQuery, anal
       const row=(await db.query('SELECT payload FROM session_insight_revisions WHERE snapshot_id=$1 AND analysis_id=$2 ORDER BY created_at DESC,version DESC LIMIT 1',[snapshotId,selection.analysisId])).rows[0];
       if(row)return row.payload;
     }
+    if (!selection.analysisId) return (await readInsightBatch(db, raw, [snapshotId]))[0]!;
     const page = await analysis.list(snapshotId);
     const run = selection.analysisId ? await analysis.get(selection.analysisId) : page.runs[0];
     if (run && run.snapshotId !== snapshotId) throw new HttpError(409, '分析版本不属于此快照');
@@ -39,6 +45,7 @@ export function sessionInsightsService(db: Database, archive: ArchiveQuery, anal
     const analysisVersion = run ? { id: run.id, generation: run.generation, prompt: run.config.promptVersion, configuration: run.config.configurationHash, applicable: run.applicable } : null;
     const unknown = () => ({ value: null, complete: false, evidence: [],contributions:[],scope:'after-enrollment' as const });
     let facts:SessionInsights['facts']={codeChanges:unknown(),tests:unknown(),commits:unknown()};
+    let sourceState:SessionInsights['sourceState'];
     if(record.manifest.byteLength<=8*1024*1024){
       try{
         const prepared=await prepareAnalysisInput(db,archive,snapshotId,{maxSessionBytes:8*1024*1024});
@@ -46,7 +53,7 @@ export function sessionInsightsService(db: Database, archive: ArchiveQuery, anal
           if(!selection.analysisId)throw new HttpError(409,'原件归属已更新，请重新读取会话洞察');
           // A newly requested historical analysis cannot borrow today's changed ownership.
         }else{
-          const {bytes}=await archive.exported(snapshotId,'raw');facts=recordedOutputFacts(bytes,prepared.input);
+          const {bytes}=await archive.exported(snapshotId,'raw');facts=recordedOutputFacts(bytes,prepared.input);sourceState={version:'native-turn-state-1',turn:readNativeTurnState(bytes,record.source)};
           if(String(await attributionRevision(db,snapshotId))!==input.attributionRevision)throw new HttpError(409,'原件归属已更新，请重新读取会话洞察');
         }
       }catch(error){
@@ -54,15 +61,21 @@ export function sessionInsightsService(db: Database, archive: ArchiveQuery, anal
         if(!(error instanceof HttpError)||![413,422].includes(error.statusCode))throw error;
       }
     }
-    const complete=!!usable&&usable.complete&&run?.result?.processing?.complete===true;
-    const value:SessionInsights={ version: digest(JSON.stringify({ snapshotId,input, analysisVersion, state, outputFactsVersion,readingVersion:'session-insights-read-1' })),factsVersion:outputFactsVersion, snapshotId, input, state, analysisVersion,
-      inferences:usable||null, metrics: { verified: complete?usable!.outcomes.filter(v=>v.status==='verified').length:null,
-        claimed:complete?usable!.outcomes.filter(v=>v.status==='claimed').length:null,
-        rework:complete&&usable!.prompts.filter(p=>!p.first).every(p=>p.rework!==null)?usable!.prompts.filter(p=>!p.first&&p.rework).length:null,
-        clarifications:complete&&usable!.replies.every(r=>r.clarification!==null)?usable!.replies.filter(r=>r.clarification).length:null }, facts };
+    const value = projectSessionInsights(snapshotId,input,run,facts,sourceState,true);
     if(Buffer.byteLength(JSON.stringify(value))>80*1024)throw new HttpError(413,'会话洞察超过单次读取上限，请读取分析与原文分页');
     await db.query('INSERT INTO session_insight_revisions(version,snapshot_id,analysis_id,payload) VALUES($1,$2,$3,$4) ON CONFLICT(version) DO NOTHING',[value.version,snapshotId,usable&&run?run.id:null,value]);
     return (await db.query('SELECT payload FROM session_insight_revisions WHERE version=$1',[value.version])).rows[0].payload;
   }
-  return { read };
+  return { read, readMany: (snapshotIds:string[], options:{full?:boolean}={}) => readInsightBatch(db,raw,snapshotIds,options.full) };
+}
+
+export function projectSessionInsights(snapshotId:string,input:SessionInsights['input'],run:AnalysisRun|undefined,facts:SessionInsights['facts'],sourceState:SessionInsights['sourceState'],historical=false):SessionInsights {
+  const usable=run?.state==='succeeded'&&(historical||run.applicable)&&run.result?.insights;
+  const state = !run ? 'unavailable' : run.state === 'failed' ? 'failed' : run.state === 'superseded'||run.state==='succeeded'&&!run.applicable&&!historical ? 'stale' : run.state === 'succeeded' ? !usable?'legacy':usable.complete&&run.result?.processing?.complete?'complete':'partial' : 'pending';
+  const analysisVersion = run ? {id:run.id,generation:run.generation,prompt:run.config.promptVersion,configuration:run.config.configurationHash,applicable:run.applicable}:null;
+  const complete=!!usable&&usable.complete&&run?.result?.processing?.complete===true;
+  return { version:digest(JSON.stringify({snapshotId,input,analysisVersion,state,outputFactsVersion,sourceState,readingVersion:'session-insights-read-2'})),factsVersion:outputFactsVersion,snapshotId,input,state,analysisVersion,sourceState,
+    inferences:usable||null,metrics:{verified:complete?usable!.outcomes.filter(v=>v.status==='verified').length:null,claimed:complete?usable!.outcomes.filter(v=>v.status==='claimed').length:null,
+      rework:complete&&usable!.prompts.filter(p=>!p.first).every(p=>p.rework!==null)?usable!.prompts.filter(p=>!p.first&&p.rework).length:null,
+      clarifications:complete&&usable!.replies.every(r=>r.clarification!==null)?usable!.replies.filter(r=>r.clarification).length:null},facts };
 }

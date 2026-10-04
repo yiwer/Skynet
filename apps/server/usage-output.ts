@@ -48,8 +48,7 @@ export function usageOutputService(db: Database, metrics: MetricsService, insigh
         AND base.source=s.source AND base.source_session_id=s.source_session_id)
       ORDER BY s.committed_at,s.id LIMIT 20001`, [ids])).rows : [];
     if (carriers.length > 20000) throw new HttpError(413, '产出范围超过原件数量上限');
-    const views: SessionInsights[] = [];
-    for (const carrier of carriers) views.push(await insights.read(carrier.id));
+    const views = await insights.readMany(carriers.map(carrier => carrier.id), { full });
     const eventIds = [...new Set(views.flatMap(view => [...Object.values(view.facts).flatMap(fact => fact.contributions.map(item => item.eventId)),
       ...view.inferences?.outcomes.flatMap(outcome => outcome.citations.flatMap(cite => cite.origin ? [cite.origin.eventId] : [])) ?? []]))];
     const origins = new Map<string, any>(eventIds.length ? (await db.query(`SELECT event_id,employee_id,source_date,project,snapshot_id,context

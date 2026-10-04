@@ -1,6 +1,8 @@
 import { useEffect, useState, type CSSProperties, type FormEvent, type ReactNode } from 'react';
 import type { MetricTotals, MetricsPage, MetricsQuery } from '../../packages/contracts/metrics.js';
 import { sourceLabel, type Source } from '../../packages/contracts/archive.js';
+import type { UsageOutputPage } from '../../packages/contracts/usage-output.js';
+import { OutputKpis, OutputTable, UsageScatter, UsageDailyPeople } from './UsageOutputCharts.js';
 import './usage-metrics.css';
 
 type Props = { request: (path: string, signal?: AbortSignal, method?: 'POST', body?: unknown) => Promise<Response> };
@@ -42,8 +44,8 @@ function Person({ name, index }: { name: string; index: number }) {
 export function UsageMetrics({ request }: Props) {
   const [draft, setDraft] = useState<MetricsQuery>({ period: 'this-week', offset: 0 });
   const [query, setQuery] = useState<MetricsQuery>(draft);
-  const [page, setPage] = useState<MetricsPage | null>(null);
-  const [complete, setComplete] = useState<MetricsPage | null>(null);
+  const [page, setPage] = useState<UsageOutputPage | null>(null);
+  const [complete, setComplete] = useState<UsageOutputPage | null>(null);
   const [employees, setEmployees] = useState<Array<{ employeeId: string; employee: string }>>([]);
   const [projects, setProjects] = useState<string[]>([]); const [customProject, setCustomProject] = useState(false); const [advanced, setAdvanced] = useState(false);
   const [busy, setBusy] = useState(false); const [error, setError] = useState(''); const [retry, setRetry] = useState(0);
@@ -53,7 +55,7 @@ export function UsageMetrics({ request }: Props) {
   const [exporting, setExporting] = useState(false); const [message, setMessage] = useState('');
   useEffect(() => {
     const abort = new AbortController(); setBusy(true); setError(''); setPage(null); setMessage('');
-    request(`/api/metrics?${params(query)}`, abort.signal).then(value => value.json()).then((data: MetricsPage) => {
+    request(`/api/usage-output?${params(query)}`, abort.signal).then(value => value.json()).then((data: UsageOutputPage) => {
       if (abort.signal.aborted) return;
       setPage(data);
       setEmployees(previous => [...new Map([...previous, ...data.employees].map(person => [person.employeeId, { employeeId: person.employeeId, employee: person.employee }])).values()]
@@ -68,8 +70,8 @@ export function UsageMetrics({ request }: Props) {
     if (query.offset === 0 && page.nextOffset === null) { setComplete(page); return; }
     // A session page is never a complete employee/Agent distribution. Read
     // the same persisted version's bounded full export to draw this chart.
-    request(`/api/metrics/export?${params({ ...query, offset: 0, version: page.version })}`, abort.signal)
-      .then(response => response.json()).then((data: MetricsPage) => { if (!abort.signal.aborted) setComplete(data); })
+    request(`/api/usage-output/export?${params({ ...query, offset: 0, version: page.version })}`, abort.signal)
+      .then(response => response.json()).then((data: UsageOutputPage) => { if (!abort.signal.aborted) setComplete(data); })
       .catch(failure => { if (!abort.signal.aborted) setChartError(failure.message); });
     return () => abort.abort();
   }, [page?.version, chartRetry]);
@@ -82,7 +84,7 @@ export function UsageMetrics({ request }: Props) {
   async function recompute() {
     setBusy(true); setError(''); setMessage('');
     try {
-      const data: MetricsPage = await (await request('/api/metrics/recompute', undefined, 'POST', { ...query, offset: 0, version: undefined })).json();
+      const data: UsageOutputPage = await (await request('/api/usage-output/recompute', undefined, 'POST', { ...query, offset: 0, version: undefined })).json();
       setQuery({ ...query, offset: 0, version: data.version });
     } catch (failure) { setError((failure as Error).message); }
     finally { setBusy(false); }
@@ -91,15 +93,15 @@ export function UsageMetrics({ request }: Props) {
     if (!page) return;
     setExporting(true); setError('');
     try {
-      const response = await request(`/api/metrics/export?${params({ ...query, offset: 0, version: page.version })}`);
+      const response = await request(`/api/usage-output/export?${params({ ...query, offset: 0, version: page.version })}`);
       const url = URL.createObjectURL(await response.blob()); const anchor = document.createElement('a');
-      anchor.href = url; anchor.download = `skynet-metrics-${page.version}.json`; anchor.click();
+      anchor.href = url; anchor.download = `skynet-usage-output-${page.version}.json`; anchor.click();
       setTimeout(() => URL.revokeObjectURL(url), 1000); setMessage('导出已准备好');
     } catch (failure) { setError((failure as Error).message); }
     finally { setExporting(false); }
   }
   const allSessions = complete?.version === page?.version ? complete?.sessions : undefined;
-  const displayedAgents = agents.filter(source => page?.sources.some(row => row.source === source));
+  const displayedAgents = agents.filter(source => page?.employees.some(row => row.agents.some(agent => agent.source === source && (agent.sessions > 0 || agent.knownInputTokens > 0))));
   const people = page?.employees.map(person => ({ ...person, agents: displayedAgents.map(source => {
     const rows = allSessions?.filter(session => session.employeeId === person.employeeId && session.source === source) ?? [];
     return { source, input: rows.reduce((sum, session) => sum + session.knownInputTokens, 0), unknown: rows.some(session => session.inputTokens === null) };
@@ -138,13 +140,7 @@ export function UsageMetrics({ request }: Props) {
     {message && <p className="usage-status usage-success" role="status">{message}</p>}
     {page && !hasUsage && <p className="usage-empty">暂无用量</p>}
     {page && hasUsage && <>
-      <dl className="usage-stats">
-        {hasInput && <Stat label="输入 Token" value={<TokenValue value={page.totals.knownInputTokens} unknown={tokenUnknown(page.totals, 'Input')} short />} trend={page.daily.map(day => trendValue(day, 'inputTokens'))}>{page.totals.unknownInputSessions > 0 && <>未知 {page.totals.unknownInputSessions} 个会话</>}</Stat>}
-        {hasOutput && <Stat label="输出 Token" value={<TokenValue value={page.totals.knownOutputTokens} unknown={tokenUnknown(page.totals, 'Output')} short />} trend={page.daily.map(day => trendValue(day, 'outputTokens'))}>{page.totals.unknownOutputSessions > 0 && <>未知 {page.totals.unknownOutputSessions} 个会话</>}</Stat>}
-        <Stat label="会话" value={number(page.totals.sessions)} />
-        <Stat label="用户轮次" value={number(page.totals.userTurns)} />
-        <Stat label="工具调用" value={number(page.totals.toolCalls)} />
-      </dl>
+      <OutputKpis page={page}/>
       {(hasInput || hasOutput) && <div className="usage-figure-grid">
         {hasInput && <section className="usage-figure" aria-label="员工用量"><div className="usage-figure-head"><div><h2>每人输入 Token</h2></div><ViewToggle chart={peopleChart} setChart={setPeopleChart} /></div>
           {!allSessions ? chartError ? <div className="usage-error" role="alert"><p>{chartError}</p><button onClick={() => setChartRetry(value => value + 1)}>重试员工图表</button></div> : <p className="usage-status" role="status">正在读取当前版本的完整用量…</p>
@@ -156,24 +152,16 @@ export function UsageMetrics({ request }: Props) {
           {agentTooltip && peopleChart && <p className="usage-chart-tooltip" role="tooltip">{agentTooltip}</p>}
           <ul className="usage-legend">{displayedAgents.map(source => <li key={source}><i data-series={sourceSeries(source)} />{sourceLabel(source)}</li>)}</ul>
         </section>}
-      {(hasInput || hasOutput) && <section className="usage-figure" aria-label="每日用量"><div className="usage-figure-head"><div><h2>每日 Token</h2></div><ViewToggle chart={chart} setChart={setChart} daily /></div>
-        {chart ? <><div className="usage-daily-scroll"><svg className="usage-daily-chart" viewBox={`0 0 ${dailyWidth} 200`} style={{ minWidth: dailyWidth }} role="group" aria-label="每日 Token 趋势">
-          <line className="usage-chart-grid" x1="24" y1="24" x2={dailyWidth - 8} y2="24" /><line className="usage-chart-grid" x1="24" y1="94" x2={dailyWidth - 8} y2="94" /><line className="usage-chart-axis" x1="24" y1="164" x2={dailyWidth - 8} y2="164" />
-          {page.daily.map((day, index) => { const unit = (dailyWidth - 40) / page.daily.length, x = 24 + unit * index + unit * 0.25, width = Math.max(4, unit * 0.5), input = (trendValue(day, 'inputTokens') ?? 0) / dailyMaximum * 128, output = (trendValue(day, 'outputTokens') ?? 0) / dailyMaximum * 128;
-            const excluded = day.tokenTrend?.excludedSessions ?? day.unknownTokenSessions;
-            const label = `${day.date}：输入 ${trendValue(day, 'inputTokens') === null ? '未知' : number(trendValue(day, 'inputTokens')!)}；输出 ${trendValue(day, 'outputTokens') === null ? '未知' : number(trendValue(day, 'outputTokens')!)}${excluded ? `；${excluded} 个未知会话未计入趋势` : ''}`;
-            return <g key={day.date} tabIndex={0} role="img" aria-label={label} onFocus={() => setDayTooltip(label)} onBlur={() => setDayTooltip('')} onMouseEnter={() => setDayTooltip(label)} onMouseLeave={() => setDayTooltip('')} onKeyDown={event => { if (event.key === 'Escape') setDayTooltip(''); }}><rect data-series="1" x={x} y={164 - input} width={width} height={input} /><rect data-series="3" x={x} y={164 - input - output} width={width} height={output} />{excluded > 0 && <rect className="usage-daily-unknown" x={x} y="8" width={width} height="3" />}<text x={x + width / 2} y="186" textAnchor="middle">{day.date.slice(5)}</text></g>;
-          })}</svg></div>{dayTooltip && <p className="usage-chart-tooltip" role="tooltip">{dayTooltip}</p>}<ul className="usage-legend"><li><i data-series="1" />输入 Token</li><li><i data-series="3" />输出 Token</li>{page.daily.some(day => day.unknownTokenSessions > 0) && <li title="当日有未上报用量"><i className="usage-legend-unknown" /><span>未知会话</span></li>}</ul></>
-          : <div className="usage-table-scroll"><table><caption>按来源日期归期的已知用量与未知会话</caption><thead><tr><th>日期</th><th>会话</th><th>用户轮次</th><th>输入 Token</th><th>输出 Token</th></tr></thead><tbody>{page.daily.map(day => <tr key={day.date}><th scope="row">{day.date}</th><td>{day.sessions}</td><td>{day.userTurns}</td><td><TokenValue value={day.knownInputTokens} unknown={tokenUnknown(day, 'Input')} /></td><td><TokenValue value={day.knownOutputTokens} unknown={tokenUnknown(day, 'Output')} /></td></tr>)}</tbody></table></div>}
-      </section>}
+      <OutputTable page={page}/>
       </div>}
+      {complete?.version === page.version && <><UsageScatter page={complete}/><UsageDailyPeople page={complete}/></>}
       <section className="usage-figure" aria-label="会话用量"><div className="usage-figure-head"><div><h2>会话明细</h2></div></div>
-        <div className="usage-table-scroll"><table><caption>当前指标版本的会话分页</caption><thead><tr><th>员工 / 项目</th><th>Agent</th><th>轮次 / 工具</th><th>输入 Token</th><th>输出 Token</th><th>原件</th></tr></thead><tbody>{page.sessions.map(session => <tr key={`${session.sessionId}:${session.employeeId}:${session.project}`}><th scope="row">{session.employee}<span className="usage-cell-detail">{session.project || '未归类项目'}</span></th><td>{sourceLabel(session.source)}</td><td>{session.userTurns} / {session.toolCalls}</td><td><TokenValue value={session.knownInputTokens} unknown={tokenUnknown(session, 'Input')} /></td><td><TokenValue value={session.knownOutputTokens} unknown={tokenUnknown(session, 'Output')} /></td><td><a href={session.webPath}>查看会话</a></td></tr>)}</tbody></table></div>
+        <div className="usage-table-scroll"><table><caption>当前指标版本的会话分页</caption><thead><tr><th>员工 / 项目</th><th>Agent</th><th>轮次 / 工具</th><th>输入 Token</th><th>输出 Token</th><th>原件</th></tr></thead><tbody>{page.sessions.filter(session => session.selected).map(session => <tr key={`${session.sessionId}:${session.employeeId}:${session.project}`}><th scope="row">{session.employee}<span className="usage-cell-detail">{session.project || '未归类项目'}</span></th><td>{sourceLabel(session.source)}</td><td>{session.userTurns} / {session.toolCalls}</td><td><TokenValue value={session.knownInputTokens} unknown={tokenUnknown(session, 'Input')} /></td><td><TokenValue value={session.knownOutputTokens} unknown={tokenUnknown(session, 'Output')} /></td><td><a href={session.webPath}>查看会话</a></td></tr>)}</tbody></table></div>
         {page.sessions.length === 0 && <p className="usage-empty">没有符合条件的会话。</p>}
         <div className="usage-pagination"><button disabled={busy || query.offset === 0} onClick={() => setQuery({ ...query, version: page.version, offset: Math.max(0, query.offset - 20) })}>上一页会话</button><span>版本 {page.revision} · 第 {Math.floor(query.offset / 20) + 1} 页</span><button disabled={busy || page.nextOffset === null} onClick={() => setQuery({ ...query, version: page.version, offset: page.nextOffset! })}>下一页会话</button></div>
       </section>
     </>}
-    {page && <details className="usage-data-status"><summary>指标口径 · 版本 {page.revision}</summary><p>{page.definition}</p><p>{page.catalogVersion}</p></details>}
+    {page && <details className="usage-data-status"><summary>指标口径 · 版本 {page.revision}</summary><p>按原始事件归属与来源日期汇总</p><p>{page.catalogVersion}</p></details>}
     {page && !page.sourceInputsComplete && page.unknownReasons.length > 0 && <details className="usage-data-status"><summary>数据缺口 · {page.unknownReasons.length}</summary><ul>{page.unknownReasons.map(reason => <li key={reason}>{reason}</li>)}</ul></details>}
     </div>
   </section>;
