@@ -1,4 +1,4 @@
-import { useEffect,useRef,useState,type KeyboardEvent } from 'react';
+import { useEffect,useMemo,useRef,useState,type KeyboardEvent } from 'react';
 import { activityLabels,activityTypes,type ActivityPage,type ActivityQuery,type ActivityEvidence } from '../../packages/contracts/activity.js';
 import { sourceLabel } from '../../packages/contracts/archive.js';
 import { beijingDate } from '../../packages/contracts/reports.js';
@@ -37,14 +37,15 @@ function Rhythm({page}:{page:ActivityPage}){
   </section>;
 }
 export function ActivityRecords({request,hash}:{request:Request;hash:string}){
-  const [query,setQuery]=useState<ActivityQuery>(()=>fromHash(hash)),[page,setPage]=useState<ActivityPage>(),[facets,setFacets]=useState<ActivityPage['lanes']>([]),[error,setError]=useState(''),[busy,setBusy]=useState(false),[retry,setRetry]=useState(0),[project,setProject]=useState(query.project??'');
-  useEffect(()=>{const selection=fromHash(hash);setQuery(selection);setProject(selection.project??'');},[hash]);
+  const query=useMemo(()=>fromHash(hash),[hash]);
+  const [page,setPage]=useState<ActivityPage>(),[facets,setFacets]=useState<ActivityPage['lanes']>([]),[error,setError]=useState(''),[busy,setBusy]=useState(false),[retry,setRetry]=useState(0),[project,setProject]=useState(query.project??'');
+  useEffect(()=>{setProject(query.project??'');},[query]);
   useEffect(()=>{const abort=new AbortController();setBusy(true);setError('');setPage(undefined);request('/api/activity?'+params(query),abort.signal).then(response=>response.json()).then(async(result:ActivityPage)=>{
       const lanes=new Map(result.lanes.map(lane=>[lane.employeeId,lane]));let offset=result.nextLaneOffset;
       while(offset!==null&&!abort.signal.aborted){const next:ActivityPage=await(await request('/api/activity?'+params({...query,version:result.version,section:'lanes',offset}),abort.signal)).json();
         for(const lane of next.lanes){const existing=lanes.get(lane.employeeId);if(existing){existing.sessions.push(...lane.sessions);existing.points.push(...lane.points);existing.segments.push(...lane.segments);}else lanes.set(lane.employeeId,lane);}offset=next.nextOffset;}
       if(abort.signal.aborted)return;setPage({...result,lanes:[...lanes.values()]});setFacets(previous=>[...new Map([...previous,...result.employeeOrder.map(employee=>({...employee,sessions:[],points:[],segments:[]}))].map(lane=>[lane.employeeId,lane])).values()]);}).catch(error=>{if(!abort.signal.aborted)setError(error.message);}).finally(()=>{if(!abort.signal.aborted)setBusy(false);});return()=>abort.abort();},[query,retry]);
-  const navigate=(next:Partial<ActivityQuery>,keep=false)=>{const value={...query,...next,...(!keep?{version:undefined,offset:0}:{})};const target='#activity?'+params(value);if(location.hash===target)setRetry(value=>value+1);else location.hash=target;};
+  const navigate=(next:Partial<ActivityQuery>,keep=false)=>{const value={...fromHash(location.hash),...next,...(!keep?{version:undefined,offset:0}:{})};const target='#activity?'+params(value);if(location.hash===target){if(hash===target)setRetry(value=>value+1);}else location.hash=target;};
   async function download(){if(!page)return;try{const response=await request('/api/activity/export?'+params({...query,version:page.version,offset:0}));const url=URL.createObjectURL(await response.blob()),a=document.createElement('a');a.href=url;a.download=`skynet-activity-${page.scope.date}-${page.version}.json`;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);}catch(error){setError((error as Error).message);}}
   return <section className="activity-records workspace-page" aria-label="活动记录" aria-busy={busy}>
     <div className="activity-page-head"><div><div className="activity-eyebrow">观察</div><h1>活动记录</h1></div><div className="activity-actions"><button disabled={busy} onClick={()=>navigate({})}>刷新</button><button disabled={!page||busy} onClick={download}>导出当前版本</button></div></div>
