@@ -34,6 +34,7 @@ import { migrateMetrics, metricsService } from './metrics.js';
 import { metricsQuerySchema } from '../../packages/contracts/metrics.js';
 import { migrateSessionInsights,sessionInsightsService } from './session-insights.js';
 import { sessionInsightsQuery } from '../../packages/contracts/session-insights.js';
+import { migrateDeliveryReceipts, saveDeliveryReceipt } from './delivery-receipts.js';
 
 export async function createApp(options: { db: Database; rawDirectory: string; webDirectory?: string; publicOrigin?: string; reportClock?: () => Date }) {
   const { db } = options;
@@ -47,6 +48,7 @@ export async function createApp(options: { db: Database; rawDirectory: string; w
   await migrateCoverage(db);
   await migrateWorkViews(db);
   await migrateMetrics(db);
+  await migrateDeliveryReceipts(db);
   const raw = new RawStore(options.rawDirectory);
   await backfillOrigins(db, raw);
   await reconcileOriginIntegrity(db,raw);
@@ -79,6 +81,8 @@ export async function createApp(options: { db: Database; rawDirectory: string; w
   const operations=serverOperations(db,options.rawDirectory);
   app.get('/api/server/operations',{onRequest:readerGuard},()=>operations.read());
   const deviceGuard = async (request: { headers: { authorization?: string } }) => { await device(request.headers.authorization); };
+  app.post('/api/delivery/receipts', { onRequest: deviceGuard }, async request =>
+    saveDeliveryReceipt(db, (await device(request.headers.authorization)).id, request.body));
   const managerGuard = async (request: { headers: { authorization?: string } }) => { await identity.manager(request.headers.authorization); };
 
   app.get('/api/identities', { onRequest: managerGuard }, async request => {
@@ -200,10 +204,10 @@ export async function createApp(options: { db: Database; rawDirectory: string; w
   const metrics = metricsService(db, raw, options.reportClock);
   app.get('/api/snapshots/:id/conversation', { onRequest: readerGuard }, async request => {
     const { id } = z.object({ id: z.uuid() }).parse(request.params);
-    const q = z.object({ cursor: z.string().optional(), includeTools: z.enum(['true', 'false']).optional(), includeContext: z.enum(['true', 'false']).optional(),
+    const q = z.object({ readingVersion: z.enum(['conversation-2', 'conversation-3']).optional(), cursor: z.string().optional(), includeTools: z.enum(['true', 'false']).optional(), includeContext: z.enum(['true', 'false']).optional(),
       limit: z.coerce.number().optional(), line: z.coerce.number().optional(), block: z.coerce.number().optional(),
       textOffset: z.coerce.number().optional(), parserVersion: z.string().optional() }).strict().parse(request.query);
-    return conversation.page(id, conversationInputSchema.parse({ cursor: q.cursor, includeTools: q.includeTools === 'true', includeContext: q.includeContext === 'true', limit: q.limit,
+    return conversation.page(id, conversationInputSchema.parse({ readingVersion: q.readingVersion, cursor: q.cursor, includeTools: q.includeTools === 'true', includeContext: q.includeContext === 'true', limit: q.limit,
       ...(q.line === undefined ? {} : { anchor: { line: q.line, block: q.block, textOffset: q.textOffset, parserVersion: q.parserVersion } }) }));
   });
   app.get('/api/snapshots/:id/conversation/trace', { onRequest: readerGuard }, async request => {
@@ -213,6 +217,7 @@ export async function createApp(options: { db: Database; rawDirectory: string; w
   });
   app.get('/api/metrics/catalog', { onRequest: readerGuard }, () => metrics.readMetricCatalog());
   app.get('/api/metrics', { onRequest: readerGuard }, request => metrics.readMetrics(metricsQuerySchema.parse(request.query)));
+  app.get('/api/team-coverage/metrics', { onRequest: readerGuard }, request => metrics.readCoverageMetrics(request.query));
   app.get('/api/snapshots/:id/metrics', { onRequest: readerGuard }, request => {
     const { id } = z.object({ id: z.uuid() }).parse(request.params);
     return metrics.readSnapshotMetrics(id, metricsQuerySchema.parse(request.query));

@@ -57,7 +57,7 @@ test('V2 public originals → conversation and metrics Web → real HTTPS OAuth 
     assert.equal((await sandbox.api('/api/metrics')).status, 401);
     assert.equal((await sandbox.api(`/api/snapshots/${snapshotId}/conversation`)).status, 401);
     const expectedAuthenticationErrors = sandbox.serverErrors.length;
-    const selection = { period: 'custom', from: day, to: day };
+    const selection = { period: 'this-week' };
     const metricsPath = '/api/metrics?' + params(selection);
     const metricsResponse = await api(metricsPath); assert.equal(metricsResponse.status, 200, await metricsResponse.clone().text());
     const metrics: MetricsPage = await metricsResponse.json();
@@ -122,8 +122,8 @@ test('V2 public originals → conversation and metrics Web → real HTTPS OAuth 
     assert.equal(defaultPages[0]!.messages.find(message => message.line === 2)!.toolEvidence, 'none-observed');
     assert.equal(defaultPages[0]!.status.verification, 'not-assessed');
     await expect(conversation.getByRole('button', { name: '显示 1 次工具调用、2 条工具记录', exact: true })).toBeVisible();
-    assert.deepEqual([defaultPages[0]!.trailingHiddenToolCalls, defaultPages[0]!.trailingHiddenToolEvents], [1, 1]);
-    await expect(conversation.getByRole('button', { name: '显示 1 次工具调用', exact: true })).toBeVisible();
+    assert.deepEqual([defaultPages[0]!.trailingHiddenToolCalls, defaultPages[0]!.trailingHiddenToolEvents], [0, 0]);
+    await expect(conversation.getByRole('button', { name: '显示 1 次工具调用', exact: true })).toHaveCount(0);
     assert.equal(await conversation.locator('pre').filter({ hasText: injection }).count(), 0);
     await conversation.getByLabel('显示工具调用与结果').check();
     const toolMessage = conversation.locator('.conversation-message').filter({ hasText: '工具实际返回：测试尚未执行' });
@@ -154,6 +154,8 @@ test('V2 public originals → conversation and metrics Web → real HTTPS OAuth 
       }
     }
     assert.ok(segmentContinuations > 0, 'the long original must be read through the explicit segment action');
+    assert.deepEqual([defaultPages.at(-1)!.trailingHiddenToolCalls, defaultPages.at(-1)!.trailingHiddenToolEvents], [1, 1]);
+    await expect(conversation.getByRole('button', { name: '显示 1 次工具调用', exact: true })).toBeVisible();
     await expect(conversation.getByRole('button', { name: '继续阅读对话', exact: true })).toBeDisabled();
     await page.keyboard.press('Control+k');
     const search = page.getByRole('region', { name: '搜索会话', exact: true });
@@ -233,10 +235,18 @@ test('V2 public originals → conversation and metrics Web → real HTTPS OAuth 
     const usagePage = page.getByRole('region', { name: '用量指标', exact: true });
     await expect(usagePage.getByRole('heading', { name: '用量指标', exact: true })).toBeVisible();
     await expect(usagePage.getByRole('region', { name: '会话用量', exact: true }).getByRole('link', { name: '查看会话', exact: true })).toHaveCount(2);
+    const dailyPoint = usagePage.locator('.usage-daily-chart [tabindex="0"]').first();
+    await expect(dailyPoint).toHaveCount(1);
+    await dailyPoint.focus();
+    await expect(usagePage.getByRole('tooltip')).toContainText('110');
+    await page.keyboard.press('Escape');
+    await expect(usagePage.getByRole('tooltip')).toHaveCount(0);
+    await usagePage.locator('.usage-bar-segment').first().focus();
+    await expect(usagePage.getByRole('tooltip')).toContainText('Claude Code CLI');
+    await page.keyboard.press('Tab');
+    await expect(usagePage.getByRole('tooltip')).toHaveCount(0);
     await expect(usagePage.getByRole('heading', { name: /^(每人产出|会话：Token 与已验证结果)$/ })).toHaveCount(0);
-    await usagePage.getByRole('group', { name: '时间范围', exact: true }).getByRole('button', { name: '自定义', exact: true }).click();
-    await usagePage.getByLabel('开始日期', { exact: true }).fill(day); await usagePage.getByLabel('结束日期', { exact: true }).fill(day);
-    await usagePage.getByRole('button', { name: '应用筛选', exact: true }).click();
+    await expect(usagePage.getByRole('group', { name: '时间范围', exact: true }).getByRole('button')).toHaveText(['本周', '上周', '接入至今']);
     await expect(usagePage).toHaveAttribute('aria-busy', 'false');
     await usagePage.getByRole('combobox', { name: /^Agent/ }).selectOption('claude-code-cli');
     await expect(usagePage.getByRole('region', { name: '会话用量', exact: true }).getByRole('link', { name: '查看会话', exact: true })).toHaveCount(1);
@@ -259,7 +269,7 @@ test('V2 public originals → conversation and metrics Web → real HTTPS OAuth 
     assert.deepEqual(await (await api('/api/metrics/export?' + params({ ...filteredSelection, version: filtered.version }))).json(), filtered);
     const dailyUsage = usagePage.getByRole('region', { name: '每日用量', exact: true });
     await dailyUsage.getByRole('button', { name: '切换为图表', exact: true }).click();
-    await expect(dailyUsage.getByRole('img')).toHaveCount(1);
+    await expect(dailyUsage.getByRole('group', { name: '每日 Token 趋势', exact: true })).toHaveCount(1);
     await dailyUsage.getByRole('button', { name: '切换为表格', exact: true }).click();
     await expect(usagePage.getByRole('table', { name: '按来源日期归期的已知用量与未知会话', exact: true })).toBeVisible();
     await capture(page, 'metrics');

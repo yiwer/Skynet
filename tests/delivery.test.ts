@@ -12,21 +12,26 @@ const hash = (bytes: Buffer) => createHash('sha256').update(bytes).digest('hex')
 test('frozen offline generations survive source loss and process/server restarts, back off, retain rejected evidence and recover through device Web', { timeout: 240_000 }, async () => {
   const sandbox = await createSandbox(); let browser: Browser | undefined;
   let upstream = ''; let mode: 'online' | 'offline' | 'limited' | 'server-error' | 'wrong-ack' = 'online';
+  let receiptMode: 'online' | 'unavailable' | 'lost-ack' = 'online';
+  const receiptBodies: string[] = [];
   let archiveRequests = 0; const archiveRequestTimes: number[] = []; const committedResponses: any[] = [];
   const proxy = createServer(async (incoming, outgoing) => {
     try {
       const path = incoming.url!; const archive = path.startsWith('/api/chunks/') || path.startsWith('/api/snapshots') || path === '/api/artifacts/assemble';
       if (archive) { archiveRequests++; archiveRequestTimes.push(Date.now()); }
+      if (path === '/api/delivery/receipts' && receiptMode === 'unavailable') { outgoing.writeHead(503).end('{}'); return; }
       if (mode === 'offline') { incoming.socket.destroy(); return; }
       if (archive && mode === 'limited') { outgoing.writeHead(429, { 'Retry-After': '1', 'Content-Type': 'application/json' }).end('{}'); return; }
       if (archive && mode === 'server-error') { outgoing.writeHead(503, { 'Content-Type': 'application/json' }).end('{}'); return; }
       const parts: Buffer[] = []; for await (const part of incoming) parts.push(Buffer.from(part));
+      if (path === '/api/delivery/receipts') receiptBodies.push(Buffer.concat(parts).toString());
       const response = await fetch(`${upstream}${path}`, { method: incoming.method,
         headers: { ...(incoming.headers.authorization ? { Authorization: incoming.headers.authorization } : {}),
           ...(incoming.headers['idempotency-key'] ? { 'Idempotency-Key': String(incoming.headers['idempotency-key']) } : {}),
           ...(incoming.headers['content-type'] ? { 'Content-Type': incoming.headers['content-type'] } : {}) },
         body: parts.length ? Buffer.concat(parts) : undefined });
       const content = Buffer.from(await response.arrayBuffer());
+      if (path === '/api/delivery/receipts' && receiptMode === 'lost-ack' && response.ok) { incoming.socket.destroy(); return; }
       if (path.startsWith('/api/snapshots') && incoming.method === 'POST' && response.ok) {
         committedResponses.push(JSON.parse(content.toString()));
         if (mode === 'wrong-ack') {
@@ -58,6 +63,8 @@ test('frozen offline generations survive source loss and process/server restarts
       return JSON.parse(await sandbox.collectorCommand('run', state));
     };
     assert.equal((await run()).committed, 1); const firstId = await latest();
+    assert.equal((await (await api(`/api/snapshots/${firstId}/conversation`)).json()).status.offlineBackfill, 'not-observed',
+      'an actual acknowledged delivery preserves its collector connectivity observation');
     const sidecarDir = join(project, sessionId, 'tool-results'); await mkdir(sidecarDir, { recursive: true });
     const sidecar = join(sidecarDir, 'large.txt'); const material = Buffer.alloc(9 * 1024 * 1024, 'm'); await writeFile(sidecar, material);
     const offlineA = bytes(firstRecord, record('离线第一次追加')); await writeFile(transcriptPath, offlineA); mode = 'offline';
@@ -74,6 +81,10 @@ test('frozen offline generations survive source loss and process/server restarts
     for (const plan of plans) {
       const value = JSON.parse(await readFile(join(state, 'delivery', 'pending', plan), 'utf8'));
       assert.ok(value.payloads.some((payload: any) => payload.hash === hash(material)), 'deleted sidecar remains referenced in every pending generation that needs it');
+      // Upgrade fixture: a 0.2.4 pending generation had no per-upload observations.
+      // Remove only this synthetic sidecar, never raw bytes or the frozen manifest.
+      if (value.manifest.hash === hash(offlineB)) await unlink(join(state, 'delivery', 'observations', `${value.id}.json`))
+        .catch(error => { if (error.code !== 'ENOENT') throw error; });
     }
     await unlink(transcriptPath); // Only this test's source; delivery must no longer need it.
     const serverPort = Number(new URL(upstream).port); await sandbox.stopServer(); upstream = await sandbox.startServer(serverPort);
@@ -81,9 +92,14 @@ test('frozen offline generations survive source loss and process/server restarts
     const recovered = await run(); assert.equal(recovered.committed, 2); assert.equal(recovered.delivery.pendingSnapshots, 0);
     assert.ok(recovered.errors.some((message: string) => message.includes('ENOENT')), 'missing source remains a collection gap even when frozen bytes deliver');
     const afterLossId = await latest(); assert.deepEqual(await raw(afterLossId), offlineB);
+    assert.equal((await (await api(`/api/snapshots/${afterLossId}/conversation`)).json()).status.offlineBackfill, 'unknown',
+      'legacy pending generations without per-upload observations do not manufacture a zero-disconnect receipt');
     const history = (await (await api(`/api/snapshots/${afterLossId}/history`)).json()).snapshots;
     assert.equal(history.length, 3); const aSnapshot = history.find((item: any) => item.hash === hash(offlineA)); assert.ok(aSnapshot);
     assert.deepEqual(await raw(aSnapshot.id), offlineA);
+    const observed = await (await api(`/api/snapshots/${aSnapshot.id}/conversation`)).json();
+    assert.equal(observed.status.offlineBackfill, 'observed');
+    assert.ok(observed.status.delivery.disconnectedAttempts >= 1);
     assert.equal((await detail(aSnapshot.id)).manifest.capture.previousSnapshotId, firstId);
     const recoveredDetail = await detail(afterLossId); const materialId = recoveredDetail.manifest.capture.materials[0].id;
     assert.equal(recoveredDetail.manifest.capture.previousSnapshotId, aSnapshot.id, 'offline generation resolves its predecessor only after that predecessor is committed');
@@ -107,6 +123,7 @@ test('frozen offline generations survive source loss and process/server restarts
     await expect(page.getByRole('region', { name: '设备同步状态' })).toContainText('服务器限流 (429)');
     await page.screenshot({ path: join(sandbox.directory, 'delivery-backlog.png'), fullPage: true });
     mode = 'online'; await setTimeout(Math.max(0, Date.parse(limited.delivery.nextAttemptAt) - Date.now() + 30)); assert.equal((await run()).committed, 1);
+    assert.equal((await (await api(`/api/snapshots/${await latest()}/conversation`)).json()).status.offlineBackfill, 'not-observed', '429 is not a disconnected transport');
 
     const settingsPath = join(state, 'settings.json'); const settings = JSON.parse(await readFile(settingsPath, 'utf8'));
     const rejectedBytes = Buffer.concat([limitedBytes, bytes(record('凭据修复后补传'))]); await writeFile(transcriptPath, rejectedBytes);
@@ -137,6 +154,23 @@ test('frozen offline generations survive source loss and process/server restarts
     mode = 'server-error'; const failedBytes = Buffer.concat([lastBytes, bytes(record('503 后补传'))]); await writeFile(transcriptPath, failedBytes);
     const unavailable = await run(); assert.equal(unavailable.delivery.lastFailure.kind, 'server-unavailable');
     mode = 'online'; await setTimeout(Math.max(0, Date.parse(unavailable.delivery.nextAttemptAt) - Date.now() + 30)); assert.equal((await run()).committed, 1);
+    assert.equal((await (await api(`/api/snapshots/${await latest()}/conversation`)).json()).status.offlineBackfill, 'not-observed', '503 is not a disconnected transport');
+    receiptMode = 'unavailable';
+    const receiptDelayedBytes = Buffer.concat([failedBytes, bytes(record('投递观察独立补送'))]);
+    await writeFile(transcriptPath, receiptDelayedBytes);
+    const delayed = await run(); assert.equal(delayed.committed, 1); assert.equal(delayed.delivery.pendingSnapshots, 0);
+    const receiptDelayedId = await latest(); assert.deepEqual(await raw(receiptDelayedId), receiptDelayedBytes);
+    assert.equal((await (await api(`/api/snapshots/${receiptDelayedId}/conversation`)).json()).status.offlineBackfill, 'unknown');
+    const receiptFiles = await readdir(join(state, 'delivery', 'receipts')); assert.equal(receiptFiles.length, 1);
+    receiptMode = 'lost-ack'; await run('retry');
+    const afterLostAck = await (await api(`/api/snapshots/${receiptDelayedId}/conversation`)).json();
+    assert.equal(afterLostAck.status.offlineBackfill, 'not-observed'); assert.equal(afterLostAck.status.delivery.receiptCount, 1);
+    assert.equal((await readdir(join(state, 'delivery', 'receipts'))).length, 1, 'lost receipt ACK retains durable outbox after raw generation retires');
+    receiptMode = 'online'; await run('retry');
+    assert.equal((await readdir(join(state, 'delivery', 'receipts'))).length, 0);
+    const replayed = receiptBodies.filter(body => JSON.parse(body).snapshotId === receiptDelayedId);
+    assert.equal(replayed.length, 2); assert.equal(replayed[0], replayed[1], 'process restart retries exactly the same receipt');
+    assert.deepEqual((await (await api(`/api/snapshots/${receiptDelayedId}/conversation`)).json()).status.delivery, afterLostAck.status.delivery);
     await page.getByRole('button', { name: '刷新设备状态' }).click(); await expect(page.getByRole('region', { name: '设备同步状态' })).toContainText('设备凭据被拒绝 (401)');
     await expect(page.getByRole('region', { name: '设备同步状态' })).toContainText('0 份');
     await page.setViewportSize({ width: 375, height: 900 }); assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);

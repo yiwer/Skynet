@@ -14,11 +14,14 @@ import { attributionRevision } from './qualification.js';
 import { QueryCache } from './query-cache.js';
 import type { RawStore } from './raw-store.js';
 import { conversationContext, displayCharacters, readConversationTrace } from './conversation-trace.js';
+import { readNativeTurnState, type NativeTurnState } from '../../packages/native/turn-state.js';
+import { readDeliveryObservation } from './delivery-receipts.js';
 
 const readingVersion = 'conversation-2';
 const cursorSchema = z.object({
-  version: z.literal(2), readingVersion: z.literal(readingVersion), snapshotId: z.uuid(), hash: hashSchema,
+  version: z.literal(2), readingVersion: z.enum(['conversation-2', 'conversation-3']), snapshotId: z.uuid(), hash: hashSchema,
   parserVersion: z.string().max(128), attributionRevision: z.string().max(128),
+  deliveryRevision: hashSchema.optional(),
   includeTools: z.boolean(), includeContext: z.boolean(), offset: z.number().int().min(0), textOffset: z.number().int().min(0),
 }).strict();
 const traceCursorSchema = z.object({
@@ -31,6 +34,7 @@ type Decorated = ActivityEvent & Pick<ConversationMessage, 'trace' | 'tool' | 'c
 type Projected = Decorated & { offset: number; hiddenToolCalls: number; hiddenToolEvents: number;
   toolEvidence: ConversationPage['messages'][number]['toolEvidence'] };
 type Reading = { manifest: Manifest; employee: string; hash: string; evidence: ReturnType<typeof readEvidence>;
+  turn: NativeTurnState;
   messages: Projected[]; spans: ConversationTraceSpan[]; totalMessages: number; totalContextEvents: number; totalToolCalls: number; totalToolEvents: number;
   trailingHiddenToolCalls: number; trailingHiddenToolEvents: number; estimatedBytes: number };
 
@@ -98,7 +102,7 @@ export function conversationQuery(db: Database, raw: RawStore) {
       return { ...event, ...(metadata ? { trace: metadata } : {}) };
     }));
     if (await attributionRevision(db, snapshotId) !== revision) throw new HttpError(409, '原件归属版本已更新，请重新读取对话');
-    return { manifest, hash: row.hash, employee: row.employee, evidence, ...projection, spans: trace.spans,
+    return { manifest, hash: row.hash, employee: row.employee, evidence, ...projection, spans: trace.spans, turn: readNativeTurnState(bytes, manifest.source),
       estimatedBytes: bytes.length * 3 + origins.size * 1536 + projection.messages.length * 2048 + trace.spans.length * 2048 };
   }
   async function page(snapshotId: string, value: ConversationInput = {}): Promise<ConversationPage> {
@@ -115,6 +119,10 @@ export function conversationQuery(db: Database, raw: RawStore) {
       } catch (error) { if (error instanceof HttpError) throw error; throw new HttpError(400, '对话分页位置无效'); }
       if (cursor.snapshotId !== snapshotId || cursor.includeTools !== input.includeTools || cursor.includeContext !== input.includeContext) throw new HttpError(400, '分页位置不属于当前对话或显示方式');
     }
+    const readingVersion = input.readingVersion ?? cursor?.readingVersion ?? 'conversation-3';
+    if (cursor && cursor.readingVersion !== readingVersion) throw new HttpError(409, '对话读取版本已更新，请重新读取');
+    const delivery = readingVersion === 'conversation-3' ? await readDeliveryObservation(db, snapshotId) : undefined;
+    if (cursor && readingVersion === 'conversation-3' && cursor.deliveryRevision !== delivery!.revision) throw new HttpError(409, '投递来源状态已更新，请重新读取对话');
     await verifySnapshotIntegrity(db, raw, snapshotId);
     const revision = await attributionRevision(db, snapshotId);
     if (cursor && cursor.attributionRevision !== revision) throw new HttpError(409, '原件归属版本已更新，请重新读取对话');
@@ -148,7 +156,8 @@ export function conversationQuery(db: Database, raw: RawStore) {
         textOffset, parserVersion: evidence.parserVersion };
       result.push({ ...event, id: `${event.line}:${event.block ?? 0}`, block: event.block ?? 0,
         text: event.text.slice(textOffset, end), textOffset, textLength: event.text.length,
-        hiddenToolCalls: includeTools ? 0 : event.hiddenToolCalls, hiddenToolEvents: includeTools ? 0 : event.hiddenToolEvents,
+        hiddenToolCalls: includeTools || (readingVersion === 'conversation-3' && textOffset > 0) ? 0 : event.hiddenToolCalls,
+        hiddenToolEvents: includeTools || (readingVersion === 'conversation-3' && textOffset > 0) ? 0 : event.hiddenToolEvents,
         evidencePath: evidenceLink(snapshotId, location), conversationPath: conversationLink(snapshotId, location)! });
       remaining -= end - textOffset + metadataSize; textOffset = end;
       if (textOffset === event.text.length) { offset++; textOffset = 0; }
@@ -157,19 +166,25 @@ export function conversationQuery(db: Database, raw: RawStore) {
     // Hidden trailing records must not manufacture an empty continuation page.
     while (offset < messages.length && hidden(messages[offset]!)) offset++;
     if (await attributionRevision(db, snapshotId) !== revision) throw new HttpError(409, '原件归属版本已更新，请重新读取对话');
+    if (delivery && (await readDeliveryObservation(db, snapshotId)).revision !== delivery.revision) throw new HttpError(409, '投递来源状态已更新，请重新读取对话');
     const related = (manifest.capture?.materials ?? []).filter(material => material.role === 'subagent' || material.role === 'child-transcript');
     return { snapshotId, hash: reading.hash, parserVersion: evidence.parserVersion, attributionRevision: revision,
       source: manifest.source, sourceSessionId: manifest.sourceSessionId, employee: reading.employee, includeTools, includeContext, readingVersion,
       totalContextEvents: reading.totalContextEvents, traceCount: reading.spans.length, tracePath: `/api/snapshots/${snapshotId}/conversation/trace`,
       totalMessages: reading.totalMessages, totalToolCalls: reading.totalToolCalls,
-      totalToolEvents: reading.totalToolEvents, trailingHiddenToolCalls: includeTools ? 0 : reading.trailingHiddenToolCalls,
-      trailingHiddenToolEvents: includeTools ? 0 : reading.trailingHiddenToolEvents,
+      totalToolEvents: reading.totalToolEvents, trailingHiddenToolCalls: includeTools || (readingVersion === 'conversation-3' && offset < messages.length) ? 0 : reading.trailingHiddenToolCalls,
+      trailingHiddenToolEvents: includeTools || (readingVersion === 'conversation-3' && offset < messages.length) ? 0 : reading.trailingHiddenToolEvents,
       messages: result, nextCursor: offset < messages.length ? Buffer.from(JSON.stringify({ version: 2, readingVersion, snapshotId,
         hash: reading.hash, parserVersion: evidence.parserVersion, attributionRevision: revision,
+        ...(delivery ? { deliveryRevision: delivery.revision } : {}),
         includeTools, includeContext, offset, textOffset })).toString('base64url') : null, anchor: input.anchor ?? null,
       status: { compacted: manifest.capture?.compacted ?? null, unrecognizedLines: evidence.unrecognizedLines,
         partialLine: evidence.partialLine || (manifest.capture?.partialLine ?? false), captureGapCount: manifest.capture?.gaps.length ?? 0,
-        captureGapExamples: (manifest.capture?.gaps ?? []).slice(0, 5), offlineBackfill: 'unknown', ongoing: 'unknown', verification: 'not-assessed' },
+        captureGapExamples: (manifest.capture?.gaps ?? []).slice(0, 5),
+        offlineBackfill: !delivery?.receiptCount ? 'unknown' : delivery.disconnectedAttempts > 0 ? 'observed' : 'not-observed',
+        ...(delivery ? { delivery } : {}),
+        ongoing: readingVersion === 'conversation-3' ? reading.turn.state : 'unknown',
+        ...(readingVersion === 'conversation-3' ? { turn: reading.turn } : {}), verification: 'not-assessed' },
       related: related.slice(0, 10).map(material => ({ materialId: material.id, role: material.role, name: material.name,
         sourceSessionId: material.sourceSessionId ?? null,
         webPath: evidenceLink(snapshotId, { kind: 'material', materialId: material.id, textOffset: 0 }) })),
