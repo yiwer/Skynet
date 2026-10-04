@@ -1,5 +1,4 @@
 import Fastify from 'fastify';
-import {sendReportDownload} from './report-download.js';
 import fastifyStatic from '@fastify/static';
 import { resolve } from 'node:path';
 import { z } from 'zod';

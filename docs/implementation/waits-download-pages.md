@@ -106,3 +106,14 @@ waits are unchanged. Fixture databases/raw files are isolated and owned.
 There is no claim of a bounded slow-consumer duration, immediate cancellation
 during preflight, or a separately injected second-pass database failure. Abort
 recovery and preflight corruption were tested at the actual HTTP boundary.
+
+Final integration merged accepted `3a7afaf` (Usage pages, efficiency capacity and
+the profile fixture clock). The shared download helper remains byte-identical
+to the reviewed efficiency helper at `2c98816`. The automatic merge introduced
+a duplicate `sendReportDownload` import; `21-final-build.txt` retains that
+TypeScript failure, and the import-only cleanup passes `22-final-build.txt`.
+The integrated public checks in `23-merged.txt` pass 3/3 (61.02 s): efficiency
+download compatibility, long wait HTTP/MCP/detail pages, and the wait browser
+facets/cursor/download journey. The latter also refreshes all ten viewport/theme
+screenshots in `54-waits-download/merged-web`. These are functional checks on a
+shared host, not AC32 performance measurements.
