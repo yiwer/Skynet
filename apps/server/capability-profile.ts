@@ -99,13 +99,14 @@ export function capabilityProfileService(db: Database, assessments: ReturnType<t
         ({ sessionId, snapshotId, source, sourceSessionId, projects, dates, tokens, knownTokens, userTurns, toolCalls, verified, codeChanges, efficiency, rework, taskType, webPath, waitFraction: timing?.waitFraction ?? null }));
       const taskCounts = new Map<CapabilityProfile['taskDistribution'][number]['taskType'], number>();
       for (const session of sessions) taskCounts.set(session.taskType, (taskCounts.get(session.taskType) ?? 0) + 1);
-      const recentActivity: CapabilityProfile['recentActivity'] = { events: [], references: [], hasEarlier: false }, dates = [...activeDates].sort().reverse();
+      const recentActivity: CapabilityProfile['recentActivity'] = { events: [], references: [], hasEarlier: false }, dates = [...activeDates].sort().reverse(), seenActivity = new Set<string>();
       for (const [index, date] of dates.entries()) {
         const page = await activity.export({ date, employeeId });
         recentActivity.references.push({ date, version: page.version, path: '#activity?' + new URLSearchParams({ date, employeeId, version: page.version }) });
-        const events = [...page.events].sort((a, b) => (b.timestamp ?? '').localeCompare(a.timestamp ?? '') || a.id.localeCompare(b.id));
+        const events = [...page.events].filter(event => !seenActivity.has(event.id)).sort((a, b) => (b.timestamp ?? '').localeCompare(a.timestamp ?? '') || a.id.localeCompare(b.id));
         const remaining = 20 - recentActivity.events.length;
         recentActivity.events.push(...events.slice(0, remaining));
+        for (const event of events.slice(0, remaining)) seenActivity.add(event.id);
         if (recentActivity.events.length >= 20) { recentActivity.hasEarlier = events.length > remaining || index + 1 < dates.length; break; }
       }
       return { algorithmVersion: 'capability-profile-1', employeeId, employee: assessment.employee, range: assessment.range, assessment,
@@ -114,6 +115,7 @@ export function capabilityProfileService(db: Database, assessments: ReturnType<t
         work: await workContent(employeeId, assessment.range.from, assessment.range.to, activeDates),
         references: { efficiency: { version: efficiencyReport.version, metricVersion: efficiencyReport.metricVersion, path: '#efficiency?' + new URLSearchParams({ period: scope.period, employeeId, version: efficiencyReport.version }) } } };
     }, async client => ({
+      delivery: (await client.query('SELECT device_id,upload_id,snapshot_id,receipt_hash,received_at FROM delivery_receipts ORDER BY device_id,upload_id')).rows,
       devices: (await client.query('SELECT id,name,active FROM devices WHERE employee_id=$1 ORDER BY id', [employeeId])).rows,
       daily: (await client.query('SELECT date,revision,version FROM daily_report_revisions WHERE employee_id=$1 ORDER BY date,revision', [employeeId])).rows,
       dailyPending: (await client.query('SELECT date,generation,refresh_pending,qualification_revision,source_revision FROM daily_report_periods WHERE employee_id=$1 ORDER BY date', [employeeId])).rows,

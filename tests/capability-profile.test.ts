@@ -1,10 +1,50 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { randomUUID } from 'node:crypto';
+import { randomUUID, createHash } from 'node:crypto';
 import { assessmentFixture } from './assessment-fixture.js';
 import { beijingDate } from '../packages/contracts/reports.js';
 import { monday, addDays } from '../packages/contracts/work-views.js';
 import { setTimeout } from 'node:timers/promises';
+
+test('recent profile activity shows each undated capture gap once across a multi-day session', { timeout: 120000 }, async () => {
+  const fixture = await assessmentFixture();
+  try {
+    const owner = await fixture.owner('Multi-day gaps'), record = fixture.rows({ prompts: 3 });
+    for (const row of record.rows as any[]) if (row.timestamp) {
+      const delta = Date.parse(row.timestamp) - fixture.base.getTime();
+      if (delta >= 0) row.timestamp = new Date(Date.parse(row.timestamp) + Math.min(2, Math.floor(delta / 1100)) * 86400000).toISOString();
+    }
+    await fixture.upload(owner, record.rows, record.sessionId, { capture: { generation: createHash('sha256').update('profile-gap').digest('hex'), revision: 1, change: 'initial', materials: [],
+      gaps: [{ code: 'missing', reference: '缺失的原生附件' }], lineage: [], compacted: false, partialLine: false } });
+    const response = await fixture.api(owner, '/api/capability-profiles/' + owner.employeeId); assert.equal(response.status, 200, await response.clone().text());
+    const profile = await response.json(), events = profile.recentActivity.events;
+    assert.equal(new Set(events.map((event: any) => event.id)).size, events.length);
+    const gaps = events.filter((event: any) => event.type === 'gap' && event.excerpt === '缺失的原生附件'); assert.equal(gaps.length, 1); assert.equal(gaps[0].sourceDate, null);
+    assert.equal(profile.kpis.sessions, 1); assert.equal(profile.kpis.userTurns, 3);
+  } finally { await fixture.close(); }
+});
+
+test('late delivery observations update the profile source identity without changing its original usage or fixed history', { timeout: 120000 }, async () => {
+  const fixture = await assessmentFixture();
+  try {
+    const owner = await fixture.owner('Delivery profile'), session = await fixture.session(owner, { prompts: 2 });
+    const uploadId = randomUUID(), hash = createHash('sha256').update(session.bytes).digest('hex');
+    const registered = await fixture.nativeApi('/api/snapshots', owner.deviceCredential, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Idempotency-Key': uploadId }, body: JSON.stringify({
+      protocolVersion: 1, sourceSessionId: session.sessionId, source: 'codex-cli', sourceVersion: '0.157.1', sourceOs: process.platform,
+      project: '/synthetic/assessment-model', hash, byteLength: session.bytes.length, qualifiedAt: fixture.base.toISOString(), capability: 'unverified' }) });
+    assert.equal(registered.status, 200, await registered.clone().text());
+    const path = '/api/capability-profiles/' + owner.employeeId, before = await (await fixture.api(owner, path)).json();
+    const time = (ms: number) => new Date(fixture.base.getTime() + ms).toISOString();
+    const receipt = await fixture.nativeApi('/api/delivery/receipts', owner.deviceCredential, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({
+      uploadId, snapshotId: session.snapshotId, capturedAt: time(0), acknowledgedAt: time(60000), disconnectedAttempts: 1, firstDisconnectedAt: time(1000), lastDisconnectedAt: time(1000) }) });
+    assert.equal(receipt.status, 200, await receipt.clone().text());
+    const after = await (await fixture.api(owner, path)).json();
+    assert.notEqual(after.version, before.version); assert.notEqual(after.frontierVersion, before.frontierVersion, 'delivery changes are part of the frozen source identity');
+    assert.deepEqual(after.kpis, before.kpis); assert.equal(after.assessment.version, before.assessment.version);
+    assert.ok(after.recentActivity.events.some((event: any) => event.type === 'backfill'));
+    assert.deepEqual(await (await fixture.api(owner, path + '?version=' + before.version)).json(), before);
+  } finally { await fixture.close(); }
+});
 
 test('fixed assessment links resolve the same profile without mixing a historical assessment with current sources', { timeout: 120000 }, async () => {
   const fixture = await assessmentFixture();
