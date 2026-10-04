@@ -4,11 +4,12 @@ import { connect, migrate } from '../server/database.js';
 import { migrateAnalysis } from '../server/analysis.js';
 import { publicConfig, readAnalysisConfig } from './config.js';
 import { NativeAnalysisFailure, verifyRuntime } from './native.js';
+import { verifyQoderRuntime } from './qodercn.js';
 import { analysisQueue, type ClaimedAnalysis } from './queue.js';
 import { executeAnalysis } from './execute.js';
 
 if (!process.env.DATABASE_URL || !process.env.SKYNET_ANALYSIS_CONFIG) throw new Error('Dedicated analysis configuration and DATABASE_URL required');
-const config = await readAnalysisConfig(process.env.SKYNET_ANALYSIS_CONFIG); await verifyRuntime(config);
+const config = await readAnalysisConfig(process.env.SKYNET_ANALYSIS_CONFIG); await (config.mode==='qoder-cn'?verifyQoderRuntime(config):verifyRuntime(config));
 const db = connect(process.env.DATABASE_URL); await migrate(db); await migrateAnalysis(db);
 const shutdown = new AbortController(); const workerId = randomUUID(); const queue = analysisQueue(db, config, workerId);
 process.once('SIGTERM', () => shutdown.abort()); process.once('SIGINT', () => shutdown.abort());
@@ -19,7 +20,7 @@ let heartbeatPending: Promise<unknown> | undefined;
 const timer = globalThis.setInterval(() => {
   if (!heartbeatPending) heartbeatPending = heartbeat().catch(() => shutdown.abort()).finally(() => { heartbeatPending = undefined; });
 }, 3000);
-console.log(`Skynet analysis worker ready (${config.mode}; Claude Code ${config.runtimeVersion})`);
+console.log(`Skynet analysis worker ready (${config.mode}; ${config.mode==='qoder-cn'?'Qoder CN':'Claude Code'} ${config.runtimeVersion})`);
 const running = new Set<Promise<void>>();
 async function run(job: ClaimedAnalysis) {
   const lost = new AbortController();

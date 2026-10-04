@@ -1,7 +1,7 @@
 FROM node:24-bookworm-slim AS build
 WORKDIR /app
 COPY package.json package-lock.json ./
-RUN npm ci
+RUN QODER_SKIP_DOWNLOAD=1 npm ci
 COPY tsconfig.json vite.config.ts ./
 COPY packages ./packages
 COPY apps ./apps

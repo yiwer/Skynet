@@ -1,5 +1,6 @@
 import type { AnalysisConfig } from './config.js';
 import { NativeAnalysisFailure, runNativeAnalysis } from './native.js';
+import { runQoderAnalysis } from './qodercn.js';
 import { validateAnalysis, type AnalysisInput } from '../server/analysis.js';
 import type { AnalysisItem, AnalysisRun } from '../../packages/contracts/analysis.js';
 import { initialProcessing, mapOutput, planAggregation, planSegments, validateAggregate } from './long.js';
@@ -8,15 +9,17 @@ import type { SessionInferences } from '../../packages/contracts/session-insight
 
 // #23 can add a bounded segment/aggregate pipeline here, without changing durable ownership.
 // Each native call must use beforeForward; intermediate summaries never become original citations.
-export async function executeAnalysis(config: AnalysisConfig, input: AnalysisInput, signal: AbortSignal, beforeForward: () => Promise<boolean>, native = runNativeAnalysis): Promise<NonNullable<AnalysisRun['result']>> {
+export async function executeAnalysis(config: AnalysisConfig, input: AnalysisInput, signal: AbortSignal, beforeForward: () => Promise<boolean>, native = config.mode==='qoder-cn'?runQoderAnalysis:runNativeAnalysis): Promise<NonNullable<AnalysisRun['result']>> {
   const plan = planSegments(input, config); const processing = initialProcessing();
   const usage: NonNullable<AnalysisRun['result']>['usage'] = { inputTokens: 0, outputTokens: 0, runtimeCostUsd: 0, providerBilledCny: null, requests: 0 };
+  if(config.mode==='qoder-cn')usage.providerCredits=0;
   let forwarded = 0;
   const forward = async () => { if (signal.aborted || forwarded >= config.maxRequests || !await beforeForward()) return false; forwarded++; return true; };
   const addUsage = (value: typeof usage) => {
     for (const key of ['inputTokens', 'outputTokens', 'runtimeCostUsd'] as const) usage[key] = usage[key] === null || value[key] === null ? null : usage[key]! + value[key]!;
+    if(config.mode==='qoder-cn')usage.providerCredits=usage.providerCredits==null||value.providerCredits==null?null:usage.providerCredits+value.providerCredits;
   };
-  const unknownUsage = () => { usage.inputTokens = usage.outputTokens = usage.runtimeCostUsd = null; };
+  const unknownUsage = () => { usage.inputTokens = usage.outputTokens = usage.runtimeCostUsd = null;if(config.mode==='qoder-cn')usage.providerCredits=null; };
   const extracted: AnalysisItem[] = [];
   const insightParts:SessionInferences[]=[];
   for (const stage of plan.stages) {
