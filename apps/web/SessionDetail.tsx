@@ -6,6 +6,7 @@ import type { Provenance } from '../../packages/contracts/provenance.js';
 import type { Coverage } from './CaptureCoverage.js';
 import { HistoryMaterials } from './HistoryMaterials.js';
 import { SessionAnalysis } from './SessionAnalysis.js';
+import { SessionInsights } from './SessionInsights.js';
 import { QualificationProof } from './QualificationProof.js';
 import { ConversationReader, conversationSelection } from './ConversationReader.js';
 import { EvidenceReader } from './EvidenceReader.js';
@@ -31,6 +32,7 @@ function SessionFacts({snapshotId,request}:{snapshotId:string;request:Props['req
 export function SessionDetail({detail,reading,conversationHash,refresh,offset,evidenceLocation,setOffset,request,download,exporting,exportStatus,exportError}:Props){
  const selected=detail.snapshotId;
  const [title,setTitle]=useState('');
+ const [analysisRefresh,setAnalysisRefresh]=useState(0);
  useEffect(()=>{setTitle('');},[selected]);
  useEffect(()=>{if(new URLSearchParams(conversationHash.split('?')[1]).get('recover')==='true')document.getElementById('session-recovery')?.scrollIntoView({block:'start'});},[conversationHash]);
  const heading=detail.manifest.project.replaceAll('\\','/').split('/').filter(Boolean).at(-1)||'未归类项目';
@@ -49,9 +51,10 @@ export function SessionDetail({detail,reading,conversationHash,refresh,offset,ev
           {!evidenceLocation && <div className="pagination"><button disabled={offset === 0} onClick={() => setOffset(value => Math.max(0, value - 100))}>上一页</button><button disabled={detail.nextOffset === null} onClick={() => setOffset(detail.nextOffset ?? 0)}>下一页</button></div>}</>}
 </section><aside className="session-side" data-scroll-region="session-inspector" aria-label="会话数据与存档">
  <SessionFacts snapshotId={selected} request={request}/>
+ <SessionInsights key={`insights-${selected}`} snapshotId={selected} request={request} analysisRefresh={analysisRefresh}/>
  <section className="session-file"><h2>存档</h2><dl><div><dt>来源</dt><dd>{sourceLabel(detail.manifest.source)}</dd></div><div><dt>版本</dt><dd>{detail.manifest.sourceVersion}</dd></div><div><dt>提交时间</dt><dd>{date(detail.committedAt)}</dd></div></dl>
  <div className="session-file-actions"><button disabled={exporting} onClick={()=>download('raw')}>下载原件</button><button disabled={exporting} onClick={()=>download('readable')}>导出文本</button></div></section>
- <SessionAnalysis key={`analysis-${selected}`} snapshotId={selected} request={(path,signal,method)=>request(path,signal,method)}/>
+ <SessionAnalysis key={`analysis-${selected}`} snapshotId={selected} request={(path,signal,method)=>request(path,signal,method)} onChange={()=>setAnalysisRefresh(value=>value+1)}/>
  <HistoryMaterials key={selected} snapshotId={selected} capture={detail.manifest.capture} request={(path,signal)=>request(path,signal)}/>
  <details className="session-archive-facts"><summary>原件与来源信息</summary><dl><div><dt>会话 ID</dt><dd className="hash">{detail.manifest.sourceSessionId}</dd></div><div><dt>SHA-256</dt><dd className="hash">{detail.manifest.hash}</dd></div><div><dt>系统</dt><dd>{detail.manifest.sourceOs}</dd></div>{detail.activity.sourceFrom&&<div><dt>开始时间</dt><dd>{date(detail.activity.sourceFrom)}</dd></div>}{detail.activity.sourceTo&&<div><dt>结束时间</dt><dd>{date(detail.activity.sourceTo)}</dd></div>}</dl>
  {detail.provenance.sourceSnapshotId&&<a href={`#${detail.provenance.sourceSnapshotId}`}>来源快照</a>}

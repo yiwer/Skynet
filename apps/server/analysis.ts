@@ -33,7 +33,7 @@ export async function migrateAnalysis(db: Database) {
 export type AnalysisInput = AnalysisRun['input'] & { events: (EvidenceLine & Partial<Pick<ActivityEvent, 'origin' | 'context' | 'sourceDate'>>)[];
   analysisContext?: { phase: 'extract' | 'aggregate'; findings?: { text: string; category: string; assessment: string }[] } };
 const runProjection = analysisProjection;
-export async function prepareAnalysisInput(db: Database, archive: ArchiveQuery, snapshotId: string, config: AnalysisRun['config']) {
+export async function prepareAnalysisInput(db: Database, archive: ArchiveQuery, snapshotId: string, config: Pick<AnalysisRun['config'],'maxSessionBytes'>) {
     const record = await archive.snapshot(snapshotId);
     if (record.manifest.byteLength > config.maxSessionBytes) throw new HttpError(413, '该原件超过有界会话分析总字节限额；尚未调用模型，完整原件仍可导出');
     const { bytes } = await archive.exported(snapshotId, 'raw');

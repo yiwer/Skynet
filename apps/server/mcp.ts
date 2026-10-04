@@ -19,8 +19,10 @@ import { conversationInputSchema, conversationTraceInputSchema } from '../../pac
 import { metricsQuerySchema } from '../../packages/contracts/metrics.js';
 import type { conversationQuery } from './conversation.js';
 import type { metricsService } from './metrics.js';
+import type { sessionInsightsService } from './session-insights.js';
+import { sessionInsightsQuery } from '../../packages/contracts/session-insights.js';
 
-export async function registerMcp(app: FastifyInstance, db: Database, archive: ArchiveQuery, publicOrigin: string, analysis: AnalysisService, reports: ReportService, coverage: CoverageService, workStatistics: WorkStatisticsService, workViews: WorkViewService,operations:ServerOperationsService, conversation: ReturnType<typeof conversationQuery>, metrics: ReturnType<typeof metricsService>) {
+export async function registerMcp(app: FastifyInstance, db: Database, archive: ArchiveQuery, publicOrigin: string, analysis: AnalysisService, reports: ReportService, coverage: CoverageService, workStatistics: WorkStatisticsService, workViews: WorkViewService,operations:ServerOperationsService, conversation: ReturnType<typeof conversationQuery>, metrics: ReturnType<typeof metricsService>, insights:ReturnType<typeof sessionInsightsService>) {
   const { guard } = await registerMcpAuth(app, db, publicOrigin);
   const offset = z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).default(0);
   const snapshotId = z.uuid().describe('Immutable snapshot ID from list_sessions, never a mutable session ID');
@@ -83,6 +85,7 @@ export async function registerMcp(app: FastifyInstance, db: Database, archive: A
     input => result(() => archive.materialPage(input.snapshotId, input.materialId, input.offset, 2048)));
     mcp.registerTool('read_analysis', { description: '分页读取同一快照的持久分析任务、结果与精确原件引用。合成 fixture 明确标记；自述、推断、记录和材料不足分开，未知用量不等于零。',
       annotations, inputSchema: { snapshotId, offset: offset.refine(value => value <= 100000) } }, input => result(() => analysis.list(input.snapshotId, input.offset)));
+    mcp.registerTool('read_session_insights',{description:'读取与会话页面相同版本的任务类型、提示词四要素、返工、追问、已验证/仅声称结果、写法建议与原件代码/测试/提交计数。未完成为 null，每项附原文和分析版本。',annotations,inputSchema:{snapshotId,...sessionInsightsQuery.shape}},input=>result(()=>insights.read(input.snapshotId,{analysisId:input.analysisId,version:input.version})));
     mcp.registerTool('list_daily_reports', { description: '分页列出北京时间日报入队状态及当前不可变版本。每天09:00入队前一自然日，入队不保证完成。',
       annotations, inputSchema: { offset } }, input => result(() => reports.list(input.offset)));
     mcp.registerTool('read_daily_report', { description: '读取同一日报版本，按项目和跨会话主题组织本来源日期已确认活动；历史引用仅作背景，未知统计不等于零。翻页时固定 revision。',

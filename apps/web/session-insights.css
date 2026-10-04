@@ -1,0 +1,23 @@
+.session-insights{min-width:0;color:var(--color-ink);font-size:var(--text-sm)}
+.session-insights header,.insight-status{display:flex;align-items:center;justify-content:space-between;gap:var(--space-xs)}
+.session-insights header h2{margin:0;font-size:var(--text-sm);font-weight:650}
+.session-insights header button{min-width:28px;min-height:28px;padding:2px 7px;background:transparent;border:0;color:var(--color-muted)}
+.insight-status{margin:12px 0;color:var(--color-muted);font-size:var(--text-xs)}
+.insight-status strong,.insight-tag{background:var(--tone-blue-soft);color:var(--tone-blue-ink);border-radius:var(--radius-xs);padding:3px 7px;font-size:var(--text-xs);font-weight:500}
+.insight-counts{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin:12px 0 16px}
+.insight-counts>div{padding:10px;background:var(--color-paper-2);border-radius:var(--radius-sm)}
+.insight-counts dt{color:var(--color-muted);font-size:var(--text-xs)}
+.insight-counts dd{margin:4px 0 0;font-size:18px;font-variant-numeric:tabular-nums}
+.session-insights>details{border-top:1px solid var(--color-rule-soft);padding:10px 0}
+.session-insights summary{cursor:pointer;font-weight:500;line-height:1.6}
+.session-insights summary:focus-visible,.session-insights a:focus-visible{outline:2px solid var(--color-focus);outline-offset:3px;border-radius:3px}
+.session-insights article{padding:10px 0;border-bottom:1px solid var(--color-rule-soft);min-width:0}
+.session-insights article:last-child{border-bottom:0}
+.session-insights h3{font-size:var(--text-xs);font-weight:600;display:flex;justify-content:space-between;align-items:center;gap:8px;margin:0 0 8px}
+.session-insights p{white-space:pre-wrap;overflow-wrap:anywhere;margin:8px 0;line-height:1.65}
+.insight-elements{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px;margin:8px 0}
+.insight-elements>div{display:flex;justify-content:space-between;gap:4px;padding:4px 6px;background:var(--color-paper-2);border-radius:4px;font-size:var(--text-xs)}
+.insight-elements dt{color:var(--color-muted)}.insight-elements dd{margin:0}
+.insight-evidence{margin-top:6px;color:var(--color-muted);font-size:var(--text-xs)}
+.insight-evidence>div{padding:8px 0}.insight-evidence q{display:block;white-space:pre-wrap;overflow-wrap:anywhere;color:var(--color-ink);margin-top:6px;line-height:1.65}
+.insight-version{font-size:var(--text-xs)}.insight-version div{margin:10px 0}.insight-version dt{color:var(--color-muted)}.insight-version dd{margin:3px 0 0;overflow-wrap:anywhere;font-family:var(--font-mono)}

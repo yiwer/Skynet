@@ -32,6 +32,8 @@ import { conversationQuery } from './conversation.js';
 import { conversationInputSchema, conversationTraceInputSchema } from '../../packages/contracts/conversation.js';
 import { migrateMetrics, metricsService } from './metrics.js';
 import { metricsQuerySchema } from '../../packages/contracts/metrics.js';
+import { migrateSessionInsights,sessionInsightsService } from './session-insights.js';
+import { sessionInsightsQuery } from '../../packages/contracts/session-insights.js';
 import { migrateDeliveryReceipts, saveDeliveryReceipt } from './delivery-receipts.js';
 
 export async function createApp(options: { db: Database; rawDirectory: string; webDirectory?: string; publicOrigin?: string; reportClock?: () => Date }) {
@@ -40,6 +42,7 @@ export async function createApp(options: { db: Database; rawDirectory: string; w
   await migrate(db);
   await migrateArchiveSearch(db);
   await migrateAnalysis(db);
+  await migrateSessionInsights(db);
   await migrateReports(db);
   await migrateServerOperations(db);
   await migrateCoverage(db);
@@ -225,6 +228,8 @@ export async function createApp(options: { db: Database; rawDirectory: string; w
     return reply.header('Content-Disposition', `attachment; filename="skynet-metrics-${data.version}.json"`).type('application/json').send(data);
   });
   const analysis = analysisService(db, archive);
+  const insights = sessionInsightsService(db, archive, analysis);
+  app.get('/api/snapshots/:id/insights', { onRequest: readerGuard }, async request => insights.read(z.uuid().parse((request.params as {id:string}).id), sessionInsightsQuery.parse(request.query)));
   const reports = reportService(db, analysis,workStatistics, options.reportClock);
   const workViews = workViewService(db, reports, options.reportClock);
   const reportQuery = z.object({ offset: z.coerce.number().int().min(0).max(100000).default(0),
@@ -354,7 +359,7 @@ export async function createApp(options: { db: Database; rawDirectory: string; w
     const file = await archive.exported((request.params as { id: string }).id, format);
     return reply.header('Content-Disposition', `attachment; filename="${file.filename}"`).type(file.contentType).send(file.bytes);
   });
-  if (options.publicOrigin) await registerMcp(app, db, archive, options.publicOrigin, analysis, reports, coverage, workStatistics, workViews,operations,conversation,metrics);
+  if (options.publicOrigin) await registerMcp(app, db, archive, options.publicOrigin, analysis, reports, coverage, workStatistics, workViews,operations,conversation,metrics,insights);
   if (options.webDirectory) {
     await app.register(fastifyStatic, { root: resolve(options.webDirectory), wildcard: false });
   }

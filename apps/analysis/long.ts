@@ -42,11 +42,16 @@ export function planSegments(input: AnalysisInput, config: Pick<AnalysisRun['con
 }
 export function mapOutput(stage: Stage, value: unknown): AnalysisOutput {
   const output = analysisOutputSchema.parse(value);
-  return { items: output.items.map(item => ({ ...item, citations: item.citations.map(citation => {
+  const mapCitation=(citation:AnalysisOutput['items'][number]['citations'][number])=>{
     const anchor = stage.anchors[citation.event]; const event = stage.input.events[citation.event];
     if (!anchor || !event || event.text.slice(citation.textOffset, citation.textOffset + citation.quote.length) !== citation.quote) throw new Error('Citation outside selected original segment');
     return { ...citation, event: anchor.event, textOffset: anchor.textOffset + citation.textOffset };
-  }) })) };
+  };
+  const cited=<T extends {citations:AnalysisOutput['items'][number]['citations']}>(item:T)=>({...item,citations:item.citations.map(mapCitation)});
+  const event=(index:number)=>{const anchor=stage.anchors[index];if(!anchor)throw new Error('Inference outside selected segment');return anchor.event;};
+  return {items:output.items.map(cited),...(output.insights?{insights:{...output.insights,
+    taskType:cited(output.insights.taskType),prompts:output.insights.prompts.map(p=>({...cited(p),event:event(p.event)})),
+    replies:output.insights.replies.map(p=>({...cited(p),event:event(p.event)})),outcomes:output.insights.outcomes.map(cited),suggestions:output.insights.suggestions.map(cited)}}:{})};
 }
 const citationKey = (citation: AnalysisOutput['items'][number]['citations'][number]) => JSON.stringify([citation.event, citation.textOffset, citation.quote]);
 export function planAggregation(input: AnalysisInput, items: AnalysisItem[], maxBytes: number) {
