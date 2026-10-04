@@ -5,7 +5,7 @@ import { conversationContext } from './conversation-trace.js';
 import { nativeTurnBoundaries, type TurnBoundary } from '../../packages/native/waits.js';
 import type { EvidenceLine, Source } from '../../packages/contracts/archive.js';
 
-export const waitAlgorithmVersion = 'recorded-waits-1';
+export const waitAlgorithmVersion = 'recorded-waits-2';
 export interface WaitInput {
   parserVersion: string; boundaries: TurnBoundary[]; messages: EvidenceLine[];
   pairs: { start: TurnBoundary | null; end: EvidenceLine; beforeLine: number | null }[];
@@ -44,7 +44,10 @@ export async function waitInput(client: pg.PoolClient, input: { snapshotId: stri
       } else if (boundary.kind === 'started') {
         if (id && completed.has(id)) continue;
         if (id) active.add(id);
-        pending = null;
+        // Native Codex records started before the submitted user message. Keep
+        // the previous completion until that message; concurrent/unknown turns
+        // cannot establish an unambiguous waiting boundary.
+        if (!id || active.size > 1) pending = null;
       } else { if (id) active.delete(id); pending = null; agentSeen = false; }
       continue;
     }
@@ -52,7 +55,10 @@ export async function waitInput(client: pg.PoolClient, input: { snapshotId: stri
     if (message.role === 'user') {
       if (pending || agentSeen) pairs.push({ start: pending, end: message, beforeLine });
       pending = null; agentSeen = false;
-    } else if (message.role === 'assistant' || message.role === 'tool request') agentSeen = true;
+    } else if (message.role === 'assistant' || message.role === 'tool request') {
+      agentSeen = true;
+      if (active.size > 0) pending = null;
+    }
     beforeLine = message.line;
   }
   for (const pair of pairs) if (pair.start?.turnId && conflicts.has(pair.start.turnId)) pair.start = { ...pair.start, timestamp: null };

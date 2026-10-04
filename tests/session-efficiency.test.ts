@@ -196,3 +196,27 @@ for(const truncated of [false,true])test('session segments use native turn bound
     assert.deepEqual((await api('/api/session-efficiency/export?period=since-enrollment&version='+first.version)).json(),first);
   }finally{await app?.close();await db.end();await sandbox.close();}
 });
+
+test('official Codex start-before-user order keeps the first agent turn and the intervening reply wait', {timeout:120000},async()=>{
+  const sandbox=await createSandbox(),db=connect(sandbox.env.DATABASE_URL!);let app:Awaited<ReturnType<typeof createApp>>|undefined;
+  try{
+    const person=await sandbox.provision('分段合成员工'),base=Date.now()+60000,stamp=(seconds:number)=>new Date(base+seconds*1000).toISOString();
+    app=await createApp({db,rawDirectory:sandbox.env.RAW_DIRECTORY!,reportClock:()=>new Date(base+3600000)});
+    const api=(url:string,payload?:unknown,credential=person.readerCredential,method:'GET'|'POST'|'PUT'='GET')=>app!.inject({url,method,headers:{Authorization:`Bearer ${credential}`,...(Buffer.isBuffer(payload)?{'Content-Type':'application/octet-stream'}:{})},...(payload===undefined?{}:{payload:payload as object})});
+    const device=(await api('/api/devices/enroll',{installationId:randomUUID(),name:'分段设备'},person.enrollmentCredential,'POST')).json(),id=randomUUID();
+    const message=(role:string,text:string,seconds:number)=>({type:'response_item',timestamp:stamp(seconds),payload:{type:'message',role,content:[{type:role==='user'?'input_text':'output_text',text}]}});
+    const boundary=(type:string,turn:string,seconds:number)=>({type:'event_msg',timestamp:stamp(seconds),payload:{type,turn_id:turn}});
+    const rows=[{type:'session_meta',timestamp:stamp(0),payload:{id}},boundary('task_started','one',1),message('user','开始检查',2),message('assistant','第一轮检查',10),boundary('task_complete','one',21),
+      boundary('task_started','two',82),message('user','继续检查',83),message('assistant','第二轮检查',90),boundary('task_complete','two',102)];
+    let previousId:string|undefined;
+    async function upload(items:unknown[]){const bytes=Buffer.from(items.map(row=>JSON.stringify(row)).join('\n')+'\n');await api('/api/chunks/'+digest(bytes),bytes,device.deviceCredential,'PUT');
+      const result=await api('/api/snapshots',{protocolVersion:1,sourceSessionId:id,source:'codex-cli',sourceVersion:'0.160.0',sourceOs:process.platform,project:'/synthetic/efficiency-timing',hash:digest(bytes),byteLength:bytes.length,qualifiedAt:stamp(0),capability:'unverified'},device.deviceCredential,'POST');assert.equal(result.statusCode,200,result.body);return previousId=result.json().snapshotId;}
+    const original=await upload(rows),response=await api('/api/session-efficiency?period=since-enrollment');assert.equal(response.statusCode,200,response.body);
+    const first=(await api('/api/session-efficiency/export?period=since-enrollment&version='+response.json().version)).json(),timing=first.sessions[0].timing;
+    const waits=(await api('/api/waits?period=since-enrollment&version='+timing.waitVersion)).json();
+    const observed={knownAgentMs:timing.knownAgentMs,knownReplyMs:timing.knownReplyMs,waitReplyMs:waits.summary.knownReplyWaitMs};
+    console.log('native-order-public-observation',JSON.stringify(observed));
+    assert.deepEqual(observed,{knownAgentMs:40000,knownReplyMs:62000,waitReplyMs:62000});
+    assert.equal(timing.activeMs,101000,'overlapping native start and recorded input are unioned once');
+  }finally{await app?.close();await db.end();await sandbox.close();}
+});

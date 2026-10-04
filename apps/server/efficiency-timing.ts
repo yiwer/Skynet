@@ -28,7 +28,15 @@ function nativeSegments(originals:WaitOriginal[],parts:UsageSession[],scope:Metr
     for(const [id,group]of groups){
       const starts=[...new Map(group.filter(b=>b.kind==='started').map(b=>[b.timestamp,b])).values()],ends=[...new Map(group.filter(b=>b.kind==='completed').map(b=>[b.timestamp,b])).values()];
       const start=starts[0],end=ends[0],first=start??end??group[0]!;
-      const prior=original.facts.messages.findLast(message=>message.line<first.line),owner=prior&&origins.get(`${prior.line}/${prior.block??0}`);
+      const previousBoundary=original.facts.boundaries.findLast(boundary=>boundary.line<first.line);
+      const nextBoundary=original.facts.boundaries.find(boundary=>boundary.line>first.line);
+      const prior=original.facts.messages.findLast(message=>message.line<first.line);
+      // Codex emits turn_started before recording the submitted user message.
+      // Older recordings can place the user first. Never borrow the previous
+      // turn's assistant or cross another native boundary to assign ownership.
+      const request=prior?.role==='user'&&prior.line>(previousBoundary?.line??0)?prior:
+        original.facts.messages.find(message=>message.role==='user'&&message.line>first.line&&message.line<(nextBoundary?.line??Infinity));
+      const owner=request&&origins.get(`${request.line}/${request.block??0}`);
       if(!owner||owner.context!=='after-enrollment'||!parts.some(p=>p.employeeId===owner.employeeId&&p.project===owner.project))continue;
       const a=start?.timestamp?Date.parse(start.timestamp):NaN,b=end?.timestamp?Date.parse(end.timestamp):NaN;
       if(Number.isFinite(a)&&a>=rangeEnd||Number.isFinite(b)&&b<rangeStart)continue;
