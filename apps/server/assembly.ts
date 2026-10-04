@@ -8,10 +8,11 @@ import { assemblyQuery, assemblyReadQuery, processingQuery, type ProcessingPage,
 import type { MetricsService } from './metrics.js';
 import type { Manifest } from '../../packages/contracts/archive.js';
 import type { Provenance } from '../../packages/contracts/provenance.js';
+import { inputIntegrityVersion, primaryInputCoverage } from './evidence-integrity.js';
 
 type Query = Pick<Database, 'query'> | Pick<pg.PoolClient, 'query'>;
 type Base = Omit<AssemblyAudit, 'version' | 'transport' | 'delivery' | 'nextOffset' | 'integrity'>;
-export const assemblyRuleVersion = 'assembly-1/origin-1';
+export const assemblyRuleVersion = `assembly-2/origin-1/${inputIntegrityVersion}`;
 export async function migrateAssembly(db: Database) {
   const transaction = await db.connect();
   try {
@@ -58,7 +59,7 @@ async function artifactChunks(q: Query, deviceId: string, hash: string): Promise
   return result;
 }
 export async function recordAssembly(q: Query, raw: RawStore, snapshotId: string, origin: Base['origin'] = 'commit') {
-  const row = (await q.query(`SELECT s.*,d.employee_id,e.name AS employee FROM snapshots s JOIN devices d ON d.id=s.device_id JOIN employees e ON e.id=d.employee_id WHERE s.id=$1`, [snapshotId])).rows[0];
+  const row = (await q.query(`SELECT s.*,d.employee_id,e.name AS employee,a.payload AS previous FROM snapshots s JOIN devices d ON d.id=s.device_id JOIN employees e ON e.id=d.employee_id LEFT JOIN assembly_records a ON a.snapshot_id=s.id WHERE s.id=$1`, [snapshotId])).rows[0];
   if (!row) throw new HttpError(404, '快照不存在');
   const manifest = row.manifest as Manifest, provenance = row.provenance as Provenance;
   const origins = await eventOrigins(q, snapshotId);
@@ -68,7 +69,7 @@ export async function recordAssembly(q: Query, raw: RawStore, snapshotId: string
   for (const line of bytes.toString('utf8').split('\n')) {
     try { const item = JSON.parse(line); if (item.isCompactSummary === true || item.type === 'compacted') compactSummaries++; } catch { /* Unreadable original lines remain visible as gaps. */ }
   }
-  const coverage = (await q.query('SELECT complete,unrecognized_lines,partial_line FROM snapshot_input_integrity WHERE snapshot_id=$1', [snapshotId])).rows[0];
+  const coverage = primaryInputCoverage(bytes,manifest.source);
   const sources: AssemblySource[] = [];
   for (const material of [{ ...manifest, name: '主会话原件', role: 'primary', id: null }, ...(manifest.capture?.materials ?? [])]) {
     const chunks = await artifactChunks(q, row.device_id, material.hash);
@@ -76,21 +77,22 @@ export async function recordAssembly(q: Query, raw: RawStore, snapshotId: string
       chunkCount: chunks ? chunks.length : null, webPath: material.id ? `#${snapshotId}?kind=material&materialId=${material.id}&textOffset=0` : `#${snapshotId}?view=raw` });
   }
   const gaps = [...(manifest.capture?.gaps ?? [])];
-  if (coverage?.unrecognized_lines > 0) gaps.push({ code: 'unknown-format', reference: `${coverage.unrecognized_lines} 行未解析` });
-  const partial = coverage?.partial_line || manifest.capture?.partialLine;
+  if (coverage.unrecognizedLines > 0) gaps.push({ code: 'unknown-format', reference: `${coverage.unrecognizedLines} 行未解析` });
+  const partial = coverage.partialLine || manifest.capture?.partialLine;
   if (partial && !gaps.some(gap => gap.code === 'partial-line')) gaps.push({ code: 'partial-line', reference: '末行待完成' });
   const uncertain = !!provenance.warning && provenance.warning !== independentOriginReason;
   const decision = uncertain ? 'unresolved' : provenance.relation === 'verified-restoration' ? 'restoration' : provenance.relation === 'same-device-continuation' ? 'continuation' : 'independent';
   const payload: Base = { ruleVersion: assemblyRuleVersion, snapshotId, source: manifest.source, sourceSessionId: manifest.sourceSessionId,
     employeeId: row.employee_id, employee: row.employee, project: manifest.project, committedAt: row.committed_at.toISOString(),
-    completedAt: origin === 'commit' ? new Date().toISOString() : null, origin,
+    completedAt: row.previous?.completedAt ?? (origin === 'commit' ? new Date().toISOString() : null), origin: row.previous?.origin ?? origin,
     state: gaps.some(gap => gap.code !== 'partial-line') ? 'gap' : partial ? 'assembling' : uncertain ? 'pending-lineage' : 'assembled',
     generation: manifest.capture ? { id: manifest.capture.generation, revision: manifest.capture.revision, change: manifest.capture.change } : null,
     records: { total: origins.length, unique: unique.size, inherited: [...unique.values()].filter(item => item.snapshotId !== snapshotId).length,
       repeated: origins.length - unique.size, compactSummaries },
     lineage: { decision, sourceSnapshotId: provenance.sourceSnapshotId, reason: uncertain ? provenance.warning : null },
     sources, sourceCount: sources.length, gaps, sideLinks: manifest.capture?.lineage ?? [] };
-  await q.query('INSERT INTO assembly_records(snapshot_id,payload) VALUES($1,$2) ON CONFLICT DO NOTHING', [snapshotId, payload]);
+  await q.query(`INSERT INTO assembly_records(snapshot_id,payload) VALUES($1,$2) ON CONFLICT(snapshot_id) DO UPDATE SET payload=EXCLUDED.payload
+    WHERE assembly_records.payload->>'ruleVersion' IS DISTINCT FROM EXCLUDED.payload->>'ruleVersion'`, [snapshotId, payload]);
   return payload;
 }
 
@@ -107,7 +109,7 @@ export function assemblyService(db: Database, raw: RawStore) {
     if (query.offset) throw new HttpError(400, '后续页需要固定组装版本');
     const row = (await db.query('SELECT s.device_id,a.payload FROM snapshots s LEFT JOIN assembly_records a ON a.snapshot_id=s.id WHERE s.id=$1', [snapshotId])).rows[0];
     if (!row) throw new HttpError(404, '快照不存在');
-    const base: Base = row.payload ?? await recordAssembly(db, raw, snapshotId, 'reconstructed');
+    const base: Base = row.payload?.ruleVersion === assemblyRuleVersion ? row.payload : await recordAssembly(db, raw, snapshotId, 'reconstructed');
     const hashes = new Set<string>();
     for (const source of base.sources) {
       for (const hash of await artifactChunks(db, row.device_id, source.hash) ?? []) hashes.add(hash);

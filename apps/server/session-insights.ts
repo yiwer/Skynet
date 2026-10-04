@@ -11,6 +11,7 @@ import type { RawStore } from './raw-store.js';
 import type { AnalysisRun } from '../../packages/contracts/analysis.js';
 import { readInsightBatch } from './session-insight-batch.js';
 import { readNativeTurnState } from '../../packages/native/turn-state.js';
+import { inputIntegrityVersion } from './evidence-integrity.js';
 
 export async function migrateSessionInsights(db:Database){
   const client=await db.connect();try{
@@ -35,7 +36,11 @@ export function sessionInsightsService(db: Database, archive: ArchiveQuery, anal
       const row=(await db.query('SELECT payload FROM session_insight_revisions WHERE snapshot_id=$1 AND analysis_id=$2 ORDER BY created_at DESC,version DESC LIMIT 1',[snapshotId,selection.analysisId])).rows[0];
       if(row)return row.payload;
     }
-    if (!selection.analysisId) return (await readInsightBatch(db, raw, [snapshotId]))[0]!;
+    if (!selection.analysisId) {
+      const value = (await readInsightBatch(db, raw, [snapshotId]))[0]!;
+      if (Buffer.byteLength(JSON.stringify(value)) > 80*1024) throw new HttpError(413,'会话洞察超过单次读取上限，请读取分析与原文分页');
+      return value;
+    }
     const page = await analysis.list(snapshotId);
     const run = selection.analysisId ? await analysis.get(selection.analysisId) : page.runs[0];
     if (run && run.snapshotId !== snapshotId) throw new HttpError(409, '分析版本不属于此快照');
@@ -66,7 +71,13 @@ export function sessionInsightsService(db: Database, archive: ArchiveQuery, anal
     await db.query('INSERT INTO session_insight_revisions(version,snapshot_id,analysis_id,payload) VALUES($1,$2,$3,$4) ON CONFLICT(version) DO NOTHING',[value.version,snapshotId,usable&&run?run.id:null,value]);
     return (await db.query('SELECT payload FROM session_insight_revisions WHERE version=$1',[value.version])).rows[0].payload;
   }
-  return { read, readMany: (snapshotIds:string[], options:{full?:boolean}={}) => readInsightBatch(db,raw,snapshotIds,options.full) };
+  async function readVersions(requested:{snapshotId:string;version:string}[]):Promise<SessionInsights[]> {
+    if(requested.length>20000)throw new HttpError(413,'会话洞察版本数量超过范围上限');
+    const values=(await db.query('SELECT snapshot_id,version,payload FROM session_insight_revisions WHERE version=ANY($1::text[])',[requested.map(row=>row.version)])).rows;
+    const map=new Map(values.map(row=>[`${row.snapshot_id}/${row.version}`,row.payload as SessionInsights]));
+    return requested.map(row=>{const value=map.get(`${row.snapshotId}/${row.version}`);if(!value)throw new HttpError(404,'会话洞察版本不存在');return value;});
+  }
+  return { read, readMany: (snapshotIds:string[], options:{full?:boolean}={}) => readInsightBatch(db,raw,snapshotIds,options.full), readVersions };
 }
 
 export function projectSessionInsights(snapshotId:string,input:SessionInsights['input'],run:AnalysisRun|undefined,facts:SessionInsights['facts'],sourceState:SessionInsights['sourceState'],historical=false):SessionInsights {
@@ -74,7 +85,9 @@ export function projectSessionInsights(snapshotId:string,input:SessionInsights['
   const state = !run ? 'unavailable' : run.state === 'failed' ? 'failed' : run.state === 'superseded'||run.state==='succeeded'&&!run.applicable&&!historical ? 'stale' : run.state === 'succeeded' ? !usable?'legacy':usable.complete&&run.result?.processing?.complete?'complete':'partial' : 'pending';
   const analysisVersion = run ? {id:run.id,generation:run.generation,prompt:run.config.promptVersion,configuration:run.config.configurationHash,applicable:run.applicable}:null;
   const complete=!!usable&&usable.complete&&run?.result?.processing?.complete===true;
-  return { version:digest(JSON.stringify({snapshotId,input,analysisVersion,state,outputFactsVersion,sourceState,readingVersion:'session-insights-read-2'})),factsVersion:outputFactsVersion,snapshotId,input,state,analysisVersion,sourceState,
+  const identity = [snapshotId,input.hash,input.parserVersion,input.attributionRevision,analysisVersion ? [analysisVersion.id,analysisVersion.generation,analysisVersion.prompt,analysisVersion.configuration,analysisVersion.applicable] : null,
+    state,outputFactsVersion,inputIntegrityVersion,sourceState ? [sourceState.version,sourceState.turn.state,sourceState.turn.turnId??null,sourceState.turn.line??null,sourceState.turn.timestamp??null] : null,'session-insights-read-2'];
+  return { version:digest(JSON.stringify(identity)),factsVersion:outputFactsVersion,snapshotId,input,state,analysisVersion,sourceState,
     inferences:usable||null,metrics:{verified:complete?usable!.outcomes.filter(v=>v.status==='verified').length:null,claimed:complete?usable!.outcomes.filter(v=>v.status==='claimed').length:null,
       rework:complete&&usable!.prompts.filter(p=>!p.first).every(p=>p.rework!==null)?usable!.prompts.filter(p=>!p.first&&p.rework).length:null,
       clarifications:complete&&usable!.replies.every(r=>r.clarification!==null)?usable!.replies.filter(r=>r.clarification).length:null},facts };

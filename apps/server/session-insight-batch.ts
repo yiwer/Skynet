@@ -3,8 +3,8 @@ import { digest } from './database.js';
 import type { RawStore } from './raw-store.js';
 import { HttpError } from './identities.js';
 import { readEvidence } from './evidence.js';
-import { attributionRevisionSql } from './qualification.js';
-import { verifyOriginIntegrity, repairLegacyCarriers } from './evidence-integrity.js';
+import { attributionRevisions } from './qualification.js';
+import { verifyOriginIntegrity, repairLegacyCarriers, primaryInputCoverage, inputIntegrityVersion } from './evidence-integrity.js';
 import { locatedOrigin } from './material-provenance.js';
 import { activityFor } from '../../packages/activity.js';
 import type { EventOrigin } from '../../packages/contracts/provenance.js';
@@ -39,7 +39,7 @@ export async function readInsightBatch(db: Database, raw: RawStore, requested: s
   const client = await db.connect();
   try {
     await client.query('BEGIN ISOLATION LEVEL REPEATABLE READ');
-    const revisions = new Map<string, string>((await client.query(`SELECT s.id,${attributionRevisionSql('s.id')}::text AS revision FROM snapshots s WHERE s.id=ANY($1::uuid[])`, [ids])).rows.map(row => [row.id, row.revision]));
+    const revisions = await attributionRevisions(client,ids);
     const jobs = (await client.query(`SELECT j.id,j.snapshot_id AS "snapshotId",j.state,j.config,j.input-'events' AS input,j.result,j.target_generation AS generation,
       t.applicable_job_id,t.desired_snapshot_id,t.config_hash,t.generation AS desired_generation,t.parser_version,t.attribution_revision
       FROM (SELECT DISTINCT ON(snapshot_id) * FROM analysis_jobs WHERE snapshot_id=ANY($1::uuid[]) ORDER BY snapshot_id,created_at DESC,id DESC) j
@@ -51,7 +51,7 @@ export async function readInsightBatch(db: Database, raw: RawStore, requested: s
         && String(job.attribution_revision) === String(job.input.attributionRevision ?? '0') && String(job.attribution_revision) === revisions.get(job.snapshotId);
       runs.set(job.snapshotId, job as AnalysisRun);
     }
-    const keys = new Map(records.map(record => [record.id, digest(JSON.stringify(['insight-input-1', outputFactsVersion, 'native-turn-state-1',
+    const keys = new Map(records.map(record => [record.id, digest(JSON.stringify(['insight-input-1', outputFactsVersion, inputIntegrityVersion, 'native-turn-state-1',
       record.id, record.hash, readEvidence(Buffer.alloc(0), record.source).parserVersion, revisions.get(record.id)]))]));
     const cached = new Map<string, Facts>(full ? [] : (await client.query('SELECT version,payload FROM insight_fact_revisions WHERE version=ANY($1::text[])', [[...keys.values()]])).rows.map(row => [row.version, row.payload]));
     const missingIds = records.filter(record => !cached.has(keys.get(record.id)!)).map(record => record.id);
@@ -80,7 +80,7 @@ export async function readInsightBatch(db: Database, raw: RawStore, requested: s
           if (parsed.events.length && parsed.events.length <= 4096 && parsed.events.every(event => mapped.has(`${event.line}/${event.block ?? 0}`))) {
             const attributed = activityFor(parsed.events, record.manifest.enrolledAt, undefined, mapped);
             const prepared: AnalysisInput = { ...input, snapshotId: record.id, source: record.source, sourceVersion: record.manifest.sourceVersion,
-              eventCount: parsed.events.length, events: attributed.events, coverage: { unrecognizedLines: parsed.unrecognizedLines, partialLine: parsed.partialLine,
+              eventCount: parsed.events.length, events: attributed.events, coverage: { unrecognizedLines: primaryInputCoverage(bytes,record.source,parsed).unrecognizedLines, partialLine: parsed.partialLine,
                 excludedMaterials: record.manifest.capture?.materials.length ?? 0, captureGaps: record.manifest.capture?.gaps ?? [], scope: '当前不可变主原件的全部已解析事件' } };
             facts.facts = recordedOutputFacts(bytes, prepared);
           }

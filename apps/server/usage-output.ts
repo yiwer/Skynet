@@ -43,8 +43,10 @@ export function usageOutputService(db: Database, metrics: MetricsService, insigh
     const ids = [...new Set(metric.sessions.flatMap(row => row.snapshotIds))];
     // Include every carrier of the selected native histories. Old rewrite inputs
     // remain evidence; continuations and verified copies share contribution IDs.
-    const carriers = ids.length ? (await db.query(`SELECT s.id,s.device_id,s.source,s.source_session_id,s.committed_at FROM snapshots s
-      WHERE EXISTS(SELECT 1 FROM snapshots base WHERE base.id=ANY($1::uuid[]) AND base.device_id=s.device_id
+    const carriers = ids.length ? (await db.query(`WITH carrying AS MATERIALIZED (SELECT DISTINCT se.snapshot_id FROM effective_snapshot_events se
+      JOIN effective_event_origins o ON o.event_id=se.event_id WHERE o.snapshot_id=ANY($1::uuid[]))
+      SELECT s.id,s.device_id,s.source,s.source_session_id,s.committed_at,s.provenance FROM snapshots s
+      WHERE s.id IN (SELECT snapshot_id FROM carrying) OR EXISTS(SELECT 1 FROM snapshots base WHERE base.id=ANY($1::uuid[]) AND base.device_id=s.device_id
         AND base.source=s.source AND base.source_session_id=s.source_session_id)
       ORDER BY s.committed_at,s.id LIMIT 20001`, [ids])).rows : [];
     if (carriers.length > 20000) throw new HttpError(413, '产出范围超过原件数量上限');
@@ -57,15 +59,27 @@ export function usageOutputService(db: Database, metrics: MetricsService, insigh
       JOIN effective_event_origins o ON o.event_id=se.event_id WHERE se.snapshot_id=ANY($1::uuid[])`, [carriers.map(row => row.id)])).rows : [];
     const carrierOrigins = new Map<string, Set<string>>();
     for (const map of mappings) { const set = carrierOrigins.get(map.snapshot_id) ?? new Set(); set.add(map.original); carrierOrigins.set(map.snapshot_id, set); }
-    const rows: UsageSession[] = metric.sessions.map(row => ({ ...row, selected: !q.employeeId || row.employeeId === q.employeeId, outputs: emptyOutputs(), insightVersions: [] }));
+    const byCarrier = new Map(carriers.map(carrier => [carrier.id,carrier]));
+    const newest = new Map(carriers.map(carrier => [JSON.stringify([carrier.device_id,carrier.source,carrier.source_session_id]),carrier.id]));
+    const leaves = new Set<string>(newest.values());
+    for (const id of newest.values()) {
+      let carrier=byCarrier.get(id); const visited=new Set<string>();
+      while(carrier?.provenance?.sourceSnapshotId && carrier.provenance.relation !== 'unconfirmed') {
+        const parent=carrier.provenance.sourceSnapshotId; if(visited.has(parent)||visited.size>=128)throw new HttpError(409,'会话谱系循环或过长');visited.add(parent);
+        leaves.delete(parent);carrier=byCarrier.get(parent);
+      }
+    }
+    const rows: UsageSession[] = metric.sessions.map(row => ({ ...row, selected: !q.employeeId || row.employeeId === q.employeeId, outputs: emptyOutputs(), insightVersions: [], latestCarrierSnapshotIds: [] }));
     const rowViews = rows.map(row => views.filter(view => row.snapshotIds.some(id => carrierOrigins.get(view.snapshotId)?.has(id))));
     for (const [index, row] of rows.entries()) {
       const inputs = rowViews[index]!;
       row.insightVersions = inputs.map(view => ({ snapshotId: view.snapshotId, version: view.version }));
+      row.latestCarrierSnapshotIds=inputs.filter(view=>leaves.has(view.snapshotId)).map(view=>view.snapshotId);
+      const target=inputs.findLast(view=>row.latestCarrierSnapshotIds.includes(view.snapshotId));
+      if(target)row.webPath=`#${target.snapshotId}?insightVersion=${target.version}`;
       // The latest observation for each native carrier determines completeness;
       // superseded partial observations must not poison a complete continuation.
-      const latest = new Map<string, SessionInsights>();
-      for (const view of inputs) { const c = carriers.find(carrier => carrier.id === view.snapshotId)!; latest.set(JSON.stringify([c.device_id,c.source,c.source_session_id]), view); }
+      const latest = new Map(inputs.filter(view=>leaves.has(view.snapshotId)).map(view=>[view.snapshotId,view]));
       for (const kind of kinds) {
         const complete = latest.size > 0 && [...latest.values()].every(view => kind === 'verified' || kind === 'claimed' ? view.metrics[kind] !== null : view.facts[kind].complete);
         if (!complete) { row.outputs[kind].value = null; row.outputs[kind].unknownSessions = 1; }
@@ -86,10 +100,12 @@ export function usageOutputService(db: Database, metrics: MetricsService, insigh
           sourceDate: origin.sourceDate, snapshotId: origin.snapshotId, value: 1 } });
       }
     }
+    const scopedRows = new Map<string,UsageSession>();
+    for(const row of rows)for(const snapshotId of row.snapshotIds)scopedRows.set(JSON.stringify([row.employeeId,row.project,snapshotId]),row);
     for (const { kind, fact } of contributions.values()) {
       const origin = origins.get(fact.eventId);
       if (!origin || origin.context !== 'after-enrollment' || !origin.source_date || origin.source_date < metric.scope.from || origin.source_date > metric.scope.to) continue;
-      const row = rows.find(row => row.employeeId === origin.employee_id && row.project === origin.project && row.snapshotIds.includes(origin.snapshot_id));
+      const row = scopedRows.get(JSON.stringify([origin.employee_id,origin.project,origin.snapshot_id]));
       if (!row) continue;
       const amount = row.outputs[kind]; amount.known += fact.value;
       for (const field of ['added','removed','passed','failed'] as const) amount[field] += fact[field] ?? 0;

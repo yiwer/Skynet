@@ -23,7 +23,10 @@ test('Codex 0.160 new sessions count their first native usage while copied or in
       const id = randomUUID();
       const created = old ? new Date(now.getTime() - 86400000).toISOString() : timestamp;
       const meta = { timestamp: created, type: 'session_meta', payload: { id, timestamp: created, cli_version: '0.160.0', source: 'cli', cwd: '/synthetic/usage', ...extra } };
-      const bytes = encode([...(omitHeader ? [] : [meta]), user, counter(100, 10), counter(150, 20), counter(150, 20),
+      const bytes = encode([...(omitHeader ? [] : [meta]), {timestamp,type:'turn_context',payload:{cwd:'/synthetic/usage',model:'synthetic-model'}}, user,
+        {timestamp,type:'event_msg',payload:{type:'user_message',message:'检查原生计数',images:[],local_images:[]}},
+        {timestamp,type:'response_item',payload:{type:'reasoning',summary:[{type:'summary_text',text:'合成简短说明'}],encrypted_content:'synthetic-opaque'}},
+        counter(100, 10), counter(150, 20), counter(150, 20),
         { timestamp, type: 'event_msg', payload: { type: 'task_complete', turn_id: 'synthetic-turn' } }]);
       assert.equal((await api(`/api/chunks/${digest(bytes)}`, bytes, device.deviceCredential, 'PUT')).statusCode, 201);
       const committed = await api('/api/snapshots', { protocolVersion: 1, sourceSessionId: id, source: 'codex-cli', sourceVersion: '0.160.0', sourceOs: process.platform,
@@ -35,6 +38,7 @@ test('Codex 0.160 new sessions count their first native usage while copied or in
     assert.deepEqual([first.json().totals.inputTokens, first.json().totals.outputTokens], [150, 20], 'the verified new session includes first cumulative usage exactly once');
     const insight = (await api(`/api/snapshots/${original.snapshotId}/insights`)).json();
     assert.equal(insight.sourceState?.turn.state, 'waiting-input', 'the same immutable input binds native turn closure for shared report consumers');
+    assert.equal((await api(`/api/snapshots/${original.snapshotId}/assembly`)).json().state, 'assembled', 'known native metadata is not an assembly gap');
     for (const value of [await upload({ forked_from_id: randomUUID() }), await upload({ history_base: { thread_id: randomUUID() } }), await upload({}, true), await upload({}, false, true)]) {
       const response = await api(`/api/snapshots/${value.snapshotId}/metrics?period=since-enrollment`); assert.equal(response.statusCode, 200, response.body);
       assert.equal(response.json().totals.inputTokens, null);
@@ -78,11 +82,12 @@ test('usage output groups native outcomes by original employee and date across a
     const continued = Buffer.concat([initial, encode(tool('commit-one', 'git commit -m change', '[main abcdef1] change\n 1 file changed, 1 insertion(+)'))]);
     const continuedId = await upload(a, continued); await upload(a, continued);
     const nextDay = new Date(now.getTime() + 86400000).toISOString();
-    await upload(b, Buffer.concat([continued, encode(tool('test-two', 'node --test next.js', '# tests 2\n# pass 2\n# fail 0', nextDay))]), { snapshotId: continuedId, hash: digest(continued), byteLength: continued.length });
+    const restoredId = await upload(b, Buffer.concat([continued, encode(tool('test-two', 'node --test next.js', '# tests 2\n# pass 2\n# fail 0', nextDay))]), { snapshotId: continuedId, hash: digest(continued), byteLength: continued.length });
     const response = await api('/api/usage-output?period=since-enrollment'); assert.equal(response.statusCode, 200, response.body);
     const report = response.json();
     assert.deepEqual([report.totals.sessions, report.outputs.tests.known, report.outputs.tests.passed, report.outputs.commits.known], [1, 5, 4, 1]);
     assert.deepEqual(report.employees.map((row: any) => [row.employee, row.outputs.tests.known]), [['甲原作者', 3], ['乙续作者', 2]]);
+    for (const row of report.sessions) assert.deepEqual(row.latestCarrierSnapshotIds, [restoredId], 'verified recovery supersedes its original native leaf for current turn state');
     const selected = (await api(`/api/usage-output?period=since-enrollment&employeeId=${beta.employeeId}`)).json();
     assert.equal(selected.outputs.tests.known, 2); assert.equal(selected.employees.length, 1);
     assert.equal(selected.sessions.filter((row: any) => row.selected).length, 1);
