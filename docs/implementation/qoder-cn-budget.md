@@ -15,8 +15,8 @@ Qoder 的 [Credits 文档](https://docs.qoder.cn/cli/sdk/cost-usage) 区分 Toke
   "runtimeVersion": "1.1.64",
   "sdkVersion": "1.0.50",
   "model": "qfmodel",
-  "workDirectory": "/var/lib/skynet-analysis/jobs",
-  "credentialFile": "/run/secrets/qoder-cn-pat",
+  "workDirectory": "/data/analysis",
+  "credentialFile": "/run/analysis/credential",
   "budgetId": "qoder-cn-manual-1",
   "budgetCny": 0,
   "inputCnyPerMillion": 0,
@@ -30,6 +30,8 @@ Qoder 的 [Credits 文档](https://docs.qoder.cn/cli/sdk/cost-usage) 区分 Toke
 ```
 
 `requestBudget` 必须是 1–1,000,000,000 的整数，至少能预留一次 `maxRequests`。`requireFreeModel` 在 Qoder 模式默认 true；运行时仍需逐次核对模型目录的 enabled、isFree 和 priceFactor，不能用此静态字段宣称任意模型免费。样例关闭自动分析。
+
+Qoder 模式的 `maxRequestBytes` 限制平台构造的完整分析请求：系统指令、引用规则、JSON Schema、带来源的用户输入、model 和 maxOutputTokens 合并序列化后的 UTF-8 字节。SDK 与提供商内部协议的额外字节不可观察，不属于这一上限；此值不能作为提供商计费依据。SDK 的 stderr 接口由平台接管并丢弃，宿主调试环境变量也不能把历史对话内容写入日志。
 
 读取配置时检查专用 `pt-` PAT 格式、文件长度和内容指纹。执行时 `readCredential` 再核对原指纹，变更的凭据不能静默附着到旧配置版本。公开配置不返回文件路径、PAT 或指纹，只保留配置 hash；Qwen PAYG 的既有专用 key 规则保持原样。Qoder 配置不能混入 fixtureOrigin 或 CNY Token 费率，其他模式不能携带 Qoder SDK/请求额度字段。
 
