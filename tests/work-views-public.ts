@@ -88,11 +88,11 @@ export async function workViewsPublic(native: boolean,extension?:WorkViewsExtens
         }); assert.equal(await queue.finish(job, result), true);
       }
     }
-    async function wait(selection: WorkViewSelection, expectedRecords: number) {
+    async function wait(selection: WorkViewSelection, expectedRecords: number | null) {
       for (let i = 0; i < 120; i++) {
         await drain(); const response = await sandbox.api(path(selection), beta.readerCredential); assert.equal(response.status, 200);
         const report = await response.json() as WorkView;
-        if (report.items.length && !report.refreshPending && report.statistics?.records === expectedRecords && !['queued', 'waiting-analysis'].includes(report.state)) return report;
+        if (report.version && (report.items.length || expectedRecords === null) && !report.refreshPending && report.statistics?.records === expectedRecords && !['queued', 'waiting-analysis'].includes(report.state)) return report;
         await setTimeout(500);
       }
       throw new Error(`${sandbox.directory}; ${errors}; ${JSON.stringify(await (await sandbox.api(path(selection), beta.readerCredential)).json())}`);
@@ -132,8 +132,11 @@ export async function workViewsPublic(native: boolean,extension?:WorkViewsExtens
     const projectsResponse = await sandbox.api('/api/work-projects', beta.readerCredential); assert.equal(projectsResponse.status, 200, await projectsResponse.clone().text());
     assert.ok((await projectsResponse.json()).projects.some((entry: any) => entry.project === ''));
     const absent = { kind: 'project', subject: '/synthetic/unknown-project', from: sunday, to: tuesday } as const;
-    const absentView = await (await sandbox.api(path(absent), beta.readerCredential, json({}))).json();
-    assert.equal(absentView.state, 'partial'); assert.equal(absentView.statistics.records, null); assert.deepEqual(absentView.participants, []);
+    assert.equal((await sandbox.api(path(absent), beta.readerCredential, json({}))).status, 202);
+    // The shared refresh lock may leave even an empty selection queued initially.
+    // Verify its durable public result through the same bounded wait as populated views.
+    const absentView = await wait(absent, null);
+    assert.equal(absentView.state, 'partial'); assert.equal(absentView.statistics.records, null); assert.deepEqual(absentView.participants, []); assert.deepEqual(absentView.items, []);
     await sandbox.restart();
     assert.deepEqual(await (await sandbox.api(path(weekly(week), `&revision=${previous.revision}`), beta.readerCredential)).json(), previousFixed);
     assert.deepEqual(await (await sandbox.api(path(fullRange, `&revision=${project.revision}`), beta.readerCredential)).json(), { ...project, refreshPending: false });
