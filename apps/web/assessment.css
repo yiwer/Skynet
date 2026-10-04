@@ -52,6 +52,10 @@
 .platform-main .assessment-section-title>span{font-size:11px;color:var(--color-muted);display:flex;gap:7px;align-items:center}
 .platform-main .assessment-section-title i{height:12px;border-left:2px solid var(--color-muted);margin-left:8px}
 .platform-main .assessment-dimensions{border:1px solid var(--color-rule);border-radius:12px;overflow:hidden;background:var(--color-card)}
+.platform-main .assessment-dimension-table{width:100%;table-layout:fixed;border-collapse:collapse;background:var(--color-card);font-size:12px;text-align:left}
+.platform-main .assessment-dimension-table th,.platform-main .assessment-dimension-table td{padding:14px 10px;border-bottom:1px solid var(--color-rule-soft);overflow-wrap:anywhere}
+.platform-main .assessment-dimension-table thead{color:var(--color-muted);background:var(--color-paper-2)}
+.platform-main .assessment-dimension-table td{font-family:var(--font-mono)}
 .platform-main .assessment-dimension+details{border-top:1px solid var(--color-rule)}
 .platform-main .assessment-dimension>summary{display:grid;grid-template-columns:minmax(100px,1fr) minmax(120px,2fr) 36px 68px;gap:16px;align-items:center;padding:17px 20px;cursor:pointer;list-style:none;font-size:13px}
 .platform-main .assessment-dimension>summary:hover{background:var(--color-hover)}
