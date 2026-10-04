@@ -13,6 +13,8 @@ import { readInsightBatch } from './session-insight-batch.js';
 import { readNativeTurnState } from '../../packages/native/turn-state.js';
 import { inputIntegrityVersion } from './evidence-integrity.js';
 import type {MessageFacts} from '../../packages/contracts/message-facts.js';
+import {sessionInsightsQuery} from '../../packages/contracts/session-insights.js';
+import {insightPage} from './session-insight-page.js';
 
 export async function migrateSessionInsights(db:Database){
   const client=await db.connect();try{
@@ -38,9 +40,7 @@ export function sessionInsightsService(db: Database, archive: ArchiveQuery, anal
       if(row)return row.payload;
     }
     if (!selection.analysisId) {
-      const value = (await readInsightBatch(db, raw, [snapshotId]))[0]!;
-      if (Buffer.byteLength(JSON.stringify(value)) > 80*1024) throw new HttpError(413,'会话洞察超过单次读取上限，请读取分析与原文分页');
-      return value;
+      return (await readInsightBatch(db, raw, [snapshotId]))[0]!;
     }
     const page = await analysis.list(snapshotId);
     const run = selection.analysisId ? await analysis.get(selection.analysisId) : page.runs[0];
@@ -68,7 +68,6 @@ export function sessionInsightsService(db: Database, archive: ArchiveQuery, anal
       }
     }
     const value = projectSessionInsights(snapshotId,input,run,facts,sourceState,true);
-    if(Buffer.byteLength(JSON.stringify(value))>80*1024)throw new HttpError(413,'会话洞察超过单次读取上限，请读取分析与原文分页');
     await db.query('INSERT INTO session_insight_revisions(version,snapshot_id,analysis_id,payload) VALUES($1,$2,$3,$4) ON CONFLICT(version) DO NOTHING',[value.version,snapshotId,usable&&run?run.id:null,value]);
     return (await db.query('SELECT payload FROM session_insight_revisions WHERE version=$1',[value.version])).rows[0].payload;
   }
@@ -86,7 +85,8 @@ export function sessionInsightsService(db: Database, archive: ArchiveQuery, anal
       const value=values.get(`${view.snapshotId}/${view.messageFactsVersion}`);if(!value)throw new HttpError(404,'提示词原件元数据版本不存在');
       return {...value,snapshotId:view.snapshotId,version:view.messageFactsVersion};});
   }
-  return { read, readMany: (snapshotIds:string[], options:{full?:boolean}={}) => readInsightBatch(db,raw,snapshotIds,options.full), readVersions,readMessageFacts };
+  return { read, page:async(snapshotId:string,input:unknown={})=>{const q=sessionInsightsQuery.parse(input);return insightPage(await read(snapshotId,q),q);},
+    readMany: (snapshotIds:string[], options:{full?:boolean}={}) => readInsightBatch(db,raw,snapshotIds,options.full), readVersions,readMessageFacts };
 }
 
 export function projectSessionInsights(snapshotId:string,input:SessionInsights['input'],run:AnalysisRun|undefined,facts:SessionInsights['facts'],sourceState:SessionInsights['sourceState'],historical=false,messageFactsVersion?:string,messageHistoryComplete?:boolean):SessionInsights {
