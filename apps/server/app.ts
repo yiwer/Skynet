@@ -214,10 +214,6 @@ export async function createApp(options: { db: Database; rawDirectory: string; w
   const conversation = conversationQuery(db, raw);
   const metrics = metricsService(db, raw, options.reportClock);
   const waits = waitsService(db, raw, options.reportClock);
-  const activity = activityService(db,raw,options.reportClock);
-  app.get('/api/activity',{onRequest:readerGuard},request=>activity.read(request.query));
-  app.post('/api/activity/recompute',{onRequest:readerGuard},request=>activity.recompute(request.body));
-  app.get('/api/activity/export',{onRequest:readerGuard},async(request,reply)=>{const data=await activity.export(request.query);return reply.header('Content-Disposition',`attachment; filename="skynet-activity-${data.version}.json"`).type('application/json').send(data);});
   app.get('/api/waits', { onRequest: readerGuard }, request => waits.read(request.query));
   app.post('/api/waits/recompute', { onRequest: readerGuard }, request => waits.recompute(request.body));
   app.get('/api/waits/export', { onRequest: readerGuard }, async (request, reply) => {
@@ -262,6 +258,10 @@ export async function createApp(options: { db: Database; rawDirectory: string; w
   });
   const analysis = analysisService(db, archive);
   const insights = sessionInsightsService(db, archive, analysis, raw);
+  const activity = activityService(db,raw,insights,options.reportClock);
+  app.get('/api/activity',{onRequest:readerGuard},request=>activity.read(request.query));
+  app.post('/api/activity/recompute',{onRequest:readerGuard},request=>activity.recompute(request.body));
+  app.get('/api/activity/export',{onRequest:readerGuard},async(request,reply)=>{const data=await activity.export(request.query);return reply.header('Content-Disposition',`attachment; filename="skynet-activity-${data.version}.json"`).type('application/json').send(data);});
   const usage = usageOutputService(db, metrics, insights);
   app.get('/api/usage-output', { onRequest: readerGuard }, request => usage.read(request.query));
   app.post('/api/usage-output/recompute', { onRequest: readerGuard }, request => usage.recompute(request.body));
@@ -399,7 +399,7 @@ export async function createApp(options: { db: Database; rawDirectory: string; w
     const file = await archive.exported((request.params as { id: string }).id, format);
     return reply.header('Content-Disposition', `attachment; filename="${file.filename}"`).type(file.contentType).send(file.bytes);
   });
-  if (options.publicOrigin) await registerMcp(app, db, archive, options.publicOrigin, analysis, reports, coverage, workStatistics, workViews,operations,conversation,metrics,assembly,processing,insights,waits,usage);
+  if (options.publicOrigin) await registerMcp(app, db, archive, options.publicOrigin, analysis, reports, coverage, workStatistics, workViews,operations,conversation,metrics,assembly,processing,insights,waits,usage,activity);
   if (options.webDirectory) {
     await app.register(fastifyStatic, { root: resolve(options.webDirectory), wildcard: false });
   }
