@@ -102,5 +102,6 @@ export function sessionEfficiencyService(db:Database,usage:ReturnType<typeof usa
     return result;}
 
   return{read,recompute:(input:unknown)=>read(input,true),export:async(input:unknown)=>(await load(input)).revision.complete(),
+    download:async(input:unknown)=>{const {q,revision}=await load(input);return revisions.download(revision.header.version,selection(q));},
     exportFromMetric:async(input:unknown,metricVersion:string,full=false)=>(await load(input,full,metricVersion)).revision.complete()};
 }
