@@ -8,9 +8,12 @@ function Evidence({citations}:{citations:InsightCitation[]}){
 }
 export function SessionInsights({snapshotId,request,analysisRefresh=0}:{snapshotId:string;request:(path:string,signal?:AbortSignal)=>Promise<Response>;analysisRefresh?:number}){
   const [data,setData]=useState<Insights|null>(null),[error,setError]=useState(''),[refresh,setRefresh]=useState(0);
+  const [hash,setHash]=useState(location.hash);
+  useEffect(()=>{const changed=()=>setHash(location.hash);addEventListener('hashchange',changed);return()=>removeEventListener('hashchange',changed);},[]);
+  const fixedVersion=new URLSearchParams(hash.split('?')[1]??'').get('insightVersion');
   useEffect(()=>{const abort=new AbortController();let timer:ReturnType<typeof setTimeout>|undefined;setData(null);setError('');
-    const read=async()=>{try{const value=await(await request(`/api/snapshots/${snapshotId}/insights`,abort.signal)).json();if(abort.signal.aborted)return;setData(value);if(value.state==='pending')timer=setTimeout(read,1500);}catch(failure){if(!abort.signal.aborted)setError((failure as Error).message);}};
-    void read();return()=>{abort.abort();clearTimeout(timer);};},[snapshotId,refresh,analysisRefresh]);
+    const read=async()=>{try{const value=await(await request(`/api/snapshots/${snapshotId}/insights${fixedVersion?'?version='+encodeURIComponent(fixedVersion):''}`,abort.signal)).json();if(abort.signal.aborted)return;setData(value);if(value.state==='pending'&&!fixedVersion)timer=setTimeout(read,1500);}catch(failure){if(!abort.signal.aborted)setError((failure as Error).message);}};
+    void read();return()=>{abort.abort();clearTimeout(timer);};},[snapshotId,refresh,analysisRefresh,fixedVersion]);
   const inferences=data?.inferences;
   return <section className="session-insights" aria-label="会话洞察"><header><h2>会话洞察</h2><button type="button" aria-label="刷新会话洞察" onClick={()=>setRefresh(value=>value+1)}>↻</button></header>
     {error?<p role="alert">{error}</p>:!data?<p role="status">正在读取…</p>:<>

@@ -30,6 +30,7 @@ export type MetricCatalog = { version: string; timeZone: 'Asia/Shanghai'; defini
 export type MetricsPage = { version: string; revision: number; scope: MetricsScope; dataAsOf: string; createdAt: string;
   totals: MetricTotals; sessions: SessionMetrics[]; nextOffset: number | null;
   daily: ({ date: string; tokenTrend?: MetricTokenTrend } & MetricTotals)[];
+  employeeDaily?: ({ employeeId: string; employee: string; date: string; tokenTrend?: MetricTokenTrend } & MetricTotals)[];
   employees: ({ employeeId: string; employee: string } & MetricTotals)[];
   sources: ({ source: Source } & MetricTotals)[];
   catalogVersion: string; definition: string; sourceInputsComplete: boolean; unknownReasons: string[] };

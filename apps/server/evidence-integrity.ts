@@ -6,9 +6,10 @@ import type {Source} from '../../packages/contracts/archive.js';
 import {nativeKey} from '../../packages/native/occurrences.js';
 import {readEvidence} from './evidence.js';
 import {activityFor} from '../../packages/activity.js';
+import {codexAuxiliaryReader} from '../../packages/native/codex-auxiliary.js';
 type Query=Pick<Database,'query'>|Pick<pg.PoolClient,'query'>;
 export const integrityVersion='original-utf8-1';
-export const inputIntegrityVersion='native-input-1';
+export const inputIntegrityVersion='native-input-2';
 /** An incomplete or not-yet-verified primary has no known business source date. Keep
  * its current native scope unknown instead of assigning it a fabricated date
  * or silently declaring every employee/day source input complete. A later
@@ -24,12 +25,11 @@ export const unscopedRawGapsSql=(employee:string)=>`(SELECT jsonb_build_object('
  * validates versions, counters, dates and baseline attribution separately. */
 export function primaryInputCoverage(bytes:Buffer,source:Source,parsed=readEvidence(bytes,source)){
   let auxiliary=0;
+  const codexAuxiliary=codexAuxiliaryReader(parsed.events);
   for(const line of completeOriginalLines(bytes)){
     if(line.text===null||!line.text.trim())continue;
     try{const row=JSON.parse(line.text);
-      if(source!=='claude-code-cli'&&row?.type==='event_msg'&&row.payload?.type==='token_count'
-        &&row.payload.info&&typeof row.payload.info==='object'&&!Array.isArray(row.payload.info)
-        &&row.payload.info.total_token_usage&&typeof row.payload.info.total_token_usage==='object'&&!Array.isArray(row.payload.info.total_token_usage))auxiliary++;
+      if(source!=='claude-code-cli'&&codexAuxiliary(row))auxiliary++;
       if(source==='claude-code-cli'&&row?.type==='queue-operation'&&['enqueue','dequeue','remove'].includes(row.operation)&&typeof row.sessionId==='string')auxiliary++;
     }catch{/* Malformed original stays a gap. */}
   }
