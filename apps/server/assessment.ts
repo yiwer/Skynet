@@ -3,7 +3,9 @@ import { HttpError } from './identities.js';
 import { assessmentQuery, type AssessmentPeriod, type AssessmentPreset, type CapabilityAssessment } from '../../packages/contracts/assessment.js';
 import { assessmentModel, assessmentModelVersion } from './assessment-model.js';
 import { assessmentInputs } from './assessment-inputs.js';
-import { consistentReportingInputs } from './reporting-frontier.js';
+import { consistentReportingInputs, reportingInputAttempt, ReportingSourceChanged } from './reporting-frontier.js';
+import type {RawStore} from './raw-store.js';
+import {assessmentPeriods} from './assessment-periods.js';
 import { assessmentHistory } from './assessment-history.js';
 import { storeAssessment } from './assessment-store.js';
 import type { usageOutputService } from './usage-output.js';
@@ -19,7 +21,7 @@ export async function migrateAssessments(db: Database) {
     CREATE INDEX IF NOT EXISTS assessment_employee_history ON assessment_revisions(employee_id,ordinal DESC)`);
   await db.query('INSERT INTO assessment_models(version,payload) VALUES($1,$2) ON CONFLICT DO NOTHING', [assessmentModelVersion, assessmentModel]);
 }
-export function assessmentService(db: Database, usage: ReturnType<typeof usageOutputService>, insights: ReturnType<typeof sessionInsightsService>, waits: ReturnType<typeof waitsService>, clock: () => Date = () => new Date()) {
+export function assessmentService(db: Database, usage: ReturnType<typeof usageOutputService>, insights: ReturnType<typeof sessionInsightsService>, waits: ReturnType<typeof waitsService>, raw:RawStore,clock: () => Date = () => new Date()) {
   type Prepared=Awaited<ReturnType<typeof assessmentInputs>> & {frontierVersion:string};
   const preparing=new Map<string,Promise<Prepared>>();let lastPreparation:Promise<unknown>=Promise.resolve();
   function prepare(full:boolean,preset:AssessmentPreset,period:AssessmentPeriod){
@@ -85,6 +87,28 @@ export function assessmentService(db: Database, usage: ReturnType<typeof usageOu
     const q = assessmentQuery.parse(input), value = await load(employeeId, q, full);
     return page(value, q.inputOffset, 32);
   }
-  return { read, batch, model, baseline, history: (employeeId: string, input: unknown) => assessmentHistory(db, employeeId, input), recompute: (employeeId: string, input: unknown) => read(employeeId, input, true),
+  async function withProfile<T>(employeeId:string,scope:{period:AssessmentPeriod;preset:AssessmentPreset;full:boolean},read:(bundle:{selected:CapabilityAssessment;weeks:{previous:CapabilityAssessment;current:CapabilityAssessment}}|null)=>Promise<T>){
+    if(scope.full)return read(null);
+    // Do not borrow the service-wide preparing Promise: another request may
+    // already have performed raw reads before this observer began.
+    const captured=await raw.observeReads(async()=>{
+      // Sequence preparation against standalone readers, but never share the
+      // computed bundle: every request captures its own actual source reads.
+      const pending=lastPreparation.catch(()=>undefined).then(()=>reportingInputAttempt(db,clock,async()=>({periods:await assessmentPeriods(db,usage,waits,insights,clock,scope.preset,scope.period)})));
+      lastPreparation=pending.then(()=>undefined,()=>undefined);const prepared=await pending;
+      if(!prepared.periods)return read(null);
+      const saved=new Map<AssessmentPeriod,CapabilityAssessment>();
+      for(const [period,inputs]of prepared.periods){
+        const employee=inputs.people.find(person=>person.id===employeeId);if(!employee)throw new HttpError(404,'员工不存在');
+        saved.set(period,await store({...inputs,frontierVersion:prepared.frontierVersion},employee,scope.preset,period));
+      }
+      return read({selected:page(saved.get(scope.period)!,0,Number.MAX_SAFE_INTEGER),weeks:{previous:saved.get('last-week')!,current:saved.get('this-week')!}});
+    });
+    try{
+      if(captured.overflow){captured.close();return read(null);}
+      if(!await captured.verify())throw new ReportingSourceChanged();return captured.value;
+    }finally{captured.close();}
+  }
+  return { withProfile, read, batch, model, baseline, history: (employeeId: string, input: unknown) => assessmentHistory(db, employeeId, input), recompute: (employeeId: string, input: unknown) => read(employeeId, input, true),
     export: async (employeeId: string, input: unknown) => page(await load(employeeId, input), 0, Number.MAX_SAFE_INTEGER) };
 }

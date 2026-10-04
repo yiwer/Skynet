@@ -5,6 +5,9 @@ import { inputIntegrityVersion } from './evidence-integrity.js';
 import { beijingDate } from '../../packages/contracts/reports.js';
 import type pg from 'pg';
 
+/** A live source changed without necessarily changing its database ledger. */
+export class ReportingSourceChanged extends Error {}
+
 /** Semantic input identity, read under one snapshot. Include originals without
  * business events: their unknown coverage can still affect the assessment.
  * Heartbeat times and derived report/cache revisions are deliberately absent. */
@@ -44,8 +47,17 @@ async function reportingFrontier(db: Database, clock: () => Date, extra?:(client
  * component services may independently persist their own valid frozen versions. */
 export async function consistentReportingInputs<T extends object>(db: Database, clock: () => Date, read: () => Promise<T>,extra?:(client:pg.PoolClient)=>Promise<unknown>): Promise<T & { frontierVersion: string }> {
   for (let attempt = 0; attempt < 3; attempt++) {
-    const before = await reportingFrontier(db, clock,extra), value = await read();
-    if (await reportingFrontier(db, clock,extra) === before) return { ...value, frontierVersion: before };
+    try{
+      return await reportingInputAttempt(db,clock,read,extra);
+    }catch(error){if(!(error instanceof ReportingSourceChanged))throw error;}
   }
   throw new HttpError(409, '报告来源正在更新，请重新读取；未保存混合输入的报告');
+}
+
+/** A composition can acquire the core identity without adding another retry
+ * loop or borrowing its parent's identity with unrelated extra fields. */
+export async function reportingInputAttempt<T extends object>(db:Database,clock:()=>Date,read:()=>Promise<T>,extra?:(client:pg.PoolClient)=>Promise<unknown>){
+  const before=await reportingFrontier(db,clock,extra),value=await read();
+  if(await reportingFrontier(db,clock,extra)!==before)throw new ReportingSourceChanged();
+  return {...value,frontierVersion:before};
 }

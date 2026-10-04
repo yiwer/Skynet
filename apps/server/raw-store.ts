@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { digest } from './database.js';
 import { syncDirectory } from '../../packages/filesystem.js';
+import {RawObservations} from './raw-observation.js';
 
 export class RawUnavailableError extends Error {
   constructor(readonly device: string, readonly hash: string, readonly reason: 'missing'|'unreadable'|'hash-mismatch', options?: ErrorOptions) {
@@ -11,7 +12,15 @@ export class RawUnavailableError extends Error {
 }
 
 export class RawStore {
+  private observations=new RawObservations();
   constructor(private root: string) {}
+  async observeReads<T>(read:()=>Promise<T>){
+    const captured=await this.observations.capture(read);
+    return {...captured,verify:()=>captured.verify(async(device,hash)=>{
+      try{await this.read(device,hash);return 'available';}
+      catch(error){if(!(error instanceof RawUnavailableError))throw error;return error.reason;}
+    })};
+  }
   async write(device: string, hash: string, bytes: Buffer) {
     if (digest(bytes) !== hash) throw new Error('Artifact hash mismatch');
     await mkdir(this.root, { recursive: true, mode: 0o700 });
@@ -38,9 +47,11 @@ export class RawStore {
     catch (error) {
       const code = (error as NodeJS.ErrnoException).code;
       if (!['ENOENT','ENOTDIR','EACCES','EPERM','EIO','EISDIR','EMFILE','ENFILE','EBUSY'].includes(code ?? '')) throw error;
-      throw new RawUnavailableError(device, hash, code === 'ENOENT' || code === 'ENOTDIR' ? 'missing' : 'unreadable', { cause: error });
+      const reason=code === 'ENOENT' || code === 'ENOTDIR' ? 'missing' : 'unreadable';
+      this.observations.record(device,hash,reason);throw new RawUnavailableError(device, hash, reason, { cause: error });
     }
-    if (digest(bytes) !== hash) throw new RawUnavailableError(device, hash, 'hash-mismatch');
+    if (digest(bytes) !== hash){this.observations.record(device,hash,'hash-mismatch');throw new RawUnavailableError(device, hash, 'hash-mismatch');}
+    this.observations.record(device,hash,'available');
     return bytes;
   }
 }

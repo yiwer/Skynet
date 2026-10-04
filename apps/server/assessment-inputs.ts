@@ -8,6 +8,11 @@ import type { CapabilityAssessment, AssessmentPreset, AssessmentPeriod } from '.
 import { emptyDimensions, scoreMetric, concludeAssessment, assessmentModelVersion } from './assessment-model.js';
 import { assessmentSessions, assessmentBaseline, fillAssessmentFactors, median } from './assessment-factors.js';
 import { dimKeys } from '../../packages/contracts/assessment.js';
+import type {UsageOutputPage,UsageSession} from '../../packages/contracts/usage-output.js';
+import type {WaitsPage} from '../../packages/contracts/waits.js';
+import type {AssessmentSession} from './assessment-factors.js';
+
+export type AssessmentInputs={report:UsageOutputPage;waitReport:WaitsPage;baselineReport:UsageOutputPage;factors:AssessmentSession[];baselineFactors:AssessmentSession[];baselineReferences:UsageSession['insightVersions']};
 
 const weekday = (date: string) => ![0, 6].includes(new Date(date + 'T00:00:00Z').getUTCDay());
 export async function assessmentInputs(db: Database, usage: ReturnType<typeof usageOutputService>, insights: ReturnType<typeof sessionInsightsService>, waits: ReturnType<typeof waitsService>, clock: () => Date, full = false, preset: AssessmentPreset = '默认', period: AssessmentPeriod = 'since-enrollment') {
@@ -20,6 +25,9 @@ export async function assessmentInputs(db: Database, usage: ReturnType<typeof us
   const views = await insights.readVersions(references), messages=[...new Map((await insights.readMessageFacts(views)).flatMap(fact=>fact.messages).map(message=>[message.id,message])).values()];
   const factors = assessmentSessions(report.sessions, views, report.scope,messages);
   const baselineFactors = period === 'since-enrollment' ? factors : assessmentSessions(baselineReport.sessions, views, baselineReport.scope,messages);
+  return scoreAssessmentInputs(db,clock,preset,{report,waitReport,baselineReport,factors,baselineFactors,baselineReferences});
+}
+export async function scoreAssessmentInputs(db:Database,clock:()=>Date,preset:AssessmentPreset,{report,waitReport,baselineReport,factors,baselineFactors,baselineReferences}:AssessmentInputs){
   const baseline = { ...assessmentBaseline(baselineFactors), modelVersion: assessmentModelVersion, usageVersion: baselineReport.version,
     sourceVersions: baselineReferences.map(ref => ref.version).sort() }, baselineVersion = digest(JSON.stringify(baseline));
   const people = (await db.query(`SELECT e.id,e.name,min(d.enrolled_at) AS enrolled_at,
