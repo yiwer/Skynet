@@ -34,5 +34,11 @@ test('complete reports retain 1,000 sessions and 19,000 waits independently of b
     const prompts=await read('/api/prompt-report?'+query);
     assert.deepEqual([prompts.kpis.sessions,prompts.kpis.prompts,prompts.kpis.context.denominator,prompts.kpis.context.unknown],[1000,20000,400,19600]);
     assert.deepEqual(await read('/api/prompt-report/recompute',{period:'since-enrollment'}),prompts);
+    const assessmentPath='/api/assessments/'+bundle.people[0]!.employeeId;
+    const assessment=await read(assessmentPath+'?'+query);
+    assert.deepEqual([assessment.sample.sessions,assessment.sample.prompts,assessment.sample.activeDays],[100,2000,20]);
+    assert.equal(assessment.inputs.usageVersion,prompts.usageVersion);assert.equal(assessment.inputs.waitsVersion,waits.version);
+    assert.equal(assessment.dims.flow.metrics.find((metric:any)=>metric.key==='permMed').value,null);
+    assert.deepEqual(await read(assessmentPath+'/recompute',{period:'since-enrollment'}),assessment);
   }finally{await disposeOwned(f,owner);if(!process.env.SKYNET_CAPACITY_SOURCE)await rm(directory,{recursive:true,force:true});}
 });

@@ -32,8 +32,7 @@ export function teamReportService(db:Database,usage:ReturnType<typeof usageOutpu
     if(q.version){const row=(await db.query('SELECT request,payload FROM team_report_revisions WHERE version=$1',[q.version])).rows[0];if(!row)throw new HttpError(404,'团队视图版本不存在');if(canonical(row.request)!==canonical(query))throw new HttpError(409,'团队视图版本与范围不一致');return row.payload;}
     const fixed=await consistentReportingInputs(db,clock,async()=>{
       const {week,...selection}=query;
-      const head=full&&!week?await usage.recompute(selection):null;
-      const source=week?await usage.readWeek(week,{employeeId:q.employeeId,source:q.source,project:q.project},full):await usage.export({...selection,...(head?{version:head.version}:{})}),prompt=await prompts.read({...query,usageVersion:source.version}),wait=await waits.forScope(selection,source.scope,full);
+      const source=week?await usage.readWeek(week,{employeeId:q.employeeId,source:q.source,project:q.project},full):await usage.complete(selection,{full}),prompt=await prompts.read({...query,usageVersion:source.version}),wait=await waits.forScope(selection,source.scope,full);
       const people=(await db.query('SELECT id,name FROM employees WHERE ($1::uuid IS NULL OR id=$1) ORDER BY name,id',[q.employeeId??null])).rows;
       const coverage=await coverageService(db,clock).matrix(source.scope.to,0,source.scope,1000);if(coverage.nextOffset!==null)throw new HttpError(413,'团队员工范围过大');
       // Activity filters never redefine the since-enrollment capability model.

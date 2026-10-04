@@ -38,7 +38,7 @@ export function profileCoachingService(insights:ReturnType<typeof sessionInsight
       return {sessionId:candidate.sessionId,snapshotId:candidate.snapshotId,verified:candidate.verified,claimed:candidate.claimed,rework:candidate.rework,tokens:candidate.tokens,
         citation,insight:{snapshotId:source.snapshotId,version:source.version},correctionIds:(source.corrections?.appliedIds??[]).slice(0,16),correctionCount:source.corrections?.appliedIds.length??0};
     }
-    const waitSource=await waits.export({period:assessment.selection?.period??'since-enrollment',version:assessment.inputs.waitsVersion}),intervals=waitSource.intervals.filter(row=>row.employeeId===assessment.employeeId);
+    const waitSource=await waits.complete({period:assessment.selection?.period??'since-enrollment',version:assessment.inputs.waitsVersion}),intervals=waitSource.intervals.filter(row=>row.employeeId===assessment.employeeId);
     const waitSummary=summarizeWaits({...waitSource,intervals}),bins=Array.from({length:24},()=>[] as number[]);
     for(const row of intervals)if(row.durationMs!==null&&row.startedAt)bins[new Date(Date.parse(row.startedAt)+8*3600000).getUTCHours()]!.push(row.durationMs);
     async function week(period:'last-week'|'this-week'):Promise<ProfileCoaching['trend']['current']>{
