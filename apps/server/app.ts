@@ -343,7 +343,7 @@ export async function createApp(options: { db: Database; rawDirectory: string; w
     const value = await assessments.export(z.uuid().parse((request.params as { id: string }).id), request.query);
     return reply.header('Content-Disposition', `attachment; filename="assessment-${value.version}.json"`).send(value);
   });
-  app.get('/api/snapshots/:id/insights', { onRequest: readerGuard }, async request => insights.read(z.uuid().parse((request.params as {id:string}).id), sessionInsightsQuery.parse(request.query)));
+  app.get('/api/snapshots/:id/insights', { onRequest: readerGuard }, async request => insights.page(z.uuid().parse((request.params as {id:string}).id), sessionInsightsQuery.parse(request.query)));
   const reports = reportService(db, analysis,workStatistics, options.reportClock);
   const workViews = workViewService(db, reports, options.reportClock);
   const profiles = capabilityProfileService(db, assessments, usage, efficiency, activity, reports, workViews, profileCoachingService(insights,waits,assessments), options.reportClock);

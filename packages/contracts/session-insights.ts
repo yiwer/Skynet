@@ -26,7 +26,11 @@ export type SessionInferences = {
 };
 export type FactContribution = {eventId:string;employeeId:string;sourceDate:string|null;snapshotId:string;value:number;added?:number;removed?:number;passed?:number;failed?:number};
 export type RecordedFact = {value:number|null;complete:boolean;evidence:InsightCitation[];contributions:FactContribution[];scope:'after-enrollment';added?:number;removed?:number;passed?:number;failed?:number};
-export const sessionInsightsQuery = z.object({ analysisId: z.uuid().optional(),version:z.string().regex(/^[a-f0-9]{64}$/).optional() }).strict();
+export const insightSections=['prompts','replies','outcomes','suggestions','codeChangesEvidence','codeChangesContributions','testsEvidence','testsContributions','commitsEvidence','commitsContributions','appliedCorrections','pendingCorrections'] as const;
+export type InsightSection=typeof insightSections[number];
+export const sessionInsightsQuery = z.object({ analysisId: z.uuid().optional(),version:z.string().regex(/^[a-f0-9]{64}$/).optional(),
+  section:z.enum(insightSections).optional(),offset:z.coerce.number().int().min(0).max(200000).default(0)
+}).strict().refine(q=>q.offset===0||!!q.version&&!!q.section,'后续洞察分页必须固定版本与部分');
 export type SessionInsights = {
   sourceAvailability?: { state:'unavailable'; reason:'missing'|'unreadable'|'hash-mismatch' };
   corrections?:{version:string;appliedIds:string[];pendingIds:string[]};
@@ -40,3 +44,13 @@ export type SessionInsights = {
   sourceState?: { version: 'native-turn-state-1'; turn: NativeTurnState };
   facts: Record<'codeChanges'|'tests'|'commits', RecordedFact>;
 };
+// Summary values and completeness describe the whole immutable insight. Array
+// completeness is given only by pages, independently for every collection.
+export type SessionInsightsPage=SessionInsights & {readingVersion:'session-insights-page-1';pages:Record<InsightSection,{total:number;offset:number;nextOffset:number|null}>};
+export function insightArrays(value:SessionInsights):Record<InsightSection,unknown[]>{
+  return {prompts:value.inferences?.prompts??[],replies:value.inferences?.replies??[],outcomes:value.inferences?.outcomes??[],suggestions:value.inferences?.suggestions??[],
+    codeChangesEvidence:value.facts.codeChanges.evidence,codeChangesContributions:value.facts.codeChanges.contributions,
+    testsEvidence:value.facts.tests.evidence,testsContributions:value.facts.tests.contributions,
+    commitsEvidence:value.facts.commits.evidence,commitsContributions:value.facts.commits.contributions,
+    appliedCorrections:value.corrections?.appliedIds??[],pendingCorrections:value.corrections?.pendingIds??[]};
+}
