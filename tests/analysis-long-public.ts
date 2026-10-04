@@ -112,13 +112,17 @@ export async function longAnalysisPublic(native: boolean) {
     const mcp=await client.callTool({name:'read_analysis',arguments:{snapshotId:archived.snapshotId}});assert.notEqual(mcp.isError,true);assert.deepEqual(JSON.parse((mcp.content as {text:string}[])[0]!.text),await(await sandbox.api(`/api/snapshots/${archived.snapshotId}/analysis`,reader.readerCredential)).json());
     browser=await chromium.launch();const context=await browser.newContext();const page=await context.newPage();await context.route('**/*',async route=>{if(new URL(route.request().url()).origin!==sandbox.origin)return route.abort();const response=await sandbox.fetchTls(route.request().url(),{method:route.request().method(),headers:await route.request().allHeaders(),body:route.request().postData()});const headers:Record<string,string>={};response.headers.forEach((v,k)=>{headers[k]=v;});await route.fulfill({status:response.status,headers,body:Buffer.from(await response.arrayBuffer())});});
     await page.goto(`${sandbox.origin}/#${archived.snapshotId}`);await page.getByLabel('个人读取凭据').fill(reader.readerCredential);await page.getByRole('button',{name:'进入存档',exact:true}).click();
-    const panel=page.getByRole('region',{name:'会话分析',exact:true});await expect(panel.getByLabel('分析处理范围')).toContainText('已完成提取');
-    await panel.getByRole('link',{name:'查看原句 · 第 2 行',exact:true}).last().click();await expect(page.getByRole('region',{name:'命中证据',exact:true})).toContainText('BEGIN_PROOF🛰');
+    const panel=page.getByRole('region',{name:'会话分析',exact:true});await expect(panel.getByRole('heading',{name:'分析已完成',exact:true})).toBeVisible();
+    const processing=panel.locator('details').filter({has:page.locator('summary').filter({hasText:'处理记录'})});
+    await processing.locator('summary').click();await expect(processing).toContainText('已完成');
+    await panel.locator('summary').filter({hasText:'原文 ·'}).click();
+    await panel.getByRole('link',{name:'第 2 行',exact:true}).last().click();await expect(page.getByRole('region',{name:'命中证据',exact:true})).toContainText('BEGIN_PROOF🛰');
     // Raw JSON anchors cannot add semantic offsets through escaped text. The separate
     // immutable-input link must jump directly to the exact quoted end of a giant event.
-    await page.getByRole('region',{name:'会话分析',exact:true}).getByRole('link',{name:'查看本次输入中的精确原句',exact:true}).last().click();
+    await page.getByRole('region',{name:'会话分析',exact:true}).locator('summary').filter({hasText:'原文 ·'}).click();
+    await page.getByRole('region',{name:'会话分析',exact:true}).getByRole('link',{name:'查看输入原句',exact:true}).last().click();
     await expect(page.getByRole('region',{name:'命中证据',exact:true})).toContainText('END_PROOF🛰');
-    await page.goto(`${sandbox.origin}/#${partial.snapshotId}`);await expect(page.getByRole('region',{name:'会话分析',exact:true})).toContainText('部分处理，不能视为完整会话分析');
+    await page.goto(`${sandbox.origin}/#${partial.snapshotId}`);await expect(page.getByRole('region',{name:'会话分析',exact:true}).getByRole('heading',{name:'分析部分完成',exact:true})).toBeVisible();
     assert.deepEqual(Buffer.from(await(await sandbox.api(`/api/snapshots/${archived.snapshotId}/raw`,reader.readerCredential)).arrayBuffer()),archived.bytes);
     if(native) {assert.ok(fixture.requests.length>3);assert.deepEqual(await readdir(jobs),[]);}
     await writeFile(join(sandbox.directory,'analysis-long-evidence.json'),JSON.stringify({native,run,partial,truncated,workerLogs,workerErrors,requests:fixture.requests.length,provider:'synthetic loopback, no Qwen calls',originalBytesUnchanged:true},null,2));

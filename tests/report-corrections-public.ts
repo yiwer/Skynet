@@ -25,6 +25,7 @@ const correctionTrace:WorkViewsExtension=async({sandbox,alpha,beta,original,sund
   assert.ok(day.items.filter((item:any)=>item.theme==='人工确认工作主题').every((item:any)=>item.themeAssociation==='manual-correction'&&item.originalTheme==='共同主题跨日延续'));
   assert.equal(day.statistics.records,2);
   await page.goto(sandbox.origin+`/#daily?employeeId=${alpha.employeeId}&date=${sunday}`);
+  await page.getByRole('region',{name:'日工作',exact:true}).locator('summary').filter({hasText:'版本与更正'}).click();
   const corrections=page.getByRole('region',{name:'分析更正',exact:true});await expect(corrections).toContainText('更正跨日主题误归类');
   await corrections.getByLabel('更正原因').fill('追加需单列的人工作说明');await corrections.getByLabel('追加说明').fill('人工说明不代表新活动或核验交付');await corrections.getByRole('button',{name:'保存说明并生成新版',exact:true}).click();
   await expect(corrections).toContainText('人工说明不代表新活动或核验交付');
@@ -58,7 +59,7 @@ const correctionTrace:WorkViewsExtension=async({sandbox,alpha,beta,original,sund
   const correctedMcp=await client.callTool({name:'read_work_view',arguments:{kind:'project',subject:displayProject,from:nextMonday,to:tuesday,revision:reclassifiedProject.revision}});assert.notEqual(correctedMcp.isError,true);
   assert.deepEqual(JSON.parse((correctedMcp.content as {text:string}[])[0]!.text),{...reclassifiedProject,refreshPending:false});
   await page.goto(sandbox.origin+'/#work?'+new URLSearchParams({kind:'project',subject:displayProject,from:nextMonday,to:tuesday,revision:String(reclassifiedProject.revision)}));
-  const workPanel=page.getByRole('region',{name:'周工作与项目',exact:true});await expect(workPanel).toContainText('来源项目：未归类项目');await workPanel.getByRole('link',{name:/核查原句/}).first().click();await expect(page.getByRole('region',{name:'命中证据',exact:true})).toContainText('未归类项目');
+  const workPanel=page.getByRole('region',{name:'周工作与项目',exact:true});await expect(workPanel).toContainText('来源项目：未归类项目');const evidenceBlock=workPanel.locator('details.report-evidence').first();await evidenceBlock.locator('summary').click();await evidenceBlock.getByRole('link').first().click();await expect(page.getByRole('region',{name:'命中证据',exact:true})).toContainText('未归类项目');
   // Force one new analysis generation; a claimed predecessor is retained, never current.
   day=await(await api(dayPath)).json();const oldRuns=await(await api(`/api/snapshots/${original.snapshotId}/analysis`)).json();
   const reanalyze={requestId:randomUUID(),kind:'reanalyze',expectedRevision:day.revision,reason:'以最新适用原件重新分析'};assert.equal((await api(dayPath+'/corrections',reanalyze)).status,202);

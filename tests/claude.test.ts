@@ -127,12 +127,14 @@ test('Claude CLI native-shaped messages cross the public collector, API and brow
 
     browser = await chromium.launch();
     const page = await browser.newPage();
-    await page.goto(origin);
+    await page.goto(origin + '/#sessions');
     await page.getByLabel('个人读取凭据').fill(reader.readerCredential);
     await page.getByRole('button', { name: '进入存档' }).click();
-    await page.getByRole('link').filter({ hasText: '/synthetic/project-a' }).click();
+    await page.getByRole('row').filter({ hasText: 'project-a' }).getByRole('link').click();
     const article = page.getByRole('article', { name: '会话详情' });
-    await expect(article.getByText('Claude 合成员工 · Claude Code CLI', { exact: true })).toBeVisible();
+    await expect(article).toContainText('Claude 合成员工 · project-a · Claude Code CLI');
+    await article.getByRole('link', { name: '时间线', exact: true }).click();
+    await expect(article.getByRole('link', { name: '时间线', exact: true })).toHaveAttribute('aria-current', 'page');
     await expect(article.getByText('合成编辑结果：false → true', { exact: false })).toBeVisible();
     await expect(article.getByText('此文本与图片同一行，不应被当成完整消息。', { exact: false })).toHaveCount(0);
     await page.screenshot({ path: join(sandbox.directory, 'claude-session.png'), fullPage: true });

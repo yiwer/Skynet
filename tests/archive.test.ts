@@ -9,6 +9,7 @@ import { createSandbox, syntheticSession } from './support.js';
 
 test('public enrollment → local hook → background → committed archive → authenticated browser survives restart', { timeout: 180_000 }, async () => {
   const sandbox = await createSandbox();
+  console.log(`Archive public fixture: ${sandbox.directory}`);
   let browser: Browser | undefined;
   try {
     browser = await chromium.launch();
@@ -96,6 +97,9 @@ test('public enrollment → local hook → background → committed archive → 
       { type: 'session_meta', payload: {} },
       { type: 'unknown_future_event' },
       null,
+      42,
+      'unsupported primitive record',
+      [],
     ];
     const malformedBytes = Buffer.from([...validEvidence, ...unsupportedEvidence].map(item => JSON.stringify(item)).join('\n') + '\n{not-json}\n');
     const malformedHash = createHash('sha256').update(malformedBytes).digest('hex');
@@ -133,50 +137,60 @@ test('public enrollment → local hook → background → committed archive → 
     assert.match(status['hook-gap.json'].error, /could not be queued/);
 
     const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
-    await page.goto(origin);
+    await page.goto(origin + '/#sessions');
     await page.getByLabel('个人读取凭据').fill(reader.readerCredential);
     await page.getByRole('button', { name: '进入存档' }).click();
     const detailRegion = page.getByRole('article', { name: '会话详情' });
     await page.route(`**/api/snapshots/${id}?*`, route => route.fulfill({ status: 503, body: 'Temporary synthetic failure' }), { times: 1 });
-    await page.getByRole('link').filter({ hasText: '合成员工甲' }).click();
-    await expect(detailRegion.getByRole('alert')).toBeVisible();
-    await expect(detailRegion.getByRole('status')).toHaveCount(0);
-    await detailRegion.getByRole('button', { name: '重试读取会话' }).click();
+    const archivedRow = page.getByRole('row').filter({ hasText: '合成员工甲' });
+    await archivedRow.getByRole('link').click();
+    await expect(page.getByRole('main').getByRole('alert')).toBeVisible();
+    await expect(page.getByRole('status')).toHaveCount(0);
+    await page.getByRole('button', { name: '重试读取会话' }).click();
+    await detailRegion.getByRole('link', { name: '时间线', exact: true }).click();
     await page.getByText('合成工具结果：3 tests passed', { exact: false }).waitFor();
-    assert.equal(new URL(page.url()).hash, `#${id}`, 'retry keeps the selected snapshot');
-    await expect(detailRegion.getByRole('alert')).toHaveCount(0);
-    // Refresh must also reload the selected detail and recover from an independent network failure.
+    assert.equal(new URL(page.url()).hash, `#${id}?view=timeline`, 'retry keeps the selected snapshot');
+    await expect(page.getByRole('button', { name: '重试读取会话' })).toHaveCount(0);
+    // Refresh the current archive list and reopen the same snapshot through its
+    // visible row; a second, independent network failure must remain recoverable.
+    await detailRegion.getByRole('navigation', { name: '位置' }).getByRole('link', { name: '会话', exact: true }).click();
+    await page.getByRole('button', { name: '刷新存档' }).click();
     await page.route(`**/api/snapshots/${id}?*`, route => route.abort('failed'), { times: 1 });
-    await page.getByRole('button', { name: '刷新存档' }).click();
-    await expect(detailRegion.getByRole('alert')).toBeVisible();
-    await expect(detailRegion.getByRole('status')).toHaveCount(0);
-    await page.getByRole('button', { name: '刷新存档' }).click();
+    await archivedRow.getByRole('link').click();
+    await expect(page.getByRole('main').getByRole('alert')).toBeVisible();
+    await expect(page.getByRole('status')).toHaveCount(0);
+    await page.getByRole('button', { name: '重试读取会话' }).click();
+    await detailRegion.getByRole('link', { name: '时间线', exact: true }).click();
     await page.getByText('合成工具结果：3 tests passed', { exact: false }).waitFor();
-    assert.equal(new URL(page.url()).hash, `#${id}`);
-    await expect(detailRegion.getByRole('alert')).toHaveCount(0);
+    assert.equal(new URL(page.url()).hash, `#${id}?view=timeline`);
+    await expect(page.getByRole('button', { name: '重试读取会话' })).toHaveCount(0);
     assert.equal(await page.evaluate(() => (window as any).archiveInjected), undefined, 'source content is inert text');
-    await page.getByText('Desktop 原生能力待验证', { exact: false }).waitFor();
-    const exports = page.getByRole('region', { name: '导出与会话找回' });
+    const exports = page.getByRole('complementary', { name: '会话数据与存档' });
     await page.route(`**/api/snapshots/${id}/readable`, route => route.fulfill({ status: 503, body: 'Synthetic export failure' }), { times: 1 });
-    await exports.getByRole('button', { name: '导出完整可读材料' }).click();
-    await expect(exports.getByRole('alert')).toBeVisible();
+    await exports.getByRole('button', { name: '导出文本', exact: true }).click();
+    const exportError = exports.getByRole('alert').filter({ hasText: '暂时无法读取，请稍后重试。' });
+    await expect(exportError).toBeVisible();
     const readableDownload = page.waitForEvent('download');
-    await exports.getByRole('button', { name: '导出完整可读材料' }).click();
+    await exports.getByRole('button', { name: '导出文本', exact: true }).click();
     const readable = await readableDownload;
     assert.equal(readable.suggestedFilename(), `${id}.txt`);
     assert.ok((await readFile((await readable.path())!, 'utf8')).includes(source.bytes.toString('utf8')), 'browser readable export retains every source line');
-    await expect(exports.getByRole('alert')).toHaveCount(0);
+    await expect(exportError).toHaveCount(0);
+    await detailRegion.getByRole('link', { name: '找回此会话', exact: true }).click();
+    await page.getByRole('radio', { name: /恢复资料包/ }).check();
+    await page.getByRole('button', { name: '下一步 →', exact: true }).click();
     const recoveryDownload = page.waitForEvent('download');
-    await exports.getByRole('button', { name: '下载恢复包' }).click();
+    await page.getByRole('button', { name: '下载恢复资料包', exact: true }).click();
     const recovery = await recoveryDownload;
     assert.equal(recovery.suggestedFilename(), `${id}.skynet-recovery.json`);
     const bundle = JSON.parse(await readFile((await recovery.path())!, 'utf8'));
     assert.deepEqual(Buffer.from(bundle.artifact.data, 'base64'), source.bytes);
-    await exports.getByText('当前来源或快照不满足已测恢复准备条件', { exact: false }).waitFor();
+    assert.notEqual(detail.recovery.preparation, 'candidate', 'synthetic Desktop data does not claim native recovery support');
     await page.screenshot({ path: join(sandbox.directory, 'archive-desktop.png'), fullPage: true });
     await page.setViewportSize({ width: 375, height: 900 });
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true);
     await page.screenshot({ path: join(sandbox.directory, 'archive-mobile.png'), fullPage: true });
+    await page.getByRole('button', { name: '打开导航', exact: true }).click();
     await page.getByRole('button', { name: '退出', exact: true }).click();
     await page.getByRole('button', { name: '进入存档' }).waitFor();
     assert.equal(await page.getByText('合成工具结果：3 tests passed', { exact: false }).count(), 0);
