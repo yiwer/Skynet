@@ -115,8 +115,11 @@ export function waitsService(db: Database, raw: RawStore, clock: () => Date = ()
         const parallel = parallelFor(interval);
         interval.parallel = parallel.length ? 'observed' : 'not-observed'; interval.parallelEvidence = parallel;
       }
-      const replySupport = [...selected].some(original => original.facts.boundaries.some(boundary => boundary.kind === 'completed' && boundary.turnId && boundary.timestamp)) ? 'observed' as const : 'unknown' as const;
-      const unknownReasons = [...new Set([...selected].flatMap(({ record, facts }) => [
+      // Earlier immutable prefixes remain evidence, but a complete continuation
+      // can resolve their temporary coverage gap for the current report.
+      const coverage = [...new Map([...selected].map(original => [original.sessionId, original])).values()];
+      const replySupport = coverage.some(original => original.facts.boundaries.some(boundary => boundary.kind === 'completed' && boundary.turnId && boundary.timestamp)) ? 'observed' as const : 'unknown' as const;
+      const unknownReasons = [...new Set(coverage.flatMap(({ record, facts }) => [
         ...(!facts.boundaries.some(boundary => boundary.kind === 'completed' && boundary.turnId && boundary.timestamp) ? ['部分来源未记录可识别的本轮结束'] : []),
         ...(record.manifest.capture?.partialLine || record.manifest.capture?.gaps.length || record.manifest.capture?.compacted ? ['来源材料存在压缩或采集缺口'] : [])]))];
       if (!selected.size) unknownReasons.push('尚无所选范围的来源材料');

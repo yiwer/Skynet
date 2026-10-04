@@ -17,12 +17,12 @@ test('duplicate and overlapping native lifecycle events cannot invent waits; inc
     const time = (ms: number) => new Date(base + ms).toISOString();
     const msg = (role: string, ms: number) => ({ type: 'response_item', timestamp: time(ms), payload: { type: 'message', role, content: [{ type: role === 'user' ? 'input_text' : 'output_text', text: `边界 ${ms}` }] } });
     const event = (type: string, turn_id: string, ms: number, extra = {}) => ({ type: 'event_msg', timestamp: time(ms), payload: { type, turn_id, ...extra } });
-    const upload = async (rows: unknown[], source = 'codex-cli', id = randomUUID()) => {
+    const upload = async (rows: unknown[], source = 'codex-cli', id = randomUUID(), project = '/synthetic/edges') => {
       const records = source === 'codex-cli' ? rows.map((row: any) => row.type === 'session_meta' ? { ...row, payload: { ...row.payload, id } } : row) : rows;
       const raw = Buffer.from(records.map(row => JSON.stringify(row)).join('\n') + '\n');
       assert.ok([200,201].includes((await api('/api/chunks/' + digest(raw), raw, device.deviceCredential, 'PUT')).statusCode));
       const result = await api('/api/snapshots', { protocolVersion: 1, sourceSessionId: id, source, sourceVersion: source === 'codex-cli' ? '0.160.0' : '2.1.281',
-        sourceOs: process.platform, project: '/synthetic/edges', hash: digest(raw), byteLength: raw.length, qualifiedAt: time(0), capability: 'unverified' }, device.deviceCredential, 'POST');
+        sourceOs: process.platform, project, hash: digest(raw), byteLength: raw.length, qualifiedAt: time(0), capability: 'unverified' }, device.deviceCredential, 'POST');
       assert.equal(result.statusCode, 200, result.body); return { snapshotId: result.json().snapshotId as string, raw };
     };
     const read = async (id: string) => { const response = await api('/api/waits?snapshotId=' + id); assert.equal(response.statusCode, 200, response.body); return response.json(); };
@@ -61,6 +61,13 @@ test('duplicate and overlapping native lifecycle events cannot invent waits; inc
     const simultaneousA = await read(duplicated.snapshotId), simultaneousB = await read(overlap.snapshotId);
     assert.equal(simultaneousA.intervals[0].parallel, 'observed'); assert.equal(simultaneousB.intervals[0].parallel, 'observed');
     assert.equal(simultaneousA.intervals[0].durationMs, 600000); assert.equal(simultaneousB.intervals[0].durationMs, 600000);
+    const growingId = randomUUID(), prefix = [header, msg('user', 0), event('task_started', 'growing', 1), msg('assistant', 10)];
+    const growing = await upload(prefix, 'codex-cli', growingId, '/synthetic/progressive');
+    const progressPath = '/api/waits?period=since-enrollment&project=%2Fsynthetic%2Fprogressive';
+    assert.equal((await api(progressPath)).json().summary.replyWaitMs, null);
+    await upload([...prefix, event('task_complete', 'growing', 1000), msg('user', 601000)], 'codex-cli', growingId, '/synthetic/progressive');
+    assert.equal((await api(progressPath)).json().summary.replyWaitMs, 600000, 'a complete continuation resolves the old incomplete input, without rewriting its original');
+    assert.equal((await read(growing.snapshotId)).summary.replyWaitMs, null);
     assert.equal((await api('/api/waits?snapshotId=' + duplicated.snapshotId + '&offset=25')).statusCode, 400, 'paging needs a frozen version');
     assert.equal((await api('/api/waits?snapshotId=' + duplicated.snapshotId + '&version=' + first.version + '&lines=7')).json().intervals.length, 1);
     assert.equal((await api('/api/waits?snapshotId=' + duplicated.snapshotId + '&version=' + first.version + '&lines=2')).json().intervals.length, 0);

@@ -34,8 +34,14 @@ test('waiting report, conversation labels, OAuth MCP and export read one frozen 
     const committed = await sandbox.api('/api/snapshots', device.deviceCredential, json({ protocolVersion: 1, sourceSessionId: sessionId, source: 'codex-cli', sourceVersion: '0.160.0',
       sourceOs: process.platform, project: '/synthetic/waiting-journey', hash: digest(raw), byteLength: raw.length, qualifiedAt: time(0), capability: 'unverified' }));
     assert.equal(committed.status, 200); const snapshotId = (await committed.json()).snapshotId;
+    const otherId = randomUUID(), parallelRaw = Buffer.from(JSON.stringify({ type: 'user', uuid: randomUUID(), sessionId: otherId,
+      timestamp: time(60000), message: { role: 'user', content: '另一项目期间活动' } }) + '\n');
+    assert.equal((await sandbox.api('/api/chunks/' + digest(parallelRaw), device.deviceCredential, { method: 'PUT', headers: { 'Content-Type': 'application/octet-stream' }, body: parallelRaw as any })).status, 201);
+    assert.equal((await sandbox.api('/api/snapshots', device.deviceCredential, json({ protocolVersion: 1, sourceSessionId: otherId, source: 'claude-code-cli', sourceVersion: '2.1.281',
+      sourceOs: process.platform, project: '/synthetic/parallel-project', hash: digest(parallelRaw), byteLength: parallelRaw.length, qualifiedAt: time(0), capability: 'unverified' }))).status, 200);
     const query = { period: 'since-enrollment' }, first = await (await api('/api/waits?' + params(query))).json();
     assert.equal(first.intervals.length, 25); assert.equal(first.total, 26); assert.equal(first.nextOffset, 25);
+    assert.equal(first.intervals[0].parallel, 'observed');
     const fixed = { ...query, version: first.version }, second = await (await api('/api/waits?' + params({ ...fixed, offset: 25 }))).json();
     const exported = await (await api('/api/waits/export?' + params(fixed))).json();
     assert.deepEqual(exported.intervals, [...first.intervals, ...second.intervals]);
@@ -76,6 +82,7 @@ test('waiting report, conversation labels, OAuth MCP and export read one frozen 
     await page.getByRole('link', { name: '查看对话', exact: true }).first().click();
     await expect(page.getByLabel('对话阅读')).toBeVisible();
     await expect(page.getByLabel('等待回复标记').first()).toContainText('11 分 40 秒');
+    await expect(page.getByLabel('等待回复标记').first()).toContainText('期间在其他会话中活动');
     await page.getByLabel('等待回复标记').first().locator('summary').click();
     await expect(page.getByLabel('等待回复标记').first().getByRole('link', { name: '轮次结束原件' })).toBeVisible();
     await page.screenshot({ path: join(directory, 'waits-conversation.png'), animations: 'disabled' });
@@ -95,6 +102,7 @@ test('waiting report, conversation labels, OAuth MCP and export read one frozen 
       await page.goto(sandbox.origin + '/' + first.intervals[0].end.conversationPath + '&waitVersion=' + first.version);
       const mark = page.getByLabel('等待回复标记').first();
       await expect(mark).toContainText('11 分 40 秒'); await mark.locator('summary').click();
+      await expect(mark).toContainText('期间在其他会话中活动');
       await expect(mark.getByRole('link', { name: '轮次结束原件' })).toBeVisible();
       assert.equal(await page.evaluate(() => document.documentElement.scrollHeight <= innerHeight && document.documentElement.scrollWidth <= innerWidth), true);
       const path = join(directory, `waits-conversation-${width}.png`); await page.screenshot({ path, animations: 'disabled' }); screenshots.push(path);

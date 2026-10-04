@@ -11,7 +11,7 @@ const timestamp = (value: string | null) => value ? new Date(value).toLocaleStri
 export function WaitMark({ wait }: { wait: ReplyWait }) {
   return <details className="conversation-wait" data-long={wait.long || undefined} aria-label="等待回复标记"><summary>
     <span>等待回复 · {waitDuration(wait.durationMs)}</span>{wait.long && <span className="wait-long">长等待</span>}
-    {wait.parallel === 'observed' && <span>期间有并行活动</span>}
+    {wait.parallel === 'observed' && <span>期间在其他会话中活动</span>}
     </summary><div className="wait-evidence">
       <span>{timestamp(wait.startedAt)} → {timestamp(wait.endedAt)}</span>{wait.reason && <span>{wait.reason}</span>}
       {wait.start && <a href={wait.start.webPath}>轮次结束原件</a>}<a href={wait.end.webPath}>用户消息原件</a>
