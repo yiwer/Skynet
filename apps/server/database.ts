@@ -134,11 +134,22 @@ const baseMigration = `
       complete boolean NOT NULL,unrecognized_lines integer NOT NULL,partial_line boolean NOT NULL,
       checked_at timestamptz NOT NULL DEFAULT now(),UNIQUE(snapshot_id,version)
     );
-    CREATE OR REPLACE VIEW effective_event_origins AS SELECT o.event_id,o.snapshot_id,o.line,o.block,o.employee_id,o.device_id,o.project,
-        o.source,o.source_session_id,o.role,o.timestamp,o.source_date,COALESCE(c.context,o.context) AS context,o.material_id,o.text_offset,
-        o.context AS base_context,COALESCE(c.revision,0) AS qualification_revision,c.proof_snapshot_id,c.proof_line,c.proof_block,c.enrolled_at AS proof_enrolled_at
-        FROM archive_event_origins o LEFT JOIN LATERAL(SELECT * FROM event_qualifications WHERE event_id=o.event_id ORDER BY revision DESC LIMIT 1)c ON true
-        WHERE EXISTS(SELECT 1 FROM event_integrity i WHERE i.event_id=o.event_id AND i.version='original-utf8-1' AND i.valid);
+    -- Keep ordinary and qualified origins disjoint. Resolving the latest proof
+    -- as a set avoids one ordered qualification lookup for every archived event.
+    CREATE OR REPLACE VIEW effective_event_origins AS
+      SELECT o.event_id,o.snapshot_id,o.line,o.block,o.employee_id,o.device_id,o.project,
+        o.source,o.source_session_id,o.role,o.timestamp,o.source_date,o.context,o.material_id,o.text_offset,
+        o.context AS base_context,0::bigint AS qualification_revision,NULL::uuid AS proof_snapshot_id,
+        NULL::integer AS proof_line,NULL::integer AS proof_block,NULL::timestamptz AS proof_enrolled_at
+      FROM archive_event_origins o
+      WHERE NOT EXISTS(SELECT 1 FROM event_qualifications c WHERE c.event_id=o.event_id)
+        AND EXISTS(SELECT 1 FROM event_integrity i WHERE i.event_id=o.event_id AND i.version='original-utf8-1' AND i.valid)
+      UNION ALL
+      SELECT o.event_id,o.snapshot_id,o.line,o.block,o.employee_id,o.device_id,o.project,
+        o.source,o.source_session_id,o.role,o.timestamp,o.source_date,c.context,o.material_id,o.text_offset,
+        o.context AS base_context,c.revision AS qualification_revision,c.proof_snapshot_id,c.proof_line,c.proof_block,c.enrolled_at AS proof_enrolled_at
+      FROM archive_event_origins o JOIN (SELECT DISTINCT ON(event_id) * FROM event_qualifications ORDER BY event_id,revision DESC)c ON c.event_id=o.event_id
+      WHERE EXISTS(SELECT 1 FROM event_integrity i WHERE i.event_id=o.event_id AND i.version='original-utf8-1' AND i.valid);
   `;
 
 export async function migrate(db: Database) {

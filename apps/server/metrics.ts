@@ -11,8 +11,10 @@ import { inputIntegrityVersion } from './evidence-integrity.js';
 import { materialSource } from './material-provenance.js';
 import { metricInputBatch, type MetricInputFacts } from './metric-inputs.js';
 import { attributionRevisions } from './qualification.js';
+import { currentMetricInputs } from './metric-current-inputs.js';
 
 const catalogVersion = `recorded-metrics-3/${statisticsExtractorVersion}`;
+const employeeNames = new Intl.Collator('zh-CN');
 const definition = '仅统计已验证原件中接入后、按北京时间来源日期归期的活动。eventId 去重；已验证服务器恢复链归为同一会话，未确认副本保持独立。员工和项目沿用每条活动的原始归属。会话数为所选范围内有业务事件的去重会话数，跨日或多人参与的会话不可直接相加；仅有原生 Token 记录的日期保留用量，不增加会话、轮次或调用。轮次、调用和已知 Token 可相加。Token 未知单列，不当作零或参加比值。';
 const limits = { snapshots: 20000, events: 100000, rawBytes: 128 * 1024 * 1024, sessions: 10000, exportBytes: 16 * 1024 * 1024 };
 const bounded = () => new HttpError(413, '指标范围超过单次计算上限，请缩小日期、员工或项目范围；未返回截断汇总');
@@ -98,11 +100,14 @@ function summarize(slices: Slice[]): SessionMetrics[] {
       unknownReasons: [...new Set([...reasons, ...(values.some(value => !value) ? ['用量基线或重复记录存在未知/冲突'] : []),
         ...(values.some(value => value && value.input === null) ? ['输入 Token 的原生分项不齐全'] : []),
         ...(values.some(value => value && value.output === null) ? ['输出 Token 未上报'] : [])])] };
-  }).sort((a, b) => a.employee.localeCompare(b.employee, 'zh-CN') || a.employeeId.localeCompare(b.employeeId)
+  }).sort((a, b) => employeeNames.compare(a.employee, b.employee) || a.employeeId.localeCompare(b.employeeId)
     || a.sessionId.localeCompare(b.sessionId) || a.project.localeCompare(b.project));
 }
 
 export function metricsService(db: Database, raw: RawStore, clock: () => Date = () => new Date()) {
+  // Keep only references to immutable saved results, never raw bytes or mutable
+  // payloads. A hit still checks the complete semantic key and every raw object.
+  const currentResults = new Map<string, { inputs: string; version: string; originals: { device: string; hash: string }[] }>();
   async function resolveScope(q: MetricsQuery, client: Pick<Database, 'query'>): Promise<MetricsScope> {
     const today = beijingDate(clock()); let from: string, to: string;
     if (q.period === 'custom') { from = q.from!; to = q.to!; }
@@ -134,6 +139,29 @@ export function metricsService(db: Database, raw: RawStore, clock: () => Date = 
       const scope = await resolveScope(q, client), scopeKey = digest(JSON.stringify(scope));
       const lock = (await client.query('SELECT pg_try_advisory_xact_lock(hashtextextended($1,7402138)) AS locked', [scopeKey])).rows[0];
       if (!lock.locked) throw new HttpError(409, '该指标范围正在计算，请稍后重试；固定版本仍可读取');
+      const currentKey = digest(JSON.stringify([catalogVersion, scope, requestSelection(q)]));
+      const reusable = full ? undefined : currentResults.get(currentKey);
+      if (reusable && await currentMetricInputs(client) === reusable.inputs) {
+        let next = 0, readable = true;
+        await Promise.all(Array.from({ length: Math.min(4, reusable.originals.length) }, async () => {
+          while (next < reusable.originals.length) {
+            const original = reusable.originals[next++]!;
+            try { await raw.read(original.device, original.hash); }
+            catch { readable = false; }
+          }
+        }));
+        if (readable) {
+          const saved = (await client.query('SELECT payload FROM metric_revisions WHERE version=$1', [reusable.version])).rows[0];
+          if (saved) { await client.query('COMMIT'); return saved.payload; }
+        }
+      }
+      currentResults.delete(currentKey);
+      const checkedOriginals = new Map<string, { device: string; hash: string }>();
+      let originalsReadable = true;
+      const readOriginal = async (device: string, hash: string) => {
+        try { const bytes = await raw.read(device, hash); checkedOriginals.set(`${device}/${hash}`, { device, hash }); return bytes; }
+        catch (error) { originalsReadable = false; throw error; }
+      };
       const events = (await client.query(`SELECT o.event_id,o.snapshot_id,o.employee_id,e.name AS employee,o.device_id,o.source,
         o.source_session_id,o.project,o.source_date,o.role,o.line,o.block,o.material_id,o.qualification_revision,o.proof_snapshot_id
         FROM effective_event_origins o JOIN employees e ON e.id=o.employee_id
@@ -257,8 +285,21 @@ export function metricsService(db: Database, raw: RawStore, clock: () => Date = 
         else if(valid)valid=firstNative.get(nativeKey(record.device_id,record.source,record.source_session_id))===record.id&&(!capture||capture.change==='initial');
         baselineProofs.set(record.id,valid);return valid;
       }
-      let totalBytes = 0; const rawInputs: unknown[] = [];
+      let totalBytes = candidates.reduce((sum, record) => sum + record.manifest.byteLength, 0);
+      if (totalBytes > limits.rawBytes) throw bounded();
+      const rawInputs: unknown[] = [];
       const rawBuffers = new Map<string, Buffer>();
+      // Fresh verification belongs to this request. Bound filesystem work while
+      // keeping each original's failure separate and processing facts in order.
+      const originals = new Map<string, { content: Buffer } | { error: unknown }>();
+      let nextOriginal = 0;
+      await Promise.all(Array.from({ length: Math.min(4, candidates.length) }, async () => {
+        while (nextOriginal < candidates.length) {
+          const record = candidates[nextOriginal++]!;
+          try { originals.set(record.id, { content: await readOriginal(record.device_id, record.hash) }); }
+          catch (error) { originals.set(record.id, { error }); }
+        }
+      }));
       const materialized = new Map<string, MetricInputFacts>();
       const inputBatch = await metricInputBatch(client, candidates.map(record => ({ snapshotId: record.id, attributionRevision: record.attribution_revision,
         hash: record.hash, source: record.source, sourceVersion: record.manifest.sourceVersion, manifest: record.manifest, baselineContinuity: baselineContinuity(record) })), full);
@@ -279,11 +320,12 @@ export function metricsService(db: Database, raw: RawStore, clock: () => Date = 
         const relevant = sliceGroups.get(groupKey) ?? [];
         const ownerSelected = (!q.employeeId || record.employee_id === q.employeeId) && (!q.source || record.source === q.source)
           && (q.project === undefined || record.manifest.project === q.project);
-        totalBytes += record.manifest.byteLength; if (totalBytes > limits.rawBytes) throw bounded();
         rawInputs.push([record.id, record.hash, record.manifest.sourceVersion, record.enrolled_at?.toISOString(), record.provenance]);
         let parsed: MetricInputFacts, content: Buffer;
         try {
-          content = await raw.read(record.device_id, record.hash);
+          const original = originals.get(record.id)!;
+          if ('error' in original) throw original.error;
+          content = original.content;
           parsed = inputBatch.read({ snapshotId: record.id, attributionRevision: record.attribution_revision,
             bytes: content, hash: record.hash, source: record.source, sourceVersion: record.manifest.sourceVersion, manifest: record.manifest, baselineContinuity: baselineContinuity(record) });
         }
@@ -353,7 +395,7 @@ export function metricsService(db: Database, raw: RawStore, clock: () => Date = 
         let content = rawBuffers.get(key);
         if (!content) {
           totalBytes += length; if (totalBytes > limits.rawBytes) throw bounded();
-          try { content = await raw.read(device, hash); rawBuffers.set(key, content); }
+          try { content = await readOriginal(device, hash); rawBuffers.set(key, content); }
           catch { continue; } // Validated event remains an observed row; completeness is reported separately.
         }
         let facts = materialized.get(key);
@@ -398,7 +440,7 @@ export function metricsService(db: Database, raw: RawStore, clock: () => Date = 
       const byEmployee = new Map<string, SessionMetrics[]>();
       for (const session of sessions) byEmployee.set(session.employeeId, [...byEmployee.get(session.employeeId) ?? [], session]);
       let employees: MetricsPage['employees'] = [...new Map(sessions.map(s => [s.employeeId, s.employee])).entries()]
-        .sort((a, b) => a[1].localeCompare(b[1], 'zh-CN') || a[0].localeCompare(b[0]))
+        .sort((a, b) => employeeNames.compare(a[1], b[1]) || a[0].localeCompare(b[0]))
         .map(([employeeId, employee]) => ({ employeeId, employee, ...total(byEmployee.get(employeeId)!) }));
       const sources = [...new Set(sessions.map(s => s.source))].sort().map(source => ({ source, ...total(sessions.filter(s => s.source === source)) }));
       const unscoped = (await client.query(`SELECT s.id,s.employee_id,s.committed_at,p.complete,p.revision FROM (
@@ -418,7 +460,7 @@ export function metricsService(db: Database, raw: RawStore, clock: () => Date = 
         const unknownReasons = [...new Set([...mine.flatMap(row => row.unknownReasons), ...failures.map(row => row.reason), ...(unresolved.length ? ['存在来源日期不能确定的原件缺口，范围完整性未知'] : [])])].sort();
         return { ...employee, ...(unscopedSources ? { inputTokens: null, outputTokens: null } : {}), unscopedSources,
           sourceInputsComplete: !unscopedSources && mine.every(row => row.sourceInputsComplete), unknownReasons };
-      }).sort((a, b) => a.employee.localeCompare(b.employee, 'zh-CN') || a.employeeId.localeCompare(b.employeeId));
+      }).sort((a, b) => employeeNames.compare(a.employee, b.employee) || a.employeeId.localeCompare(b.employeeId));
       const unknownReasons = [...new Set([...sessions.flatMap(s => s.unknownReasons), ...discoveryGaps, ...(unscoped.length ? ['存在来源日期不能确定的原件缺口，范围完整性未知'] : [])])].sort();
       const dataAsOf = new Date(Math.max(0, ...candidates.map(s => s.committed_at.getTime()), ...unscoped.map(s => (s.committed_at as Date).getTime()))).toISOString();
       const inputVersion = digest(JSON.stringify([events, rawInputs, unscoped]));
@@ -436,7 +478,13 @@ export function metricsService(db: Database, raw: RawStore, clock: () => Date = 
         if (Buffer.byteLength(JSON.stringify(payload)) > limits.exportBytes) throw bounded();
         await client.query('INSERT INTO metric_revisions(version,scope_key,revision,request,payload) VALUES($1,$2,$3,$4,$5)', [version, scopeKey, revision, requestSelection(q), payload]);
       }
-      await client.query('COMMIT'); return payload;
+      const inputs = originalsReadable && checkedOriginals.size <= limits.snapshots ? await currentMetricInputs(client) : undefined;
+      await client.query('COMMIT');
+      if (inputs) {
+        currentResults.set(currentKey, { inputs, version: payload.version, originals: [...checkedOriginals.values()] });
+        while (currentResults.size > 4) currentResults.delete(currentResults.keys().next().value!);
+      }
+      return payload;
     } catch (error) { await client.query('ROLLBACK'); throw error; } finally { client.release(); }
   }
   async function load(input: unknown): Promise<{ q: MetricsQuery; payload: MetricsPage }> {

@@ -31,6 +31,8 @@ const timings: number[] = [];
 let uploaded = 0, bytesTotal = 0;
 const report: Record<string, unknown> = {
   kind: 'metrics-foundation-performance-not-full-AC32', commit: execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim(),
+  workingTreeDirty: Boolean(execFileSync('git', ['status', '--porcelain'], { encoding: 'utf8' }).trim()),
+  workingDiffSha256: digest(execFileSync('git', ['diff', 'HEAD'])),
   measuredAt: new Date().toISOString(), node: process.version, platform: process.platform,
   cpu: cpus()[0]?.model, logicalCpu: cpus().length, memoryBytes: totalmem(),
   dataset: { employees: 10, sessions: 1000, businessEvents: 80000, userTurns: 20000, toolCalls: 20000,
@@ -84,11 +86,9 @@ try {
     assert.deepEqual([result.totals.sessions, result.totals.userTurns, result.totals.toolCalls, result.totals.inputTokens, result.totals.outputTokens], [1000, 20000, 20000, 2000000, 500000]);
     if (!initial) initial = result; else assert.deepEqual(result, initial, 'unchanged live reads retain the same result version');
     console.log(JSON.stringify({ read: iteration, ms: Math.round(timings.at(-1)!), sessions: result.totals.sessions }));
-    if (!iteration) assert.ok(timings[0]! <= 3000, `First read ${Math.round(timings[0]!)}ms exceeds 3000ms`);
   }
   const warm = timings.slice(1).sort((a, b) => a - b);
   report.subsequentP50Ms = warm[4]; report.subsequentP95Ms = warm[9];
-  assert.ok(warm[9]! <= 1000, `Subsequent P95 ${Math.round(warm[9]!)}ms exceeds 1000ms`);
   assert.deepEqual(await checked('/api/metrics/recompute', reader, json({ period: 'since-enrollment' })), initial, 'full recomputation preserves the frozen result');
   const scoped = await Promise.all(devices.slice(0, 2).map(device => checked(path + '&employeeId=' + device.employeeId, reader)));
   for (const result of scoped) assert.deepEqual([result.totals.sessions, result.totals.userTurns, result.totals.inputTokens], [100, 2000, 200000]);
@@ -102,7 +102,12 @@ try {
   assert.deepEqual([next.totals.sessions, next.totals.userTurns, next.totals.toolCalls, next.totals.inputTokens, next.totals.outputTokens], [1000, 20001, 20000, 2000100, 500025]);
   assert.deepEqual(await checked(path + '&version=' + initial!.version, reader), initial, 'later input cannot overwrite an earlier fixed result');
   assert.deepEqual(await checked('/api/metrics/recompute', reader, json({ period: 'since-enrollment' })), next);
-  report.correctness = 'known totals, concurrent scopes, recomputation, changed input and historical version passed'; report.status = 'passed';
+  report.correctness = 'known totals, concurrent scopes, recomputation, changed input and historical version passed';
+  // Collect the full distribution and verify result semantics even when the
+  // first sample is slow. Threshold failures remain failures, not skipped work.
+  assert.ok(timings[0]! <= 3000, `First read ${Math.round(timings[0]!)}ms exceeds 3000ms`);
+  assert.ok(warm[9]! <= 1000, `Subsequent P95 ${Math.round(warm[9]!)}ms exceeds 1000ms`);
+  report.status = 'passed';
 } catch (error) { report.status = 'failed'; report.error = String(error); throw error; }
 finally {
   Object.assign(report, { uploaded, readsMs: timings, firstReadMs: timings[0], sandboxDirectory: sandbox.directory });
