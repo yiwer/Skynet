@@ -12,6 +12,7 @@
     "start": "node dist/apps/server/main.js",
     "collector": "tsx apps/collector/cli.ts",
     "provision": "tsx apps/server/provision.ts",
+    "calibration": "tsx apps/operations/calibration.ts",
     "test": "tsx tests/run.ts",
     "test:metrics-performance": "tsx tests/metrics-performance.ts",
     "demo": "tsx tests/demo.ts",
