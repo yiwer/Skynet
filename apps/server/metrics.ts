@@ -3,14 +3,16 @@ import { HttpError } from './identities.js';
 import type { RawStore } from './raw-store.js';
 import type { Manifest, Source } from '../../packages/contracts/archive.js';
 import type { Provenance } from '../../packages/contracts/provenance.js';
-import { metricsQuerySchema, type MetricsQuery, type MetricsPage, type MetricsScope, type MetricTotals, type SessionMetrics, type MetricCatalog } from '../../packages/contracts/metrics.js';
-import { nativeStatistics, statisticsExtractorVersion, type TokenComponents } from '../../packages/native-statistics.js';
+import { metricsQuerySchema, coverageMetricsQuerySchema, type MetricsQuery, type MetricsPage, type MetricsScope, type MetricTotals, type SessionMetrics, type MetricCatalog } from '../../packages/contracts/metrics.js';
+import { statisticsExtractorVersion, type TokenComponents } from '../../packages/native-statistics.js';
 import { beijingDate } from '../../packages/contracts/reports.js';
 import { monday, addDays } from '../../packages/contracts/work-views.js';
-import { primaryInputCoverage, inputIntegrityVersion } from './evidence-integrity.js';
+import { inputIntegrityVersion } from './evidence-integrity.js';
 import { materialSource } from './material-provenance.js';
+import { materializeMetricInput } from './metric-inputs.js';
+import { attributionRevisionSql } from './qualification.js';
 
-const catalogVersion = `recorded-metrics-2/${statisticsExtractorVersion}`;
+const catalogVersion = `recorded-metrics-3/${statisticsExtractorVersion}`;
 const definition = '仅统计已验证原件中接入后、按北京时间来源日期归期的活动。eventId 去重；已验证服务器恢复链归为同一会话，未确认副本保持独立。员工和项目沿用每条活动的原始归属。会话数为所选范围内有业务事件的去重会话数，跨日或多人参与的会话不可直接相加；仅有原生 Token 记录的日期保留用量，不增加会话、轮次或调用。轮次、调用和已知 Token 可相加。Token 未知单列，不当作零或参加比值。';
 const limits = { snapshots: 20000, events: 100000, rawBytes: 128 * 1024 * 1024, sessions: 10000, exportBytes: 16 * 1024 * 1024 };
 const bounded = () => new HttpError(413, '指标范围超过单次计算上限，请缩小日期、员工或项目范围；未返回截断汇总');
@@ -22,7 +24,7 @@ function boundedPage<T>(value: T): T {
 export function readMetricCatalog(): MetricCatalog {
   return { version: catalogVersion, timeZone: 'Asia/Shanghai', definitions: [
     { key: 'sessions', label: '会话', definition: '有已确认接入后业务事件的会话；仅有 Token 元数据的日期不增加会话数。相同原生身份续聊及服务器核验的恢复链合并，子会话保持独立。', origin: '原件 · 确定性' },
-    { key: 'userTurns', label: '用户轮次', definition: '用户提交的消息；按原件行去重，不包含工具结果、系统消息或压缩摘要。', origin: '原件 · 确定性' },
+    { key: 'userTurns', label: '用户轮次', definition: '用户提交的消息；按原件行去重，不包含工具结果、系统消息、压缩摘要或单个完整机器环境封套。混合用户正文保留。', origin: '原件 · 确定性' },
     { key: 'toolCalls', label: '工具调用', definition: '已归属的 Agent 工具请求 block 数；重复上传、确认丢失和恢复复制不增加。', origin: '原件 · 确定性' },
     { key: 'inputTokens', label: '输入 Token', definition: '只使用已支持版本的原生用量。Codex 累计计数取有基线的非负差值，缓存输入是输入子集；Claude 普通输入、缓存读取和缓存写入相加，同 message.id 仅计一次。', origin: '原件 · 确定性' },
     { key: 'outputTokens', label: '输出 Token', definition: '原生记录的输出；推理输出是输出子集，不重复相加。缺失、基线不明、冲突或不支持的来源为未知。', origin: '原件 · 确定性' },
@@ -35,10 +37,14 @@ export async function migrateMetrics(db: Database) {
     version text PRIMARY KEY, scope_key text NOT NULL, revision integer NOT NULL,
     request jsonb NOT NULL, payload jsonb NOT NULL, UNIQUE(scope_key,revision)
   )`);
+  await db.query(`CREATE TABLE IF NOT EXISTS metric_input_revisions (
+    version text PRIMARY KEY, snapshot_id uuid NOT NULL REFERENCES snapshots(id),
+    attribution_revision text NOT NULL, parser_version text NOT NULL, payload jsonb NOT NULL
+  )`);
 }
 
 type Snapshot = { id: string; device_id: string; employee_id: string; employee: string; source: Source; source_session_id: string;
-  manifest: Manifest; hash: string; committed_at: Date; enrolled_at: Date | null; provenance: Provenance | null };
+  manifest: Manifest; hash: string; committed_at: Date; enrolled_at: Date | null; provenance: Provenance | null; attribution_revision: string };
 type Event = { event_id: string; snapshot_id: string; employee_id: string; employee: string; device_id: string; source: Source;
   source_session_id: string; project: string; source_date: string; role: string; line: number; block: number; material_id: string | null;
   qualification_revision: string; proof_snapshot_id: string | null };
@@ -111,7 +117,17 @@ export function metricsService(db: Database, raw: RawStore, clock: () => Date = 
       ...(q.source ? { source: q.source } : {}), ...(q.project !== undefined ? { project: q.project } : {}) };
   }
 
-  async function compute(q: MetricsQuery): Promise<MetricsPage> {
+  async function compute(q: MetricsQuery, full = false): Promise<MetricsPage> {
+    for (let attempt = 0; ; attempt++) {
+      try { return await computeOnce(q, full); }
+      catch (error) {
+        if (!['40001', '40P01'].includes((error as { code?: string }).code ?? '')) throw error;
+        if (attempt >= 2) throw new HttpError(409, '指标输入正在更新，请稍后重试；固定版本仍可读取');
+        await new Promise(resolve => setTimeout(resolve, 25 * (attempt + 1)));
+      }
+    }
+  }
+  async function computeOnce(q: MetricsQuery, full: boolean): Promise<MetricsPage> {
     const client = await db.connect();
     try {
       await client.query('BEGIN ISOLATION LEVEL REPEATABLE READ');
@@ -147,7 +163,7 @@ export function metricsService(db: Database, raw: RawStore, clock: () => Date = 
         UNION
         SELECT p.id FROM selected x JOIN snapshots s ON s.id=x.id JOIN snapshots p ON p.id=(s.provenance->>'sourceSnapshotId')::uuid
           WHERE s.provenance->>'relation' IN ('verified-restoration','same-device-continuation')
-      ) SELECT s.*,d.employee_id,d.enrolled_at,e.name AS employee FROM selected x JOIN snapshots s ON s.id=x.id
+      ) SELECT s.*,d.employee_id,d.enrolled_at,e.name AS employee,${attributionRevisionSql('s.id')}::text AS attribution_revision FROM selected x JOIN snapshots s ON s.id=x.id
         JOIN devices d ON d.id=s.device_id JOIN employees e ON e.id=d.employee_id ORDER BY s.committed_at,s.id LIMIT ${limits.snapshots + 1}`,
       [JSON.stringify(nativeInputs), [...new Set(events.map(event => event.snapshot_id))]])).rows as Snapshot[];
       if (snapshots.length > limits.snapshots) throw bounded();
@@ -224,6 +240,7 @@ export function metricsService(db: Database, raw: RawStore, clock: () => Date = 
       const candidates = relevantSnapshots.filter(s => !subsumed.has(s.id));
       let totalBytes = 0; const rawInputs: unknown[] = [];
       const rawBuffers = new Map<string, Buffer>();
+      const materialized = new Map<string, Awaited<ReturnType<typeof materializeMetricInput>>>();
       const sliceGroups = new Map<string, Slice[]>();
       for (const slice of slices.values()) {
         const key = JSON.stringify([slice.sessionId, slice.employeeId, slice.project]);
@@ -242,18 +259,27 @@ export function metricsService(db: Database, raw: RawStore, clock: () => Date = 
           && (q.project === undefined || record.manifest.project === q.project);
         totalBytes += record.manifest.byteLength; if (totalBytes > limits.rawBytes) throw bounded();
         rawInputs.push([record.id, record.hash, record.manifest.sourceVersion, record.enrolled_at?.toISOString(), record.provenance]);
-        let parsed: ReturnType<typeof nativeStatistics>, content: Buffer;
-        try { content = await raw.read(record.device_id, record.hash); parsed = nativeStatistics(content, record.source, record.manifest.sourceVersion); }
-        catch {
+        let parsed: Awaited<ReturnType<typeof materializeMetricInput>>, content: Buffer;
+        try {
+          content = await raw.read(record.device_id, record.hash);
+          parsed = await materializeMetricInput(client, { snapshotId: record.id, attributionRevision: record.attribution_revision,
+            bytes: content, hash: record.hash, source: record.source, sourceVersion: record.manifest.sourceVersion, full });
+        }
+        catch (error) {
+          // A competing scope can materialize this same input after our
+          // repeatable-read snapshot. Retry the whole transaction, never label
+          // that serialization conflict as an original-storage gap.
+          if (['40001', '40P01'].includes((error as { code?: string }).code ?? '')) throw error;
           for (const slice of relevant) slice.reasons.add('已存档原件不可读取或含无效编码');
           if (ownerSelected) discoveryGaps.add('已存档原件不可读取或含无效编码，无法确认所选日期的 Token');
           continue;
         }
         rawBuffers.set(record.id, content);
+        materialized.set(record.id, parsed);
         const reasons = new Set<string>();
         if (!parsed.supported || !record.enrolled_at) reasons.add('来源版本或接入边界未经验证');
         if (latest.get(nativeKey(record.device_id, record.source, record.source_session_id))?.id === record.id
-          && (!parsed.complete || !primaryInputCoverage(content, record.source).complete)) reasons.add('来源原件有缺口，已知部分不代表全部');
+          && (!parsed.complete || !parsed.coverageComplete)) reasons.add('来源原件有缺口，已知部分不代表全部');
         if (record.provenance?.warning && record.provenance.relation !== 'unconfirmed') reasons.add(record.provenance.warning);
         for (const slice of relevant) for (const reason of reasons) slice.reasons.add(reason);
         if (!record.enrolled_at) { if (ownerSelected) discoveryGaps.add('来源接入边界未经验证，无法确认所选日期的 Token'); continue; }
@@ -264,7 +290,9 @@ export function metricsService(db: Database, raw: RawStore, clock: () => Date = 
           const key = session + '/' + item.key;
           const previous = usageOrigins.get(key);
           if (previous) {
-            if (JSON.stringify(previous.value) !== JSON.stringify(item.value)) { previous.value = null; previous.slice?.usage.set(key, null); }
+            const same = previous.value === null || item.value === null ? previous.value === item.value
+              : (Object.keys(previous.value) as (keyof TokenComponents)[]).every(field => previous.value![field] === item.value![field]);
+            if (!same) { previous.value = null; previous.slice?.usage.set(key, null); }
             continue;
           }
           let slice: Slice | undefined;
@@ -289,7 +317,7 @@ export function metricsService(db: Database, raw: RawStore, clock: () => Date = 
       // A native, explicit summary/meta flag prevents counting that preserved
       // text as a new user submission; never guess from message wording.
       const userSources = new Map<string, Event[]>();
-      for (const event of events) if (event.role === 'user' && event.source === 'claude-code-cli') {
+      for (const event of events) if (event.role === 'user') {
         const key = JSON.stringify([event.snapshot_id, event.material_id]); userSources.set(key, [...userSources.get(key) ?? [], event]);
       }
       const excludedTurns = new Set<string>();
@@ -306,12 +334,15 @@ export function metricsService(db: Database, raw: RawStore, clock: () => Date = 
           try { content = await raw.read(device, hash); rawBuffers.set(key, content); }
           catch { continue; } // Validated event remains an observed row; completeness is reported separately.
         }
-        const lines = content.toString('utf8').split('\n');
+        let facts = materialized.get(key);
+        if (!facts) {
+          facts = await materializeMetricInput(client, { snapshotId: record.id, attributionRevision: record.attribution_revision,
+            materialId: first.material_id ?? undefined, bytes: content, hash, source: record.source, sourceVersion: record.manifest.sourceVersion, full });
+          materialized.set(key, facts);
+        }
+        const excluded = new Set(facts.excludedUserLines);
         for (const event of sourceEvents) {
-          try {
-            const row = JSON.parse(lines[event.line - 1]!);
-            if (row.isCompactSummary === true || row.isMeta === true) excludedTurns.add(JSON.stringify([event.snapshot_id, event.material_id, event.line]));
-          } catch { /* Invalid originals cannot gain a guessed summary marker. */ }
+          if (excluded.has(event.line)) excludedTurns.add(JSON.stringify([event.snapshot_id, event.material_id, event.line]));
         }
       }
       for (const slice of slices.values()) for (const turn of slice.turns) if (excludedTurns.has(turn)) slice.turns.delete(turn);
@@ -319,7 +350,17 @@ export function metricsService(db: Database, raw: RawStore, clock: () => Date = 
       const selected = [...slices.values()], sessions = summarize(selected); if (sessions.length > limits.sessions) throw bounded();
       const byDate = new Map<string, Slice[]>();
       for (const slice of selected) byDate.set(slice.date, [...byDate.get(slice.date) ?? [], slice]);
-      const daily = [...byDate.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([date, values]) => ({ date, ...total(summarize(values)) }));
+      const unknownSessions = new Set(sessions.filter(session => session.inputTokens === null || session.outputTokens === null).map(session => session.sessionId));
+      const daily = [...byDate.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([date, values]) => {
+        const rows = summarize(values), included = rows.filter(row => !unknownSessions.has(row.sessionId));
+        const excludedSessions = new Set(rows.filter(row => unknownSessions.has(row.sessionId)).map(row => row.sessionId)).size;
+        const known = total(included);
+        return { date, ...total(rows), tokenTrend: {
+          inputTokens: !included.length && excludedSessions ? null : known.knownInputTokens,
+          outputTokens: !included.length && excludedSessions ? null : known.knownOutputTokens,
+          includedSessions: new Set(included.map(row => row.sessionId)).size, excludedSessions,
+        } };
+      });
       const byEmployee = new Map<string, SessionMetrics[]>();
       for (const session of sessions) byEmployee.set(session.employeeId, [...byEmployee.get(session.employeeId) ?? [], session]);
       const employees = [...new Map(sessions.map(s => [s.employeeId, s.employee])).entries()]
@@ -374,14 +415,21 @@ export function metricsService(db: Database, raw: RawStore, clock: () => Date = 
     return boundedPage({ ...payload, sessions: payload.sessions.slice(q.offset, q.offset + 20), nextOffset: q.offset + 20 < payload.sessions.length ? q.offset + 20 : null });
   }
   async function exportMetrics(input: unknown = {}): Promise<MetricsPage> { const { payload } = await load(input); return payload; }
+  async function readCoverageMetrics(input: unknown) {
+    const { date, view, ...filters } = coverageMetricsQuerySchema.parse(input);
+    const q: MetricsQuery = { period: 'custom', from: view === 'day' ? date : addDays(date, -6), to: date, offset: 0, ...filters };
+    const payload = q.version ? (await load(q)).payload : await compute(q);
+    return boundedPage({ ...payload, sessions: payload.sessions.slice(0, 20), nextOffset: payload.sessions.length > 20 ? 20 : null });
+  }
   async function recompute(input: unknown = {}): Promise<MetricsPage> {
     const q = metricsQuerySchema.parse(input); if (q.version || q.offset) throw new HttpError(400, '重算不能指定旧版本或分页位置');
-    return readMetrics(q);
+    const payload = await compute(q, true);
+    return boundedPage({ ...payload, sessions: payload.sessions.slice(0, 20), nextOffset: payload.sessions.length > 20 ? 20 : null });
   }
   async function readSessionMetrics(sessionId: string, input: unknown = {}) {
     const { payload } = await load(input); const sessions = payload.sessions.filter(s => s.sessionId === sessionId);
     if (!sessions.length) throw new HttpError(404, '所选范围内不存在该会话的指标');
-    return boundedPage({ version: payload.version, scope: payload.scope, dataAsOf: payload.dataAsOf, catalogVersion: payload.catalogVersion, definition, sessions, totals: total(sessions) });
+    return boundedPage({ version: payload.version, scope: payload.scope, dataAsOf: payload.dataAsOf, catalogVersion: payload.catalogVersion, definition: payload.definition, sessions, totals: total(sessions) });
   }
   async function readSnapshotMetrics(snapshotId: string, input: unknown = {}) {
     if (!(await db.query('SELECT id FROM snapshots WHERE id=$1', [snapshotId])).rowCount) throw new HttpError(404, '快照不存在');
@@ -389,8 +437,8 @@ export function metricsService(db: Database, raw: RawStore, clock: () => Date = 
     const originals = (await db.query('SELECT DISTINCT o.snapshot_id FROM effective_snapshot_events e JOIN effective_event_origins o ON o.event_id=e.event_id WHERE e.snapshot_id=$1', [snapshotId])).rows;
     const ids = new Set([snapshotId, ...originals.map(r => r.snapshot_id)]);
     const sessions = payload.sessions.filter(s => s.snapshotIds.some(id => ids.has(id)));
-    return boundedPage({ version: payload.version, scope: payload.scope, dataAsOf: payload.dataAsOf, catalogVersion: payload.catalogVersion, definition, sessions, totals: total(sessions) });
+    return boundedPage({ version: payload.version, scope: payload.scope, dataAsOf: payload.dataAsOf, catalogVersion: payload.catalogVersion, definition: payload.definition, sessions, totals: total(sessions) });
   }
-  return { readMetricCatalog, readMetrics, readSessionMetrics, readSnapshotMetrics, exportMetrics, recompute };
+  return { readMetricCatalog, readMetrics, readSessionMetrics, readSnapshotMetrics, readCoverageMetrics, exportMetrics, recompute };
 }
 export type MetricsService = ReturnType<typeof metricsService>;
