@@ -14,7 +14,7 @@ function formatted(value: number | null, unit: MetricScore['unit']) {
   const factor = unit === 'ratio' ? 100 : 1;
   return Number((value * factor).toFixed(1)).toLocaleString('zh-CN') + ({ ratio: '%', multiple: '×', minutes: ' 分钟', number: '' }[unit]);
 }
-export function CapabilityAssessment({ request, currentEmployeeId, appendNote, frozen, additions }: { request: Request; currentEmployeeId: string; appendNote?: AppendNote; frozen?: Assessment; additions?: { metadata?: ReactNode; navigation?: ReactNode; content?: ReactNode; actions?: ReactNode; details?: ReactNode; emptyMessage?: string; onRefresh?: () => void } }) {
+export function CapabilityAssessment({ request, currentEmployeeId, appendNote, frozen, additions }: { request: Request; currentEmployeeId: string; appendNote?: AppendNote; frozen?: Assessment; additions?: { metadata?: ReactNode; navigation?: ReactNode; content?: ReactNode; actions?: ReactNode; details?: ReactNode; emptyMessage?: string; onRefresh?: () => void;hideRepresentatives?:boolean } }) {
   const [query, setQuery] = useState(selection), [loaded, setData] = useState<Assessment>(), [error, setError] = useState(''), [busy, setBusy] = useState(false);
   const data = frozen ?? loaded;
   const [retry, setRetry] = useState(0), [people, setPeople] = useState<{ id: string; name: string }[]>([]), [next, setNext] = useState<number | null>(null);
@@ -26,6 +26,7 @@ export function CapabilityAssessment({ request, currentEmployeeId, appendNote, f
   const requestedPeriod = query.get('period'), requestedPreset = query.get('preset');
   const period = version ? data?.selection?.period ?? requestedPeriod ?? 'since-enrollment' : requestedPeriod ?? 'since-enrollment';
   const preset = version ? data?.preset ?? requestedPreset ?? '默认' : requestedPreset ?? '默认';
+  function dimension(key:string){const element=document.getElementById('profile-dimension-'+key) as HTMLDetailsElement|null;if(!element)return;element.open=true;element.querySelector('summary')?.focus({preventScroll:true});element.scrollIntoView({block:'start',behavior:matchMedia('(prefers-reduced-motion: reduce)').matches?'instant':'smooth'});}
   useEffect(() => { const change = () => setQuery(selection()); window.addEventListener('hashchange', change); return () => window.removeEventListener('hashchange', change); }, []);
   useEffect(() => {
     if (frozen) return;
@@ -79,20 +80,20 @@ export function CapabilityAssessment({ request, currentEmployeeId, appendNote, f
       {!data.sample.sessions ? <p id="profile-verdict" tabIndex={-1} className="assessment-empty" data-testid="assessment-empty">{additions?.emptyMessage ?? (data.range.empty ? '所选周期早于接入' : '暂无会话')}</p> : <>
       <section id="profile-verdict" tabIndex={-1} className="assessment-verdict" aria-label="评估结论"><div><p className="assessment-eyebrow">使用 Coding Agent 的能力</p><div className="assessment-score"><span className="assessment-level" data-level={data.level}>{data.level}</span>
         <strong data-testid="assessment-index">{number(data.index)}</strong>{data.index !== null && <span>/ 100</span>}</div>
-        <p className="assessment-reason">{data.reason}</p><p className="assessment-confidence">可信度{data.confidence}{data.margin !== null && ` · 估计误差 ±${data.margin}`}</p>
+        <p className="assessment-reason">{data.reason}</p><p className="assessment-summary">依据 {data.sample.sessions} 个会话、{data.sample.prompts} 条提示词；{dimKeys.filter(key=>data.dims[key].score!==null&&Math.round(data.dims[key].score!)<60).length} 个维度低于 60 分。</p><p className="assessment-confidence">可信度{data.confidence}{data.margin !== null && ` · 估计误差 ±${data.margin}`}</p>
         <div className="assessment-sample"><span>{data.sample.sessions} 个会话</span><span>{data.sample.prompts} 条提示词</span><span>{data.sample.activeDays} 个活跃日</span></div></div>
-        {!!(data.strengths.length || data.priorities.length) && <aside>{data.strengths.length > 0 && <><h2>强项</h2><div className="assessment-chips">{data.strengths.map(key => <span key={key}>{data.dims[key].label} {number(data.dims[key].score)}</span>)}</div></>}
-          {data.tips.length > 0 && <><h2>优先提升</h2><ul>{data.tips.map(tip => <li key={tip.dim}><strong>{data.dims[tip.dim].label}</strong><span>{tip.text}</span></li>)}</ul></>}</aside>}</section>
+        {!!(data.strengths.length || data.priorities.length) && <aside>{data.strengths.length > 0 && <><h2>强项</h2><div className="assessment-chips">{data.strengths.map(key => <button key={key} onClick={()=>dimension(key)}>{data.dims[key].label} {number(data.dims[key].score)}</button>)}</div></>}
+          {data.tips.length > 0 && <><h2>优先提升</h2><ul>{data.tips.map(tip => <li key={tip.dim}><strong><button onClick={()=>dimension(tip.dim)}>{data.dims[tip.dim].label}</button></strong><span>{tip.text}</span></li>)}</ul></>}</aside>}</section>
       {data.coverageIssues.length > 0 && <details className="assessment-coverage"><summary>采集覆盖 · {data.coverageIssues.length} 项</summary><ul>{data.coverageIssues.map(issue => <li key={issue}>{issue}</li>)}</ul></details>}
       <div id="profile-dimensions" tabIndex={-1} className="assessment-section-title"><h2>能力维度</h2><span>本人得分 <i /> 团队中位数</span></div>
-      <div className="assessment-dimensions">{dimKeys.map(key => { const dim = data.dims[key], score = dim.score === null ? null : Math.round(dim.score), unknown = dim.metrics.every(metric => metric.state === 'unknown'); return <details className="assessment-dimension" key={key} open={score !== null && score < 60}>
+      <div className="assessment-dimensions">{dimKeys.map(key => { const dim = data.dims[key], score = dim.score === null ? null : Math.round(dim.score), unknown = dim.metrics.every(metric => metric.state === 'unknown'); return <details id={'profile-dimension-'+key} className="assessment-dimension" key={key} open={score !== null && score < 60}>
         <summary><strong>{dim.label}</strong><div className="assessment-bar" role="img" aria-label={`${dim.label} ${number(score)} 分，团队中位数 ${number(dim.teamMedian)}`}><i style={{ width: (score ?? 0) + '%' }} />{dim.teamMedian !== null && <em style={{ left: dim.teamMedian + '%' }} />}</div>
           <b>{number(score)}</b><span className="assessment-dim-state" data-low={score !== null && score < 60 || undefined}>{score === null ? unknown ? '来源未知' : '样本不足' : score < 60 ? '待提升' : score >= 70 ? '强项' : '一般'}</span></summary>
         <div className="assessment-metrics" aria-label={dim.label + '指标'}>{dim.metrics.map(metric => <article key={metric.key}><div className="assessment-metric-heading"><strong>{metric.label}</strong><span>{metric.state === 'scored' ? `${number(metric.score)} 分` : metric.state === 'unknown' ? '来源未知' : '样本不足'}</span></div>
           <dl><div><dt>原始值</dt><dd>{formatted(metric.value, metric.unit)}</dd></div><div><dt>0 → 100 分</dt><dd>{formatted(metric.anchor[0], metric.unit)} → {formatted(metric.anchor[1], metric.unit)}</dd></div><div><dt>样本 {metric.samples}</dt><dd>门槛 {metric.minimum}</dd></div></dl>
           {metric.reason && <p>{metric.reason}</p>}{metric.evidence.length > 0 && <div className="assessment-evidence">{metric.evidence.map((item, index) => <a key={item.webPath + index} href={item.webPath}>{item.quote ? `原文 ${index + 1}` : '查看会话'}</a>)}</div>}</article>)}</div>
         <p className="assessment-weight">方案权重 {dim.weight}% · 本次权重 {Number(dim.effectiveWeight.toFixed(1))}%</p></details>; })}</div>
-      {(data.representatives.best || data.representatives.rework) && <section className="assessment-representatives"><h2>代表性会话</h2>{data.representatives.best && <a href={data.representatives.best.webPath}>最佳示例</a>}{data.representatives.rework && <a href={data.representatives.rework.webPath}>返工较多</a>}</section>}
+      {!additions?.hideRepresentatives&&(data.representatives.best || data.representatives.rework) && <section className="assessment-representatives"><h2>代表性会话</h2>{data.representatives.best && <a href={data.representatives.best.webPath}>最佳示例</a>}{data.representatives.rework && <a href={data.representatives.rework.webPath}>返工较多</a>}</section>}
       </>}
       {additions?.content}
       <div id="profile-notes" tabIndex={-1}><ReviewNotes key={employeeId} employeeId={employeeId} assessmentVersion={data.version} request={request} appendNote={appendNote} /></div>

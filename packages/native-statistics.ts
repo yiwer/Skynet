@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import type { Manifest, Source } from './contracts/archive.js';
 import { sourceTimestamp } from './contracts/archive.js';
+import type { PreparedOriginal } from './native/prepared-original.js';
 
 export const statisticsExtractorVersion = 'native-recorded-statistics-2';
 export type TokenComponents = { input: number | null; cachedInput: number | null; cacheWriteInput: number | null;
@@ -14,14 +15,20 @@ const path = (value: unknown): value is string => typeof value === 'string' && v
 
 // Auxiliary rows do not become business EvidenceLine events. Invalid UTF-8 is
 // rejected rather than inventing replacement characters as verbatim evidence.
-export function codexInitialBaseline(bytes: Buffer, manifest: Manifest): boolean {
+export function codexInitialBaseline(bytes: Buffer, manifest: Manifest, prepared?: PreparedOriginal): boolean {
   if (manifest.source !== 'codex-cli' || manifest.sourceVersion !== '0.160.0' || !manifest.enrolledAt || manifest.restoredFrom) return false;
   const capture = manifest.capture;
   if (capture && (capture.gaps.length || capture.lineage.length || capture.compacted || capture.partialLine || ['rewrite', 'truncate'].includes(capture.change))) return false;
   try {
-    const lines = new TextDecoder('utf-8', { fatal: true }).decode(bytes).split('\n');
-    if (lines.pop() !== '') return false;
-    const rows = lines.filter(line => line.trim()).map(line => JSON.parse(line));
+    let rows: any[];
+    if (prepared) {
+      if (!prepared.complete || prepared.records.some(record => record.text.trim() && !record.parsed)) return false;
+      rows = prepared.records.filter(record => record.text.trim()).map(record => record.value);
+    } else {
+      const lines = new TextDecoder('utf-8', { fatal: true }).decode(bytes).split('\n');
+      if (lines.pop() !== '') return false;
+      rows = lines.filter(line => line.trim()).map(line => JSON.parse(line));
+    }
     const meta = rows[0]?.payload;
     return rows[0]?.type === 'session_meta' && rows.filter(row => row.type === 'session_meta').length === 1
       && meta?.id === manifest.sourceSessionId && meta?.cli_version === manifest.sourceVersion
@@ -31,9 +38,10 @@ export function codexInitialBaseline(bytes: Buffer, manifest: Manifest): boolean
   } catch { return false; }
 }
 
-export function nativeStatistics(bytes: Buffer, source: Source, version: string, options: { codexInitialBaseline?: boolean } = {}) {
-  const text = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
-  const lines = text.split('\n'); const complete = !lines.pop();
+export function nativeStatistics(bytes: Buffer, source: Source, version: string, options: { codexInitialBaseline?: boolean; prepared?: PreparedOriginal } = {}) {
+  let complete: boolean, lines: string[];
+  if (options.prepared) { complete = options.prepared.complete; lines = options.prepared.records.map(record => record.text); }
+  else { lines = new TextDecoder('utf-8', { fatal: true }).decode(bytes).split('\n'); complete = !lines.pop(); }
   const usage: NativeUsage[] = []; const files: NativeFile[] = [];
   const supported = source === 'claude-code-cli' ? version === '2.1.281' : source === 'codex-cli' && ['0.157.1', '0.160.0'].includes(version);
   let prior: TokenComponents | null = null;
@@ -41,7 +49,10 @@ export function nativeStatistics(bytes: Buffer, source: Source, version: string,
   const messages = new Map<string, NativeUsage>();
   for (const [index, raw] of lines.entries()) {
     if (!raw.trim()) continue;
-    let row: any; try { row = JSON.parse(raw); } catch { continue; }
+    let row: any;
+    const record = options.prepared?.records[index];
+    if (record) { if (!record.parsed) continue; row = record.value; }
+    else { try { row = JSON.parse(raw); } catch { continue; } }
     const timestamp = sourceTimestamp(row.timestamp); const line = index + 1;
     if (source !== 'claude-code-cli' && row.type === 'event_msg' && row.payload?.type === 'token_count') {
       const value = row.payload.info?.total_token_usage;
