@@ -1,0 +1,18 @@
+import { z } from 'zod';
+export const assessmentQuery = z.object({ version: z.string().regex(/^[a-f0-9]{64}$/).optional() }).strict();
+export const dimKeys = ['adopt', 'prompt', 'iter', 'verify', 'output', 'flow'] as const;
+export type DimKey = typeof dimKeys[number];
+export type MetricScore = { key: string; label: string; value: number | null; anchor: [number, number]; score: number | null;
+  samples: number; minimum: number; state: 'scored' | 'insufficient' | 'unknown'; unit: 'ratio' | 'number' | 'minutes' | 'multiple';
+  evidence: { snapshotId: string; webPath: string; quote?: string }[]; evidenceCount: number; reason: string | null };
+export type CapabilityAssessment = {
+  version: string; employeeId: string; employee: string; period: '接入至今'; preset: '默认'; modelVersion: string;
+  inputs: { metricsVersion: string; analysisVersions: string[]; insightVersions: string[]; baselineVersion: string; waitsVersion: string; coverageVersion: string };
+  range: { from: string | null; to: string; timeZone: 'Asia/Shanghai' };
+  index: number | null; margin: number | null; confidence: '高' | '中' | '低'; level: '较好' | '一般' | '需提升' | '待定';
+  dims: Record<DimKey, { label: string; score: number | null; weight: number; effectiveWeight: number; teamMedian: number | null; metrics: MetricScore[] }>;
+  strengths: DimKey[]; priorities: DimKey[]; tips: { dim: DimKey; text: string }[]; reason: string;
+  sample: { sessions: number; prompts: number; activeDays: number; workdays: number; unknownTokenSessions: number };
+  coverageIssues: string[]; generatedAt: string;
+  representatives: { best: { snapshotId: string; webPath: string } | null; rework: { snapshotId: string; webPath: string } | null };
+};

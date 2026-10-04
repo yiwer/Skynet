@@ -1,0 +1,63 @@
+import { useEffect, useState } from 'react';
+import { dimKeys, type CapabilityAssessment as Assessment, type MetricScore } from '../../packages/contracts/assessment.js';
+import './assessment.css';
+type Request = (path: string, signal?: AbortSignal) => Promise<Response>;
+const selection = () => new URLSearchParams(location.hash.split('?')[1]);
+const number = (value: number | null) => value === null ? '—' : Math.round(value).toLocaleString('zh-CN');
+function formatted(value: number | null, unit: MetricScore['unit']) {
+  if (value === null) return '—';
+  const factor = unit === 'ratio' ? 100 : 1;
+  return Number((value * factor).toFixed(1)).toLocaleString('zh-CN') + ({ ratio: '%', multiple: '×', minutes: ' 分钟', number: '' }[unit]);
+}
+export function CapabilityAssessment({ request, currentEmployeeId }: { request: Request; currentEmployeeId: string }) {
+  const [query, setQuery] = useState(selection), [data, setData] = useState<Assessment>(), [error, setError] = useState(''), [busy, setBusy] = useState(false);
+  const [retry, setRetry] = useState(0), [people, setPeople] = useState<{ id: string; name: string }[]>([]), [next, setNext] = useState<number | null>(null);
+  const employeeId = query.get('employeeId') ?? currentEmployeeId, version = query.get('version');
+  useEffect(() => { const change = () => setQuery(selection()); window.addEventListener('hashchange', change); return () => window.removeEventListener('hashchange', change); }, []);
+  useEffect(() => {
+    const abort = new AbortController(); setBusy(true); setData(undefined); setError('');
+    request(`/api/assessments/${employeeId}${version ? '?version=' + version : ''}`, abort.signal).then(r => r.json()).then(value => { if (!abort.signal.aborted) setData(value); })
+      .catch(e => { if (!abort.signal.aborted) setError(e.message); }).finally(() => { if (!abort.signal.aborted) setBusy(false); });
+    return () => abort.abort();
+  }, [employeeId, version, retry]);
+  useEffect(() => { const abort = new AbortController(); request('/api/daily-report-employees', abort.signal).then(r => r.json()).then(value => {
+    if (!abort.signal.aborted) { setPeople(value.employees); setNext(value.nextOffset); }
+  }).catch(e => { if (!abort.signal.aborted) setError(e.message); }); return () => abort.abort(); }, []);
+  async function download() {
+    if (!data) return;
+    try { const response = await request(`/api/assessments/${employeeId}/export?version=${data.version}`), url = URL.createObjectURL(await response.blob());
+      const link = document.createElement('a'); link.href = url; link.download = `assessment-${data.version}.json`; link.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch (e) { setError((e as Error).message); }
+  }
+  return <section className="assessment-page">
+    <header className="assessment-heading"><div><p>员工画像</p><h1>{data?.employee ?? people.find(p => p.id === employeeId)?.name ?? '使用能力评估'}</h1></div>
+      <div className="assessment-actions"><button onClick={() => setRetry(n => n + 1)} disabled={busy}>刷新</button><button onClick={download} disabled={!data}>导出评估</button></div></header>
+    <div className="assessment-controls"><label>员工<select aria-label="评估员工" value={employeeId} onChange={e => { location.hash = 'profile?employeeId=' + e.target.value; }}>
+      {people.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select></label>
+      {next !== null && <button onClick={async () => { try { const value = await (await request('/api/daily-report-employees?offset=' + next)).json(); setPeople(p => [...p, ...value.employees]); setNext(value.nextOffset); } catch (e) { setError((e as Error).message); } }}>更多员工</button>}
+      <span>接入至今</span><span>默认方案</span>{version && <a href={'#profile?employeeId=' + employeeId}>查看当前评估</a>}</div>
+    {error && <p className="error" role="alert">{error}</p>}{busy && <p role="status">正在读取评估…</p>}
+    {data && <div key={data.version} className="assessment-content" data-scroll-region="assessment">
+      <section className="assessment-verdict" aria-label="评估结论"><div><p className="assessment-eyebrow">使用 Coding Agent 的能力</p><div className="assessment-score"><span className="assessment-level" data-level={data.level}>{data.level}</span>
+        <strong data-testid="assessment-index">{number(data.index)}</strong>{data.index !== null && <span>/ 100</span>}</div>
+        <p className="assessment-reason">{data.reason}</p><p className="assessment-confidence">可信度{data.confidence}{data.margin !== null && ` · 估计误差 ±${data.margin}`}</p>
+        <div className="assessment-sample"><span>{data.sample.sessions} 个会话</span><span>{data.sample.prompts} 条提示词</span><span>{data.sample.activeDays} 个活跃日</span></div></div>
+        {!!(data.strengths.length || data.priorities.length) && <aside>{data.strengths.length > 0 && <><h2>强项</h2><div className="assessment-chips">{data.strengths.map(key => <span key={key}>{data.dims[key].label} {number(data.dims[key].score)}</span>)}</div></>}
+          {data.tips.length > 0 && <><h2>优先提升</h2><ul>{data.tips.map(tip => <li key={tip.dim}><strong>{data.dims[tip.dim].label}</strong><span>{tip.text}</span></li>)}</ul></>}</aside>}</section>
+      {data.coverageIssues.length > 0 && <details className="assessment-coverage"><summary>采集覆盖 · {data.coverageIssues.length} 项</summary><ul>{data.coverageIssues.map(issue => <li key={issue}>{issue}</li>)}</ul></details>}
+      <div className="assessment-section-title"><h2>能力维度</h2><span>本人得分 <i /> 团队中位数</span></div>
+      <div className="assessment-dimensions">{dimKeys.map(key => { const dim = data.dims[key], score = dim.score === null ? null : Math.round(dim.score), unknown = dim.metrics.every(metric => metric.state === 'unknown'); return <details className="assessment-dimension" key={key} open={score !== null && score < 60}>
+        <summary><strong>{dim.label}</strong><div className="assessment-bar" role="img" aria-label={`${dim.label} ${number(score)} 分，团队中位数 ${number(dim.teamMedian)}`}><i style={{ width: (score ?? 0) + '%' }} />{dim.teamMedian !== null && <em style={{ left: dim.teamMedian + '%' }} />}</div>
+          <b>{number(score)}</b><span className="assessment-dim-state" data-low={score !== null && score < 60 || undefined}>{score === null ? unknown ? '来源未知' : '样本不足' : score < 60 ? '待提升' : score >= 70 ? '强项' : '一般'}</span></summary>
+        <div className="assessment-metrics" aria-label={dim.label + '指标'}>{dim.metrics.map(metric => <article key={metric.key}><div className="assessment-metric-heading"><strong>{metric.label}</strong><span>{metric.state === 'scored' ? `${number(metric.score)} 分` : metric.state === 'unknown' ? '来源未知' : '样本不足'}</span></div>
+          <dl><div><dt>原始值</dt><dd>{formatted(metric.value, metric.unit)}</dd></div><div><dt>0 → 100 分</dt><dd>{formatted(metric.anchor[0], metric.unit)} → {formatted(metric.anchor[1], metric.unit)}</dd></div><div><dt>样本 {metric.samples}</dt><dd>门槛 {metric.minimum}</dd></div></dl>
+          {metric.reason && <p>{metric.reason}</p>}{metric.evidence.length > 0 && <div className="assessment-evidence">{metric.evidence.map((item, index) => <a key={item.webPath + index} href={item.webPath}>{item.quote ? `原文 ${index + 1}` : '查看会话'}</a>)}</div>}</article>)}</div>
+        <p className="assessment-weight">方案权重 {dim.weight}% · 本次权重 {Number(dim.effectiveWeight.toFixed(1))}%</p></details>; })}</div>
+      {(data.representatives.best || data.representatives.rework) && <section className="assessment-representatives"><h2>代表性会话</h2>{data.representatives.best && <a href={data.representatives.best.webPath}>最佳示例</a>}{data.representatives.rework && <a href={data.representatives.rework.webPath}>返工较多</a>}</section>}
+      <details className="assessment-method"><summary>计算规则与版本</summary><p>单项按固定锚点线性折算至 0—100 分，样本不足或来源未知不计分。缺失维度的权重按比例分给其余维度。</p><p>综合指数先取整：72 分起为较好，60—71 分为一般。低可信度等级待定；误差按 26 ÷ √会话数取整估计。</p>
+        <p>产出基线采用团队同类任务；当前原生轮次结束且等待输入才纳入已结束样本，续聊会更新下一版。团队维度中位数只用于对照。</p>
+        <dl><div><dt>生成时间（北京时间）</dt><dd>{new Date(data.generatedAt).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false })}</dd></div><div><dt>模型版本</dt><dd>{data.modelVersion}</dd></div><div><dt>基线版本</dt><dd>{data.inputs.baselineVersion}</dd></div><div><dt>结果版本</dt><dd>{data.version}</dd></div></dl>
+        <a href={`#profile?employeeId=${employeeId}&version=${data.version}`}>此版本固定链接</a></details>
+    </div>}
+  </section>;
+}
