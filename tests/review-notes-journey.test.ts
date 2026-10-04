@@ -75,10 +75,22 @@ test('a colleague adds profile context through Web and shared OAuth MCP reads it
     }
     const download = page.waitForEvent('download'); await page.getByRole('button', { name: '导出评估', exact: true }).click();
     assert.deepEqual(JSON.parse(await readFile((await (await download).path())!, 'utf8')), before);
+    for (let n = 0; n < 12; n++) assert.equal((await api(notesPath, json({ requestId: randomUUID(), assessmentVersion: before.version, text: `补充背景 ${n}\n` + '方案评审记录。'.repeat(60) }))).status, 201);
+    const finalNotes = await (await api(notesPath)).json(); assert.equal(finalNotes.count, 13); assert.equal(finalNotes.notes.length, 10);
+    assert.deepEqual(await call('read_review_notes', { employeeId: subject.employeeId }), finalNotes);
+    const tail = await (await api(notesPath + '?cursor=' + finalNotes.nextCursor)).json(); assert.equal(tail.notes.length, 3);
+    assert.deepEqual(await call('read_review_notes', { employeeId: subject.employeeId, cursor: finalNotes.nextCursor }), tail);
+    await section.getByRole('button', { name: '刷新备注', exact: true }).click(); await expect(section.locator('.review-note-text')).toHaveCount(10);
+    await section.getByRole('button', { name: '更早备注', exact: true }).focus(); await page.keyboard.press('Enter'); await expect(section.locator('.review-note-text')).toHaveCount(3);
+    await section.getByRole('button', { name: '最新备注', exact: true }).click(); await expect(section.locator('.review-note-text')).toHaveCount(10);
+    const list = section.getByLabel('备注记录', { exact: true }); await list.focus(); await page.keyboard.press('End');
+    await expect.poll(() => list.evaluate(element => element.scrollTop)).toBeGreaterThan(0);
+    await page.screenshot({ path: join(directory, 'review-notes-long-320-dark.png'), animations: 'disabled' });
+    assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth && document.documentElement.scrollHeight <= innerHeight));
     await client.close(); client = undefined; await sandbox.restart(); await page.reload();
     await page.getByLabel('个人读取凭据').fill(colleague.readerCredential); await page.getByRole('button', { name: '进入存档', exact: true }).click();
-    await expect(section).toContainText('背景备注作者'); assert.deepEqual(await (await api(notesPath)).json(), notes);
+    await expect(section).toContainText('背景备注作者'); assert.deepEqual(await (await api(notesPath)).json(), finalNotes);
     assert.deepEqual(await (await api(path)).json(), before); assert.deepEqual(errors, []);
-    await writeFile(join(directory, 'public-result.json'), JSON.stringify({ assessment: before, notes, shots, errors, notifications: 'No notification or HR action path is added by this feature.' }, null, 2));
+    await writeFile(join(directory, 'public-result.json'), JSON.stringify({ assessment: before, notes: finalNotes, tail, shots, errors }, null, 2));
   } finally { await client?.close(); await browser?.close(); await sandbox.close(); }
 });

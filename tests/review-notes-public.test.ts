@@ -86,3 +86,30 @@ test('review notes paginate a stable list while newer notes are appended and rej
     assert.equal((await api(`/api/employees/${other.employeeId}/review-notes?cursor=` + first.nextCursor)).statusCode, 400);
   } finally { await app?.close(); await db.end(); await sandbox.close(); }
 });
+
+test('review note writes require a live platform identity and a matching immutable assessment', { timeout: 120_000 }, async () => {
+  const sandbox = await createSandbox(), db = connect(sandbox.env.DATABASE_URL!);
+  let app: Awaited<ReturnType<typeof createApp>> | undefined;
+  try {
+    const subject = await sandbox.provision('复核权限对象'), author = await sandbox.provision('停用前备注作者'), manager = await sandbox.provision('复核身份维护者', true);
+    app = await createApp({ db, rawDirectory: sandbox.env.RAW_DIRECTORY! });
+    const api = (url: string, body?: object, access = author.readerCredential) => app!.inject({ url, method: body ? 'POST' : 'GET', headers: { Authorization: `Bearer ${access}` }, ...(body ? { payload: body } : {}) });
+    const path = `/api/employees/${subject.employeeId}/review-notes`, assessment = (await api(`/api/assessments/${subject.employeeId}`)).json();
+    const foreign = (await api(`/api/assessments/${author.employeeId}`)).json();
+    const body = { requestId: randomUUID(), assessmentVersion: assessment.version, text: '原作者的背景记录保留' };
+    const device = (await api('/api/devices/enroll', { installationId: randomUUID(), name: '复核权限设备' }, author.enrollmentCredential)).json();
+    for (const access of [author.enrollmentCredential, device.deviceCredential]) {
+      assert.equal((await api(path, undefined, access)).statusCode, 401);
+      assert.equal((await api(path, body, access)).statusCode, 401);
+    }
+    assert.equal((await api(path, { ...body, assessmentVersion: foreign.version })).statusCode, 404);
+    assert.equal((await api(`/api/employees/${randomUUID()}/review-notes`, body)).statusCode, 404);
+    for (const text of ['', '   ', '字'.repeat(2001), '隐\u0000藏']) assert.equal((await api(path, { ...body, text })).statusCode, 400);
+    const created = await api(path, body); assert.equal(created.statusCode, 201); const note = created.json();
+    assert.equal((await api(`/api/identities/employees/${author.employeeId}/disable`, {}, manager.readerCredential)).statusCode, 200);
+    assert.equal((await api(path)).statusCode, 401); assert.equal((await api(path, body)).statusCode, 401);
+    const notes = (await api(path, undefined, subject.readerCredential)).json(); assert.deepEqual(notes.notes, [note]);
+    assert.equal(notes.notes[0].author.name, '停用前备注作者');
+    assert.deepEqual((await api(`/api/assessments/${subject.employeeId}?version=${assessment.version}`, undefined, subject.readerCredential)).json(), assessment);
+  } finally { await app?.close(); await db.end(); await sandbox.close(); }
+});
