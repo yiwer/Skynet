@@ -51,27 +51,36 @@ function SelectedSession({row,onClose}: {row:EfficiencySession;onClose:()=>void}
 export function SessionEfficiency({request}:Props){
   const [query,setQuery]=useState<EfficiencyQuery>({period:'this-week',offset:0,sort:'date',direction:'desc',reviewOnly:'false',segmentOffset:0});
   const [page,setPage]=useState<SessionEfficiencyPage|null>(null),[full,setFull]=useState<SessionEfficiencyPage|null>(null),[busy,setBusy]=useState(false),[error,setError]=useState(''),[retry,setRetry]=useState(0);
+  const [previousOffsets,setPreviousOffsets]=useState<number[]>([]);
   const [selected,setSelected]=useState(''),[project,setProject]=useState(''),[employees,setEmployees]=useState<EfficiencySession['employees']>([]),[exporting,setExporting]=useState(false);
   const [detail,setDetail]=useState<EfficiencySession|null>(null),[detailBusy,setDetailBusy]=useState(false),[detailError,setDetailError]=useState(''),[detailRetry,setDetailRetry]=useState(0);
   useEffect(()=>{const abort=new AbortController();setBusy(true);setError('');setPage(null);
     request('/api/session-efficiency?'+params(query),abort.signal).then(r=>r.json()).then(async(data:SessionEfficiencyPage)=>{
       if(abort.signal.aborted)return;setPage(data);
-      const complete=data.total===data.sessions.length?data:await(await request('/api/session-efficiency/export?'+params({...query,offset:0,version:data.version}),abort.signal)).json() as SessionEfficiencyPage;
+      let complete=full?.version===data.version?full:null;
+      if(!complete){
+        const summaries:EfficiencySession[]=[];let offset:number|null=0;
+        while(offset!==null){const part:SessionEfficiencyPage=await(await request('/api/session-efficiency?'+params({...query,version:data.version,section:'summaries',offset,reviewOnly:'false',sessionId:undefined,segmentOffset:0}),abort.signal)).json();
+          if(abort.signal.aborted)return;if(part.version!==data.version||part.nextOffset!==null&&part.nextOffset<=offset)throw new Error('会话摘要分页不完整，请重新读取');
+          summaries.push(...part.sessions);offset=part.nextOffset;}
+        if(summaries.length!==data.total||new Set(summaries.map(row=>row.sessionId)).size!==data.total)throw new Error('会话摘要分页不完整，请重新读取');
+        complete={...data,sessions:summaries,nextOffset:null};
+      }
       if(abort.signal.aborted)return;setFull(complete);setEmployees(previous=>[...new Map([...previous,...complete.sessions.flatMap(s=>s.employees)].map(p=>[p.employeeId,p])).values()].sort((a,b)=>a.employee.localeCompare(b.employee,'zh-CN')||a.employeeId.localeCompare(b.employeeId)));
     }).catch(f=>{if(!abort.signal.aborted)setError(f.message);}).finally(()=>{if(!abort.signal.aborted)setBusy(false);});return()=>abort.abort();
   },[query,retry]);
-  function scope(next:Partial<EfficiencyQuery>){setSelected('');setFull(null);setQuery({...query,...next,offset:0,version:undefined});}
+  function scope(next:Partial<EfficiencyQuery>){setPreviousOffsets([]);setSelected('');setFull(null);setQuery({...query,...next,offset:0,version:undefined});}
   function apply(e:FormEvent){e.preventDefault();scope({project:project||undefined});}
-  function sort(key:EfficiencyQuery['sort']){if(page)setQuery({...query,version:page.version,offset:0,sort:key,direction:query.sort===key&&query.direction==='desc'?'asc':'desc'});}
+  function sort(key:EfficiencyQuery['sort']){setPreviousOffsets([]);if(page)setQuery({...query,version:page.version,offset:0,sort:key,direction:query.sort===key&&query.direction==='desc'?'asc':'desc'});}
   async function download(){if(!page)return;setExporting(true);try{const response=await request('/api/session-efficiency/export?'+params({...query,offset:0,version:page.version}));const url=URL.createObjectURL(await response.blob()),link=document.createElement('a');link.href=url;link.download='skynet-session-efficiency-'+page.version+'.json';link.click();setTimeout(()=>URL.revokeObjectURL(url),1000);}catch(e){setError((e as Error).message);}finally{setExporting(false);}}
-  async function recompute(){setBusy(true);try{const data=await(await request('/api/session-efficiency/recompute',undefined,'POST',{...query,offset:0,version:undefined})).json();setSelected('');setQuery({...query,offset:0,version:data.version});}catch(e){setError((e as Error).message);}finally{setBusy(false);}}
+  async function recompute(){setBusy(true);try{const data=await(await request('/api/session-efficiency/recompute',undefined,'POST',{...query,offset:0,version:undefined})).json();setPreviousOffsets([]);setSelected('');setQuery({...query,offset:0,version:data.version});}catch(e){setError((e as Error).message);}finally{setBusy(false);}}
   const complete=full?.version===page?.version?full:null,selection=complete?.sessions.find(s=>s.sessionId===selected),reviews=complete?.sessions.filter(s=>s.reviewReasons.length)??[];
   useEffect(()=>{const abort=new AbortController();setDetail(null);setDetailError('');setDetailBusy(false);
-    if(!selection?.timing?.nextSegmentOffset||!page)return;
+    if(!selection?.timing||selection.timing.segments.length===selection.timing.segmentTotal||!page)return;
     setDetailBusy(true);const version=page.version,original=selection;
-    void(async()=>{try{const segments=[...original.timing!.segments];let offset=original.timing!.nextSegmentOffset;
+    void(async()=>{try{const segments=[...original.timing!.segments];let offset:number|null=original.timing!.segments.length;
       while(offset!==null){const data:SessionEfficiencyPage=await(await request('/api/session-efficiency?'+params({...query,offset:0,version,sessionId:original.sessionId,segmentOffset:offset}),abort.signal)).json();
-        const next=data.sessions[0]!.timing!;segments.push(...next.segments);offset=next.nextSegmentOffset;}
+        const next=data.sessions[0]!.timing!;if(data.version!==version||next.nextSegmentOffset!==null&&next.nextSegmentOffset<=offset)throw new Error('会话分段分页不完整，请重新读取');segments.push(...next.segments);offset=next.nextSegmentOffset;}
       if(!abort.signal.aborted)setDetail({...original,timing:{...original.timing!,segments,nextSegmentOffset:null}});
     }catch(e){if(!abort.signal.aborted)setDetailError((e as Error).message);}finally{if(!abort.signal.aborted)setDetailBusy(false);}})();return()=>abort.abort();
   },[selected,page?.version,selection,detailRetry]);
@@ -90,10 +99,10 @@ export function SessionEfficiency({request}:Props){
         <section className="eff-review" aria-label="值得复盘的会话"><header><h2>值得复盘的会话 <span>{page.reviewCount}</span></h2><details><summary>入选条件</summary><p>Token 高于 P75（{number(page.tokenP75)}）且已验证结果为 0；或声称多于已验证；或返工 ≥ 2。</p></details></header>
           {!complete?<p role="status">正在读取固定版本…</p>:!reviews.length?<p>暂无符合条件的会话</p>:<ul>{reviews.map(row=><li key={row.sessionId}><button onClick={()=>setSelected(row.sessionId)}><strong>{row.employees.map(e=>e.employee).join('、')}</strong><span>{row.projects.join(' · ')||sourceLabel(row.source)}</span><small>{row.reviewReasons.join(' · ')}</small></button></li>)}</ul>}
         </section>
-        <div className="eff-detail-grid" data-selected={!!selection}><section className="eff-card" aria-label="会话列表"><header><h2>会话明细 <span>{page.filteredTotal}</span></h2><label className="eff-only-review"><input type="checkbox" checked={query.reviewOnly==='true'} onChange={e=>setQuery({...query,offset:0,version:page.version,reviewOnly:e.target.checked?'true':'false'})}/>仅复盘会话</label></header>
+        <div className="eff-detail-grid" data-selected={!!selection}><section className="eff-card" aria-label="会话列表"><header><h2>会话明细 <span>{page.filteredTotal}</span></h2><label className="eff-only-review"><input type="checkbox" checked={query.reviewOnly==='true'} onChange={e=>{setPreviousOffsets([]);setQuery({...query,offset:0,version:page.version,reviewOnly:e.target.checked?'true':'false'});}}/>仅复盘会话</label></header>
           <div className="eff-table-scroll"><table aria-label="会话明细"><thead><tr><th>员工 / 项目</th>{columns.map(c=><th key={c.key} aria-sort={query.sort===c.key?query.direction==='asc'?'ascending':'descending':'none'}><button onClick={()=>sort(c.key)} aria-label={`按 ${c.label} 排序`}>{c.label}{query.sort===c.key?query.direction==='asc'?' ↑':' ↓':''}</button></th>)}<th>详情</th></tr></thead>
             <tbody>{page.sessions.map(row=><tr key={row.sessionId} data-selected={row.sessionId===selected}><th><strong>{row.employees.map(e=>e.employee).join('、')}</strong><span>{row.projects.join(' · ')}</span><small>{sourceLabel(row.source)} · {taskTypeLabels[row.taskType]}</small></th><td>{row.dates.at(-1)??'未知'}</td><td>{number(row.tokens)}</td><td>{number(row.userTurns)}</td><td>{number(row.codeChanges)}</td><td>{number(row.verified)}</td><td><strong>{number(row.efficiency.value)}</strong><small>{number(row.efficiency.numerator)} / {number(row.efficiency.denominator)} Token</small></td><td>{number(row.rework)}</td><td><button onClick={()=>setSelected(row.sessionId)} aria-label="查看会话分段">分段</button></td></tr>)}</tbody></table></div>
-          <nav className="eff-pagination" aria-label="产效会话分页"><button disabled={busy||query.offset===0} onClick={()=>setQuery({...query,version:page.version,offset:Math.max(0,query.offset-20)})}>上一页会话</button><span>第 {Math.floor(query.offset/20)+1} 页</span><button disabled={busy||page.nextOffset===null} onClick={()=>setQuery({...query,version:page.version,offset:page.nextOffset!})}>下一页会话</button></nav>
+          <nav className="eff-pagination" aria-label="产效会话分页"><button disabled={busy||query.offset===0} onClick={()=>{setQuery({...query,version:page.version,offset:previousOffsets.at(-1)??0});setPreviousOffsets(previousOffsets.slice(0,-1));}}>上一页会话</button><span>第 {previousOffsets.length+1} 页</span><button disabled={busy||page.nextOffset===null} onClick={()=>{setPreviousOffsets([...previousOffsets,query.offset]);setQuery({...query,version:page.version,offset:page.nextOffset!});}}>下一页会话</button></nav>
         </section>{selection&&<div>{detailBusy&&<p role="status">正在读取固定会话分段…</p>}{detailError&&<p role="alert">{detailError}<button onClick={()=>setDetailRetry(v=>v+1)}>重试分段</button></p>}<SelectedSession row={detail??selection} onClose={()=>setSelected('')}/></div>}</div>
       </>}
     </div>
