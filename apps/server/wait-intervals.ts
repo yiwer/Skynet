@@ -3,7 +3,7 @@ import { waitEvidence,unavailableOwners,type WaitOriginal } from './wait-dataset
 import type { ReplyWait,WaitsScope } from '../../packages/contracts/waits.js';
 import { addDays } from '../../packages/contracts/work-views.js';
 
-type Activity = { employeeId: string; sessionId: string; timestamp: number; evidence: ReplyWait['end'] };
+type Activity = { employeeId: string; sessionId: string; timestamp: number; original: WaitOriginal; line: number; block: number };
 function parallelLookup(events: Activity[]) {
   const employees = new Map<string, { rows: Activity[]; nextSession: number[] }>();
   for (const event of events) {
@@ -24,7 +24,7 @@ function parallelLookup(events: Activity[]) {
     // wait is logarithmic plus at most three retained foreign evidence points.
     while (lo < rows.length && rows[lo]!.timestamp < end && found.length < 3) {
       if (rows[lo]!.sessionId === wait.sessionId) lo = nextSession[lo]!;
-      else { found.push(rows[lo]!.evidence); lo++; }
+      else { const row = rows[lo]!; found.push(waitEvidence(row.original, row.line, row.block)); lo++; }
     }
     return found;
   };
@@ -42,7 +42,7 @@ for (const original of originals) {
   for (const message of facts.messages) {
     const origin = origins.get(`${message.line}/${message.block ?? 0}`), timestamp = message.timestamp ? Date.parse(message.timestamp) : NaN;
     if (origin?.context === 'after-enrollment' && Number.isFinite(timestamp) && !activity.has(origin.eventId)) {
-      activity.set(origin.eventId, { employeeId: origin.employeeId, sessionId, timestamp, evidence: waitEvidence(original, message.line, message.block ?? 0) });
+      activity.set(origin.eventId, { employeeId: origin.employeeId, sessionId, timestamp, original, line: message.line, block: message.block ?? 0 });
     }
   }
   if (scope.snapshotId && record.id !== scope.snapshotId || scope.source && record.source !== scope.source) continue;
@@ -80,9 +80,16 @@ for (const original of originals) {
 }
 const intervals = [...candidates.values()].sort((a, b) => (a.endedAt ?? '').localeCompare(b.endedAt ?? '') || a.id.localeCompare(b.id));
 const parallelFor = parallelLookup([...activity.values()]);
+const unavailableSessions = new Map<string, Set<string>>();
+for (const original of originals) for (const owner of unavailableOwners(original)) {
+  let sessions = unavailableSessions.get(owner.employeeId);
+  if (!sessions) unavailableSessions.set(owner.employeeId, sessions = new Set());
+  sessions.add(original.sessionId);
+}
 for (const interval of intervals) if (interval.durationMs !== null) {
   const parallel = parallelFor(interval);
-  interval.parallel = parallel.length ? 'observed' : originals.some(original=>original.sessionId!==interval.sessionId&&unavailableOwners(original,{employeeId:interval.employeeId}).length)?'unknown':'not-observed'; interval.parallelEvidence = parallel;
+  const unavailable = unavailableSessions.get(interval.employeeId);
+  interval.parallel = parallel.length ? 'observed' : unavailable && (unavailable.size > 1 || !unavailable.has(interval.sessionId)) ? 'unknown' : 'not-observed'; interval.parallelEvidence = parallel;
 }
 return {intervals,selected,rangeStart,rangeEnd};
 }
