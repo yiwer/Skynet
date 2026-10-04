@@ -14,7 +14,7 @@ function formatted(value: number | null, unit: MetricScore['unit']) {
   const factor = unit === 'ratio' ? 100 : 1;
   return Number((value * factor).toFixed(1)).toLocaleString('zh-CN') + ({ ratio: '%', multiple: '×', minutes: ' 分钟', number: '' }[unit]);
 }
-export function CapabilityAssessment({ request, currentEmployeeId, appendNote, frozen, additions }: { request: Request; currentEmployeeId: string; appendNote?: AppendNote; frozen?: Assessment; additions?: { metadata?: ReactNode; navigation?: ReactNode; content?: ReactNode; actions?: ReactNode; details?: ReactNode; onRefresh?: () => void } }) {
+export function CapabilityAssessment({ request, currentEmployeeId, appendNote, frozen, additions }: { request: Request; currentEmployeeId: string; appendNote?: AppendNote; frozen?: Assessment; additions?: { metadata?: ReactNode; navigation?: ReactNode; content?: ReactNode; actions?: ReactNode; details?: ReactNode; emptyMessage?: string; onRefresh?: () => void } }) {
   const [query, setQuery] = useState(selection), [loaded, setData] = useState<Assessment>(), [error, setError] = useState(''), [busy, setBusy] = useState(false);
   const data = frozen ?? loaded;
   const [retry, setRetry] = useState(0), [people, setPeople] = useState<{ id: string; name: string }[]>([]), [next, setNext] = useState<number | null>(null);
@@ -58,7 +58,7 @@ export function CapabilityAssessment({ request, currentEmployeeId, appendNote, f
       const link = document.createElement('a'); link.href = url; link.download = `${kind}-${ref}.json`; link.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
     } catch (e) { setError((e as Error).message); }
   }
-  return <section className="assessment-page">
+  return <section className={'assessment-page'+(frozen?' full-profile-page':'')}>
     <ProfileReturn value={returnTo} />
     <header className="assessment-heading"><div><p>员工画像</p><h1>{data?.employee ?? people.find(p => p.id === employeeId)?.name ?? '使用能力评估'}</h1></div>
       <div className="assessment-actions"><button onClick={() => { if(additions?.onRefresh) additions.onRefresh(); else setRetry(n => n + 1); }} disabled={busy}>刷新</button><button onClick={() => download()} disabled={!data}>导出评估</button>{additions?.actions}</div></header>{additions?.metadata}
@@ -76,7 +76,7 @@ export function CapabilityAssessment({ request, currentEmployeeId, appendNote, f
         {history && <><ol>{history.items.map(item => <li key={item.version}><a href={profileLink(employeeId, item.selection?.period ?? 'since-enrollment', item.preset, item.version)} aria-current={version === item.version ? 'page' : undefined}>
           <strong>{item.period} · {item.preset}</strong><span>{new Date(item.generatedAt).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false })} · {number(item.index)} 分 · {item.level}</span><small>{item.version.slice(0, 12)}</small></a></li>)}</ol>
           {history.nextCursor && <button onClick={moreHistory} disabled={historyBusy}>更多历史版本</button>}</>}</details>
-      {!data.sample.sessions ? <p className="assessment-empty" data-testid="assessment-empty">{data.range.empty ? '所选周期早于接入' : '暂无会话'}</p> : <>
+      {!data.sample.sessions ? <p id="profile-verdict" tabIndex={-1} className="assessment-empty" data-testid="assessment-empty">{additions?.emptyMessage ?? (data.range.empty ? '所选周期早于接入' : '暂无会话')}</p> : <>
       <section id="profile-verdict" tabIndex={-1} className="assessment-verdict" aria-label="评估结论"><div><p className="assessment-eyebrow">使用 Coding Agent 的能力</p><div className="assessment-score"><span className="assessment-level" data-level={data.level}>{data.level}</span>
         <strong data-testid="assessment-index">{number(data.index)}</strong>{data.index !== null && <span>/ 100</span>}</div>
         <p className="assessment-reason">{data.reason}</p><p className="assessment-confidence">可信度{data.confidence}{data.margin !== null && ` · 估计误差 ±${data.margin}`}</p>

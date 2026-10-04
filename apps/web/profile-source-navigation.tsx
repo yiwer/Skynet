@@ -13,4 +13,5 @@ export function fixedProfileReturn(value:string|null):string|null{
 export function withProfileSourceReturn(path:string,origin:string){
   const fixed=fixedProfileReturn(origin);if(!fixed)return path;const [route,query]=path.split('?'),params=new URLSearchParams(query);params.set('profileReturn',fixed);return route+'?'+params;
 }
+export function carryProfileSourceReturn(path:string){const origin=fixedProfileReturn(new URLSearchParams(location.hash.split('?')[1]).get('profileReturn'));return origin?withProfileSourceReturn(path,origin):path;}
 export function ProfileSourceReturn(){const target=fixedProfileReturn(new URLSearchParams(location.hash.split('?')[1]).get('profileReturn'));return target?<a className="profile-return" href={target}>返回员工画像</a>:null;}
